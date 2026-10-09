@@ -7,6 +7,9 @@ their UVs, its skeleton, and each of its motions, frame by frame.
 It only reads: it never changes the game's files. **No game data is included**; it reads
 the models from your own disc image.
 
+This is a fan project, not affiliated with or endorsed by Bandai Namco. Digimon is a
+trademark of its owners.
+
 ## What it shows
 
 - **Models**: every battle model on the disc. That's 434 files, from FIGHT/MODEL (the
@@ -32,7 +35,8 @@ the models from your own disc image.
 
 ## Requirements
 
-- **Windows 10 or 11**, 64-bit, with a graphics card that supports **OpenGL 3.3**.
+- **Windows 10 or 11**, 64-bit, with a graphics card that supports **OpenGL 3.3** (any
+  card or integrated graphics from the last ten years). Only Windows for now.
 - **Your own copy of the game**: Digimon World 2003 (Europe), SLES-03936, as a disc
   image, either a `.bin`/`.cue` pair or a `.iso`. Other versions (Digimon World 3,
   USA/Japan) aren't supported: the file tables are read from the European executable.
@@ -54,6 +58,14 @@ To build it you also need:
 
 ## Setup
 
+### 0. Get the source
+
+    git clone <this repository's URL>
+    cd <its folder>
+
+Or download it as a ZIP from GitHub's **Code** button and unpack it. Every command
+below runs from this folder.
+
 ### 1. Read the models from your disc
 
     python tools/setup_disc.py "path/to/Digimon World 2003 (Europe).cue"
@@ -61,6 +73,9 @@ To build it you also need:
 This takes a few seconds and writes `data/`:
 - `data/files/`: the 434 battle model files, about 17 MB;
 - `data/names.txt`: the disc's file names.
+
+Given a `.cue`, it reads the `.bin` with the same name next to it; if yours is named
+differently, give the `.bin` itself. You only need to do this once.
 
 It checks the executable on the disc first. If it says "this isn't Digimon World 2003
 (Europe), SLES-03936", the image is another version or is damaged.
@@ -81,15 +96,36 @@ If it fails:
 
 ### 3. Run
 
-    build/dw3mv.exe
+    build\dw3mv.exe
 
-To check the setup, `build/dw3mv.exe --check` reads every model and should end with
-`434 models, 0 unread`.
+Or double-click `dw3mv.exe` in the `build` folder. To check the setup:
+
+    build\dw3mv.exe --check | more
+
+It reads every model and should end with `434 models, 0 unread`. (It's a window app:
+in cmd or PowerShell, pipe its output, as here, so that the prompt waits for it.)
+
+If it doesn't start:
+- **"SDL3.dll was not found"**: `SDL3.dll` must be next to `dw3mv.exe`; `build.py`
+  copies it there.
+- **"This needs a graphics card with OpenGL 3.3"**: update the graphics driver. On a
+  remote desktop or a virtual machine there may be no OpenGL 3.3.
+- **The list of models is empty**: `data/` is missing; run step 1 again. The viewer
+  looks for it next to `build/`, or next to the exe.
 
 ## Use
 
-Pick a model in **Files**; the filter takes part of a name (`M384`, `KOET`) or a file
-number. You can also drop a model's `.BIN` on the window.
+The window is the 3D view, with a panel on the right:
+
+- **Files**: the disc's models by file name, and their file number. The filter takes
+  part of a name (`M384`, `KOET`) or a number. You can also drop a model's `.BIN` on the
+  window.
+- **Model**: what the file holds, the display options, and the bone tree. Click a bone
+  to highlight it, untick it to hide it.
+- **Motions**: the motion list and the playback controls. Motions play at 60 keyframes
+  a second at 1x, the rate the game steps them.
+- **Textures**: the texture pages, with the UVs over them. **Save BMP** writes the page
+  shown next to `dw3mv.exe`, named after the model, the page and the palette.
 
 | Control | Action |
 |---|---|

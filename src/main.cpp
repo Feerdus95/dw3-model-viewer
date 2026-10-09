@@ -26,6 +26,29 @@
 #include <map>
 #include <memory>
 #include <set>
+#ifdef _WIN32
+#include <io.h>
+#include <windows.h>
+#endif
+
+/* A window app has no console: the command-line modes print to the one they
+   were started from */
+static void attach_console() {
+#ifdef _WIN32
+    if (_isatty(1) || GetFileType(GetStdHandle(STD_OUTPUT_HANDLE)) != FILE_TYPE_UNKNOWN) return; /* redirected */
+    if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+        freopen("CONOUT$", "w", stdout);
+        freopen("CONOUT$", "w", stderr);
+    }
+#endif
+}
+
+/* An error the user has to see: a message box in the window app */
+static int fatal(const char *what) {
+    fprintf(stderr, "%s\n", what);
+    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "DW3 Model Viewer", what, nullptr);
+    return 1;
+}
 
 /* --- OpenGL 3.3, through SDL (opengl32 only exports 1.1) --- */
 #define GL_FUNCS(X)                                                                                              \
@@ -168,7 +191,7 @@ static GLuint compile(const char *vs, const char *fs) {
         if (!ok) {
             char log[2048];
             GL(glGetShaderInfoLog)(s, sizeof log, nullptr, log);
-            SDL_Log("shader: %s", log);
+            fatal(log);
             return 0;
         }
         GL(glAttachShader)(p, s);
@@ -632,6 +655,7 @@ int main(int argc, char **argv) {
     g_exe_dir = base ? base : "";
     find_data(data);
 
+    if (check || !shot.empty()) attach_console();
     if (check) {
         std::vector<Entry> list = scan_models();
         int bad = 0;
@@ -654,8 +678,7 @@ int main(int argc, char **argv) {
     }
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
-        SDL_Log("SDL_Init: %s", SDL_GetError());
-        return 1;
+        return fatal(SDL_GetError());
     }
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
@@ -673,8 +696,7 @@ int main(int argc, char **argv) {
     }
     SDL_GLContext ctx = win ? SDL_GL_CreateContext(win) : nullptr;
     if (!ctx || !gl_load()) {
-        SDL_Log("this needs OpenGL 3.3: %s", SDL_GetError());
-        return 1;
+        return fatal((std::string("This needs a graphics card with OpenGL 3.3.\n") + SDL_GetError()).c_str());
     }
     SDL_GL_SetSwapInterval(1);
     g_mesh = compile(MESH_VS, MESH_FS);
@@ -707,7 +729,7 @@ int main(int argc, char **argv) {
 
     if (!shot.empty()) { /* one frame, drawn off screen */
         if (!scene.model) {
-            SDL_Log("%s", status.c_str());
+            fprintf(stderr, "%s\n", status.c_str());
             return 1;
         }
         scene.model->setMotion(shot_motion);
