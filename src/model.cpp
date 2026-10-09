@@ -184,9 +184,10 @@ static void read_tims(const Archive &a, int texX, int texY, std::vector<Tim> &ou
     }
 }
 
-void place_tims(const Model &m, std::vector<uint16_t> &vram) {
+/* VRAM, 1024x512 halfwords, with the model's TIMs where FIGHTSTG puts them */
+static void place_tims(const std::vector<Tim> &tims, std::vector<uint16_t> &vram) {
     vram.assign(1024 * 512, 0);
-    for (const Tim &t : m.tims)
+    for (const Tim &t : tims)
         for (int y = 0; y < t.h; y++)
             for (int x = 0; x < t.w; x++)
                 vram[((t.y + y) & 511) * 1024 + ((t.x + x) & 1023)] = t.pixels[y * t.w + x];
@@ -212,10 +213,9 @@ static bool read_motions(const Archive &a, std::vector<std::vector<MotionStep>> 
     return true;
 }
 
-static const int TEX_X = 512, TEX_Y = 0; /* where the viewer puts the model's textures */
-
-bool Model::load(const std::string &n, std::vector<uint8_t> bytes) {
+bool Model::load(const std::string &n, std::vector<uint8_t> bytes, const Fighter *f) {
     name = n;
+    fighter = f;
     file = std::move(bytes);
     arc.data = file.data();
     arc.size = file.size();
@@ -223,7 +223,8 @@ bool Model::load(const std::string &n, std::vector<uint8_t> bytes) {
         error = "not an archive";
         return false;
     }
-    boneEntry = find_bone_entry(arc);
+    boneEntry = f ? f->modelEntry : find_bone_entry(arc);
+    if (boneEntry >= arc.count() || !arc.entry(boneEntry)) boneEntry = -1;
     if (boneEntry < 0) {
         error = "no bone list (not a model?)";
         return false;
@@ -265,8 +266,15 @@ bool Model::load(const std::string &n, std::vector<uint8_t> bytes) {
         bones.push_back(std::move(bone));
     }
     if (texEntry != 0) read_tims(sub(arc, texEntry), TEX_X, TEX_Y, tims);
-    /* the motions: FighterInfo.motions names their archive; the fighters'
-       is entry 0 of their model's file */
+    place_tims(tims, vram);
+    /* the motions: FighterInfo.motions names their archive (the fighters' is
+       entry 0 of their model's file); without it, the first entry that reads
+       as one */
+    if (f && f->motionsFid == f->modelFid && read_motions(sub(arc, f->motionsEntry), motions)) motionEntry = f->motionsEntry;
+    if (f && f->effectsFid == f->modelFid) {
+        Archive e = sub(arc, f->effectsEntry);
+        scripts = read_scripts(e.data, e.size);
+    }
     for (int i = 0; i < arc.count() && motionEntry < 0; i++) {
         if (i == boneEntry || i == texEntry || rd32(arc.data + i * 4) == 0) continue;
         if (read_motions(sub(arc, i), motions)) motionEntry = i;
@@ -296,6 +304,10 @@ bool Model::load(const std::string &n, std::vector<uint8_t> bytes) {
         computeWorld();
     }
     return true;
+}
+
+bool Model::stepFace() {
+    return fighter && step_face(*fighter, face, motion, TEX_X, TEX_Y, vram);
 }
 
 /* --- FIGHTSTG's posing --- */

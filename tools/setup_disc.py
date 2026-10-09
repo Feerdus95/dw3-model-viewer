@@ -4,7 +4,8 @@ SLES-03936): the battle models' files, by file number, and every file's name.
     python tools/setup_disc.py "path/to/Digimon World 2003 (Europe).cue"
 
 writes
-    data/files/NNNN.bin   each battle model's file (M###XXXX, MEFT####)
+    data/files/NNNN.bin   each battle model's file (M###XXXX, MEFT####), and
+                          the battle's data on its fighters
     data/names.txt        the disc's file names, line N for file N
 
 The game finds its files by number through a table in its executable (each
@@ -23,6 +24,10 @@ EXE_VRAM = 0x80010000
 FILE_SECTORS = 0x80044F6C  # s32[2382]: first sector
 FILE_SECTOR_COUNTS = 0x800474A4  # u16[2382]: sectors
 FILE_COUNT = 2382
+# the battle's data on its fighters: USDIGNAM (the Digimon's names), USSKLNAM
+# (the techniques'), SFSTDATA.PRO (the stages' lights), SMDLDATA.PRO (the
+# fighters: models, faces, cameras, scripts), SDIGIEDT.PRO (the enemies' table)
+BATTLE_DATA = {79, 163, 459, 460, 463}
 OUT = Path(__file__).resolve().parents[1] / "data"
 
 
@@ -77,7 +82,7 @@ def main():
     (OUT / "names.txt").write_text("".join(n + "\n" for n in names), encoding="ascii")
     models = 0
     for fid, (start, count, name) in enumerate(zip(starts, counts, names)):
-        if re.match(r"M(\d|EFT)", name) and 0 < start and count and start + count <= sectors:
+        if (re.match(r"M(\d|EFT)", name) or fid in BATTLE_DATA) and 0 < start and count and start + count <= sectors:
             (OUT / "files" / f"{fid:04d}.bin").write_bytes(read(start, count))
             models += 1
     print(f"{sum(1 for n in names if n)} names, {models} files -> {OUT}")

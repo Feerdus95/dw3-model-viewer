@@ -13,11 +13,16 @@ trademark of its owners.
 ## What it shows
 
 - **Models**: every battle model on the disc. That's 434 files, from FIGHT/MODEL (the
-  Digimon) and FIGHT/EFFECT (DNA forms and technique models).
+  Digimon) and FIGHT/EFFECT (DNA forms and technique models), by the names the game
+  gives them: the Digimon's, or the technique's for an effect model.
 - **Mesh**:
   - textures off, as the PSX draws them (nearest texels), or bilinear-filtered (a
     preview of a smoother look);
-  - lighting, wireframe, back-face culling and a floor grid.
+  - lights: a fight stage's own (its three lights and ambient color, worked out as the
+    PSX does), a plain viewer light, or none;
+  - the face as in battle: the eyes blink, close when hit, and the other face parts
+    cycle;
+  - wireframe, back-face culling and a floor grid.
 - **Skeleton**:
   - the bone tree, with each part's mesh;
   - show or hide any part, and highlight one;
@@ -28,6 +33,13 @@ trademark of its owners.
   - play, pause, step one keyframe, restart, loop, speed from 0.05x to 4x, and a
     keyframe slider;
   - the blends between motions play as the game plays them.
+- **Fighter** (from the battle's fighters' file, SMDLDATA.PRO):
+  - each fighter that uses the model, partner or enemy;
+  - its cameras: a partner's 12 (the portraits, the battle shots), an enemy's 3, seen
+    as the game frames them;
+  - its action scripts, decoded: the motions, cameras, effects, sounds and waits of
+    each technique and reaction. Click a motion to play it, a camera to look through
+    it.
 - **Textures**:
   - every texture page and palette pair the polygons use, decoded;
   - the UVs drawn over it (the selected part's in yellow);
@@ -52,7 +64,8 @@ trademark of its owners.
        python tools/setup_disc.py "path/to/Digimon World 2003 (Europe).cue"
 
    This takes a few seconds and writes `data/` next to the exe: the 434 battle model
-   files (about 17 MB) and the disc's file names. Given a `.cue`, it reads the `.bin`
+   files (about 17 MB), the battle's data on its fighters (names, cameras, lights) and
+   the disc's file names. Given a `.cue`, it reads the `.bin`
    with the same name next to it; if yours is named differently, give the `.bin`
    itself. It checks the disc first: if it says "this isn't Digimon World 2003
    (Europe), SLES-03936", the image is another version or is damaged.
@@ -133,13 +146,16 @@ here, so that the prompt waits for it.)
 
 The window is the 3D view, with a panel on the right:
 
-- **Files**: the disc's models by file name, and their file number. The filter takes
-  part of a name (`M384`, `KOET`) or a number. You can also drop a model's `.BIN` on the
-  window.
-- **Model**: what the file holds, the display options, and the bone tree. Click a bone
-  to highlight it, untick it to hide it.
+- **Files**: the disc's models by name, file name and file number. The filter takes
+  part of any of them (`Monmon`, `M384`, `KOET`). You can also drop a model's `.BIN` on
+  the window.
+- **Model**: what the file holds, the display options (textures, lights and their
+  stage, face, wireframe), and the bone tree. Click a bone to highlight it, untick it
+  to hide it.
 - **Motions**: the motion list and the playback controls. Motions play at 60 keyframes
   a second at 1x, the rate the game steps them.
+- **Fighter**: the fighter (pick one when several use the model), its cameras (**Free**
+  goes back to orbiting) and its action scripts.
 - **Textures**: the texture pages, with the UVs over them. **Save BMP** writes the page
   shown next to `dw3mv.exe`, named after the model, the page and the palette.
 
@@ -156,15 +172,18 @@ The window is the 3D view, with a panel on the right:
     dw3mv [file.bin]                      opens the viewer, and the model
     dw3mv --data DIR                      reads data/ (files and names.txt) from DIR
     dw3mv --check                         reads every model, prints a line for each
-    dw3mv --shot out.bmp [--motion N] [--key K] file.bin
-                                          draws one frame to a BMP and exits
+    dw3mv --shot out.bmp [--motion N] [--key K] [--cam N] [--stage N] [--fighter N] file.bin
+                                          draws one frame to a BMP and exits: at a
+                                          motion's keyframe, through a fighter's
+                                          camera, with a stage's lights
 
 By default `data/` is looked for next to the exe, or next to its `build` folder.
 
 ## How it reads a model
 
 The reading is a port of what the game itself does, from the dw3_decomp decompilation
-(`src/fightstg/fightstg.c`, `src/main/gfx/tim_loader.c`), not a guess at the format.
+(`src/fightstg/fightstg.c`, `src/main/gfx/tim_loader.c`, and for the fighters
+`fighter_info.c`, `face.c`, `battle_script.c`, `lights.c`), not a guess at the format.
 
 - **The file** is an archive, a table of offsets. Its parts:
   - **bone list**: the texture entry, then each bone's parent, mesh and keys;
@@ -176,21 +195,23 @@ The reading is a port of what the game itself does, from the dw3_decomp decompil
   - **motions**: each a list of steps that play ranges of that timeline or blend into
     the next;
   - **textures**: RLEN-compressed TIMs, palettes included.
+- **The fighters' file** (SMDLDATA.PRO) names each fighter's bone list, motions,
+  scripts, face parts and cameras; its names come from the battle's text files.
 - **Textures** are placed in an emulated 1024×512 VRAM. The shader looks each texel up
   through its page and palette, as the PSX does.
 - **Bones**: each one's matrix is built as the game builds it (Z·Y·X rotation, then
   scale), and a bone scaled under 48/4096 is hidden.
 
-`src/model.cpp` reads and poses a model with no OpenGL in it. `src/main.cpp` is the
-window, the renderer and the interface.
+`src/model.cpp` reads and poses a model and `src/game.cpp` reads the fighters' data,
+with no OpenGL in either. `src/main.cpp` is the window, the renderer and the interface.
 
 ## Not there yet
 
-- **Names**: models go by their file names, not by Digimon names (from SMDLDATA.PRO).
-- **Faces**: the blinking eyes and other animated face parts.
-- **Battle data**: the cameras of each fighter (SMDLDATA.PRO) and the action scripts.
-- **Lighting**: an approximation, not the PSX's light matrices.
 - **Export and replacement** of models and textures, beyond saving a texture as a BMP.
+- **Reading the disc without Python**: dropping the disc image on the viewer.
+- **Playing a whole action script**: its effects, sounds and the other side's model;
+  for now a script's motions and cameras play one at a time.
+- **Names in other languages**: they are the English ones.
 
 ## License
 

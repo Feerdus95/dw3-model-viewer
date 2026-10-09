@@ -2,6 +2,7 @@
    (dw3_decomp: src/fightstg/fightstg.c, include/fightstg/model.h). Nothing
    here knows about OpenGL. */
 #pragma once
+#include "game.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -69,8 +70,16 @@ struct Pose {
     float world[16]; /* column-major, model units */
 };
 
+/* Where the viewer puts a model's textures in VRAM (FIGHTSTG uses
+   FIGHTSTG_fighterTexPos; any 64-halfword column works) */
+const int TEX_X = 512, TEX_Y = 0;
+
 struct Model {
     std::string name;
+    const Fighter *fighter = nullptr; /* who uses it, when the fighters' file says */
+    std::vector<std::vector<ScriptLine>> scripts;
+    std::vector<uint16_t> vram; /* its textures in place, and the face's changes */
+    FaceState face;
     std::vector<uint8_t> file;
     Archive arc;
     int boneEntry = -1, motionEntry = -1, texEntry = -1;
@@ -87,15 +96,14 @@ struct Model {
     int blend = 0, blendTarget = 0, idleFrames[2] = {0, 0};
     std::vector<uint16_t> keyframes, blendTargets, blendSources;
 
-    bool load(const std::string &name, std::vector<uint8_t> bytes);
+    /* FIGHTER, when given, names its bone list, motions and scripts */
+    bool load(const std::string &name, std::vector<uint8_t> bytes, const Fighter *fighter = nullptr);
+    bool stepFace(); /* one battle frame of the face; true when VRAM changed */
     void setMotion(int m);  /* 1-based, as the game's */
     void evaluate();        /* the pose at the current keyframe */
     void advance(int ticks); /* steps the keyframe on, as FIGHTSTG_stepMotion */
     void computeWorld();
 };
-
-/* VRAM, 1024x512 halfwords, with the model's TIMs where FIGHTSTG puts them */
-void place_tims(const Model &m, std::vector<uint16_t> &vram);
 
 /* Finds the bone list in a file: the entry whose words fit
    {texFile, count, (parent, mesh, keys) * count}; -1 if none */

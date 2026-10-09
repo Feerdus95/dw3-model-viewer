@@ -58,7 +58,7 @@ static int fatal(const char *what) {
     X(glFrontFace) X(glPolygonMode) X(glCreateShader) X(glShaderSource) X(glCompileShader) X(glGetShaderiv)       \
     X(glGetShaderInfoLog) X(glCreateProgram) X(glAttachShader) X(glLinkProgram) X(glGetProgramiv)                 \
     X(glGetProgramInfoLog) X(glUseProgram) X(glGetUniformLocation) X(glUniform1i) X(glUniform1f) X(glUniform3f)   \
-    X(glUniform4f) X(glUniformMatrix4fv) X(glGenVertexArrays) X(glBindVertexArray) X(glGenBuffers)                \
+    X(glUniform4f) X(glUniform3fv) X(glUniformMatrix4fv) X(glGenVertexArrays) X(glBindVertexArray) X(glGenBuffers)                \
     X(glDeleteBuffers) X(glBindBuffer) X(glBufferData) X(glEnableVertexAttribArray) X(glVertexAttribPointer)     \
     X(glVertexAttribIPointer) X(glGenFramebuffers) X(glBindFramebuffer) X(glFramebufferTexture2D)                \
     X(glGenRenderbuffers) X(glBindRenderbuffer) X(glRenderbufferStorage) X(glFramebufferRenderbuffer)
@@ -88,7 +88,8 @@ layout(location = 5) in uvec4 limits; /* u, v min, max */
 layout(location = 6) in uint mode;
 uniform mat4 mvp, world;
 uniform vec3 light;
-uniform int lighting;
+uniform int lighting; /* 0 none, 1 the viewer's light, 2 the stage's (the GTE's NCS) */
+uniform vec3 ldir[3], lcol[3], amb;
 out vec2 uv;
 out vec3 col;
 flat out uvec4 t, lim;
@@ -97,11 +98,20 @@ void main() {
     gl_Position = mvp * vec4(pos, 1.0);
     uv = uv_in; t = tex; lim = limits; md = mode;
     col = color.rgb * 255.0;
-    if ((mode & 2u) != 0u && lighting != 0) {
-        vec3 n = normalize(mat3(world) * nrm);
-        col = vec3(128.0 * (0.45 + 0.75 * max(dot(n, light), 0.0)));
-    } else if ((mode & 2u) != 0u) {
-        col = vec3(128.0);
+    if ((mode & 2u) != 0u) {
+        if (lighting == 1) {
+            vec3 n = normalize(mat3(world) * nrm);
+            col = vec3(128.0 * (0.45 + 0.75 * max(dot(n, light), 0.0)));
+        } else if (lighting == 2) {
+            /* FIGHTSTG_lightMesh: the light matrix through the bone's, each
+               light's color by how much the normal faces it, plus the back
+               color, clamped as the GTE does */
+            vec3 n = mat3(world) * nrm, c = amb;
+            for (int i = 0; i < 3; i++) c += lcol[i] * max(dot(ldir[i], n), 0.0);
+            col = min(c, vec3(255.0));
+        } else {
+            col = vec3(128.0);
+        }
     }
 }
 )";
@@ -258,6 +268,7 @@ static const M4 PSX_TO_GL = {{1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1}}
 static std::string g_data;                  /* data/files */
 static std::vector<std::string> g_names;    /* the disc's names, by fid */
 static std::string g_exe_dir;
+static GameData g_game;                     /* fighters, stages, names */
 
 static bool read_file(const std::string &path, std::vector<uint8_t> &out) {
     std::ifstream f(path, std::ios::binary);
@@ -289,6 +300,7 @@ static void find_data(const std::string &given) {
             if (!line.empty() && line.back() == '\r') line.pop_back();
             g_names.push_back(line);
         }
+        g_game.load(g_data);
         return;
     }
     g_data = tries[0] + "/files";
@@ -299,6 +311,7 @@ static void find_data(const std::string &given) {
 struct Entry {
     int fid;
     std::string name;
+    std::string label; /* who it is: the fighters' names, or the technique's */
 };
 
 static std::vector<Entry> scan_models() {
@@ -308,7 +321,7 @@ static std::vector<Entry> scan_models() {
         const std::string &n = g_names[fid];
         if (n.empty() || n[0] != 'M' || !read_file(fid_path(fid), bytes)) continue;
         Archive a{bytes.data(), bytes.size()};
-        if (a.count() > 0 && (size_t)a.count() * 4 <= a.size && find_bone_entry(a) >= 0) out.push_back({fid, n});
+        if (a.count() > 0 && (size_t)a.count() * 4 <= a.size && find_bone_entry(a) >= 0) out.push_back({fid, n, g_game.fileLabel(fid, n)});
     }
     return out;
 }
@@ -328,9 +341,20 @@ struct Scene {
     std::vector<bool> hidden;
     int selected = -1;
     GLuint vao = 0, vbo = 0, vram = 0;
-    std::vector<uint16_t> vramCpu;
     float radius = 500, center[3] = {0, 0, 0};
+    int fid = -1;
+    std::string path;
+    std::vector<const Fighter *> fighters; /* who uses the file */
+    int fighter = 0;                       /* the one shown */
 };
+
+static void upload_vram(Scene &s) {
+    GL(glBindTexture)(GL_TEXTURE_2D, s.vram);
+    GL(glPixelStorei)(GL_UNPACK_ALIGNMENT, 2);
+    GL(glTexImage2D)(GL_TEXTURE_2D, 0, GL_R16UI, 1024, 512, 0, GL_RED_INTEGER, GL_UNSIGNED_SHORT, s.model->vram.data());
+    GL(glTexParameteri)(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    GL(glTexParameteri)(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+}
 
 static void upload(Scene &s) {
     Model &m = *s.model;
@@ -387,12 +411,7 @@ static void upload(Scene &s) {
     GL(glVertexAttribIPointer)(4, 4, GL_UNSIGNED_SHORT, sizeof(GVert), (void *)offsetof(GVert, tex));
     GL(glVertexAttribIPointer)(5, 4, GL_UNSIGNED_SHORT, sizeof(GVert), (void *)offsetof(GVert, limits));
     GL(glVertexAttribIPointer)(6, 1, GL_UNSIGNED_INT, sizeof(GVert), (void *)offsetof(GVert, mode));
-    place_tims(m, s.vramCpu);
-    GL(glBindTexture)(GL_TEXTURE_2D, s.vram);
-    GL(glPixelStorei)(GL_UNPACK_ALIGNMENT, 2);
-    GL(glTexImage2D)(GL_TEXTURE_2D, 0, GL_R16UI, 1024, 512, 0, GL_RED_INTEGER, GL_UNSIGNED_SHORT, s.vramCpu.data());
-    GL(glTexParameteri)(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    GL(glTexParameteri)(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    upload_vram(s);
 
     /* the camera's target: the posed model's box */
     float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
@@ -462,7 +481,12 @@ static void save_bmp(const std::string &path, const std::vector<uint32_t> &px, i
 struct View {
     Camera cam;
     int textures = 1; /* 0 off, 1 as the PSX, 2 bilinear */
-    bool lighting = true, wireframe = false, skeleton = false, cull = false, grid = true;
+    int lighting = 2; /* 0 off, 1 the viewer's light, 2 a stage's */
+    int stage = 0;
+    float fov = 0.8f; /* vertical, radians; a game camera's from its projection */
+    int gameCamera = -1;
+    bool face = true;
+    bool wireframe = false, skeleton = false, cull = false, grid = true;
     bool playing = true, loop = true;
     float speed = 1, ticks = 0;
     int texCombo = 0;
@@ -491,7 +515,7 @@ static void render(Scene &s, View &v, int w, int h) {
     GL(glViewport)(0, 0, w, h);
     GL(glClearColor)(0.18f, 0.2f, 0.24f, 1);
     GL(glClear)(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    M4 proj = perspective(0.8f, (float)w / std::max(h, 1), v.cam.dist * 0.01f, v.cam.dist * 50);
+    M4 proj = perspective(v.fov, (float)w / std::max(h, 1), v.cam.dist * 0.01f, v.cam.dist * 50);
     M4 vp = mul(proj, v.cam.view());
     if (v.grid) {
         std::vector<float> g;
@@ -522,7 +546,14 @@ static void render(Scene &s, View &v, int w, int h) {
     GL(glBindTexture)(GL_TEXTURE_2D, s.vram);
     GL(glUniform1i)(GL(glGetUniformLocation)(g_mesh, "vram"), 0);
     GL(glUniform1i)(GL(glGetUniformLocation)(g_mesh, "textures"), v.textures);
-    GL(glUniform1i)(GL(glGetUniformLocation)(g_mesh, "lighting"), v.lighting);
+    int lighting = v.lighting == 2 && g_game.stages.empty() ? 1 : v.lighting;
+    GL(glUniform1i)(GL(glGetUniformLocation)(g_mesh, "lighting"), lighting);
+    if (lighting == 2) {
+        const StageLights &l = g_game.stages[std::clamp(v.stage, 0, (int)g_game.stages.size() - 1)];
+        GL(glUniform3fv)(GL(glGetUniformLocation)(g_mesh, "ldir"), 3, &l.dir[0][0]);
+        GL(glUniform3fv)(GL(glGetUniformLocation)(g_mesh, "lcol"), 3, &l.color[0][0]);
+        GL(glUniform3fv)(GL(glGetUniformLocation)(g_mesh, "amb"), 1, l.ambient);
+    }
     /* the light: over the camera's shoulder, in the model's (PSX) space */
     float lx = sinf(v.cam.yaw + 0.5f), lz = cosf(v.cam.yaw + 0.5f);
     GL(glUniform3f)(GL(glGetUniformLocation)(g_mesh, "light"), lx * 0.7f, -0.6f, -lz * 0.7f);
@@ -579,19 +610,59 @@ static void render(Scene &s, View &v, int w, int h) {
 static void frame_model(Scene &s, View &v) {
     v.cam.target[0] = s.center[0], v.cam.target[1] = s.center[1], v.cam.target[2] = s.center[2];
     v.cam.dist = s.radius * 3.4f;
+    v.fov = 0.8f;
+    v.gameCamera = -1;
 }
 
-static bool open_model(Scene &s, View &v, const std::string &name, const std::string &path, std::string &status) {
+/* A fighter's camera: at camPos looking at camRef, in the battle's space.
+   The game negates their y and z into the PSX's (FIGHTSTG_getFighterView),
+   which the viewer's own flip takes back. There the fighter stands at its
+   side's home (FIGHTSTG_faceModel): a partner 0x1400 + distance towards the
+   viewer's +z, turned round to face the enemy, an enemy as far the other way;
+   both raised by height. The viewer's model stands at the origin, so the
+   camera comes into its space. Its projection is on a 240-line screen. */
+static void apply_camera(View &v, const Fighter &f, int index) {
+    const GameCamera &c = f.cameras[index];
+    float home = (float)(0x1400 + f.distance) * (f.enemy ? -1 : 1);
+    auto local = [&](const int16_t *p, float *out) {
+        float x = p[0], y = p[1] - (float)f.height, z = p[2] - home;
+        out[0] = f.enemy ? x : -x, out[1] = y, out[2] = f.enemy ? z : -z; /* a partner's turn: 0x800 about y */
+    };
+    float eye[3], ref[3];
+    local(c.pos, eye);
+    local(c.ref, ref);
+    float d[3] = {eye[0] - ref[0], eye[1] - ref[1], eye[2] - ref[2]};
+    float len = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    if (len < 1) return;
+    for (int i = 0; i < 3; i++) v.cam.target[i] = ref[i];
+    v.cam.dist = len;
+    v.cam.pitch = asinf(d[1] / len);
+    v.cam.yaw = atan2f(d[0], d[2]);
+    if (c.proj > 0) v.fov = 2 * atanf(120.0f / c.proj);
+    v.gameCamera = index;
+}
+
+static bool open_model(Scene &s, View &v, const std::string &name, const std::string &path, std::string &status,
+                       int fid = -1, int fighter = 0) {
     std::vector<uint8_t> bytes;
     if (!read_file(path, bytes)) {
         status = "can't read " + path;
         return false;
     }
+    std::vector<const Fighter *> fighters = g_game.forFile(fid);
+    fighter = fighters.empty() ? 0 : std::clamp(fighter, 0, (int)fighters.size() - 1);
     auto m = std::make_unique<Model>();
-    if (!m->load(name, std::move(bytes))) {
-        status = name + ": " + m->error;
-        return false;
+    if (!m->load(name, bytes, fighters.empty() ? nullptr : fighters[fighter])) {
+        /* a fighter whose entries don't read: the file on its own */
+        m = std::make_unique<Model>();
+        fighters.clear();
+        fighter = 0;
+        if (!m->load(name, std::move(bytes))) {
+            status = name + ": " + m->error;
+            return false;
+        }
     }
+    s.fid = fid, s.path = path, s.fighters = fighters, s.fighter = fighter;
     s.model = std::move(m);
     s.selected = -1;
     upload(s);
@@ -640,13 +711,16 @@ static void bone_tree(Scene &s, int b) {
 
 int main(int argc, char **argv) {
     std::string shot, open_path, data;
-    int shot_motion = 1, shot_key = 0;
+    int shot_motion = 1, shot_key = 0, shot_cam = -1, shot_stage = 0, shot_fighter = 0;
     bool check = false;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--shot" && i + 1 < argc) shot = argv[++i];
         else if (a == "--motion" && i + 1 < argc) shot_motion = atoi(argv[++i]);
         else if (a == "--key" && i + 1 < argc) shot_key = atoi(argv[++i]);
+        else if (a == "--cam" && i + 1 < argc) shot_cam = atoi(argv[++i]);
+        else if (a == "--stage" && i + 1 < argc) shot_stage = atoi(argv[++i]);
+        else if (a == "--fighter" && i + 1 < argc) shot_fighter = atoi(argv[++i]);
         else if (a == "--data" && i + 1 < argc) data = argv[++i];
         else if (a == "--check") check = true;
         else open_path = a;
@@ -662,16 +736,18 @@ int main(int argc, char **argv) {
         for (const Entry &e : list) {
             std::vector<uint8_t> bytes;
             read_file(fid_path(e.fid), bytes);
+            std::vector<const Fighter *> fs = g_game.forFile(e.fid);
             Model m;
-            if (!m.load(e.name, std::move(bytes))) {
+            if (!m.load(e.name, std::move(bytes), fs.empty() ? nullptr : fs[0])) {
                 printf("%04d %-13s ERROR %s\n", e.fid, e.name.c_str(), m.error.c_str());
                 bad++;
                 continue;
             }
             size_t polys = 0;
             for (const Mesh &me : m.meshes) polys += me.polys.size();
-            printf("%04d %-13s bones %3d polys %5d tims %d motions %2d\n", e.fid, e.name.c_str(), (int)m.bones.size() - 1,
-                   (int)polys, (int)m.tims.size(), (int)m.motions.size());
+            printf("%04d %-13s bones %3d polys %5d tims %d motions %2d scripts %2d  %s\n", e.fid, e.name.c_str(),
+                   (int)m.bones.size() - 1, (int)polys, (int)m.tims.size(), (int)m.motions.size(), (int)m.scripts.size(),
+                   e.label.c_str());
         }
         printf("%d models, %d unread\n", (int)list.size(), bad);
         return bad != 0;
@@ -716,16 +792,17 @@ int main(int argc, char **argv) {
     std::string status;
     std::vector<Entry> list;
     bool listed = false;
-    auto open_entry = [&](const std::string &path) {
+    auto open_entry = [&](const std::string &path, int fighter) {
         std::string name = path.substr(path.find_last_of("/\\") + 1);
+        int fid = -1;
         /* a fid's file goes by its disc name */
-        if (name.size() == 8 && name.substr(4) == ".bin") {
-            int fid = atoi(name.c_str());
-            if (fid > 0) name = fid_name(fid);
+        if (name.size() == 8 && name.substr(4) == ".bin" && atoi(name.c_str()) > 0) {
+            fid = atoi(name.c_str());
+            name = fid_name(fid);
         }
-        open_model(scene, view, name, path, status);
+        open_model(scene, view, name, path, status, fid, fighter);
     };
-    if (!open_path.empty()) open_entry(open_path);
+    if (!open_path.empty()) open_entry(open_path, shot_fighter);
 
     if (!shot.empty()) { /* one frame, drawn off screen */
         if (!scene.model) {
@@ -736,8 +813,10 @@ int main(int argc, char **argv) {
         for (int i = 0; i < shot_key; i++) {
             scene.model->evaluate();
             scene.model->advance(1);
+            scene.model->stepFace();
         }
         scene.model->evaluate();
+        upload_vram(scene);
         const int W = 960, H = 720;
         GLuint fbo, rb[2];
         GL(glGenFramebuffers)(1, &fbo);
@@ -750,6 +829,9 @@ int main(int argc, char **argv) {
         GL(glRenderbufferStorage)(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, W, H);
         GL(glFramebufferRenderbuffer)(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rb[1]);
         view.skeleton = false;
+        view.stage = shot_stage;
+        if (shot_cam >= 0 && !scene.fighters.empty() && shot_cam < (int)scene.fighters[scene.fighter]->cameras.size())
+            apply_camera(view, *scene.fighters[scene.fighter], shot_cam);
         render(scene, view, W, H);
         std::vector<uint32_t> px(W * H), flipped(W * H);
         GL(glReadPixels)(0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
@@ -784,7 +866,7 @@ int main(int argc, char **argv) {
         while (SDL_PollEvent(&e)) {
             ImGui_ImplSDL3_ProcessEvent(&e);
             if (e.type == SDL_EVENT_QUIT) running = false;
-            if (e.type == SDL_EVENT_DROP_FILE) open_entry(e.drop.data);
+            if (e.type == SDL_EVENT_DROP_FILE) open_entry(e.drop.data, 0);
             if (!io.WantCaptureMouse) {
                 if (e.type == SDL_EVENT_MOUSE_MOTION && (e.motion.state & SDL_BUTTON_LMASK)) {
                     view.cam.yaw -= e.motion.xrel * 0.008f;
@@ -814,11 +896,14 @@ int main(int argc, char **argv) {
             view.ticks += dt * 60 * view.speed;
             int n = (int)view.ticks;
             view.ticks -= n;
+            bool faced = false;
             for (int i = 0; i < std::min(n, 8); i++) {
                 m.advance(1);
                 if (m.motionDone && view.loop) m.setMotion(m.motion);
                 m.evaluate();
+                if (view.face) faced |= m.stepFace();
             }
+            if (faced) upload_vram(scene);
         }
 
         ImGui_ImplOpenGL3_NewFrame();
@@ -830,7 +915,9 @@ int main(int argc, char **argv) {
         ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - panel, 0));
         ImGui::SetNextWindowSize(ImVec2(panel, io.DisplaySize.y));
         ImGui::Begin("##panel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
-        if (scene.model)
+        if (scene.model && !scene.fighters.empty() && !scene.fighters[scene.fighter]->name.empty())
+            ImGui::Text("%s  (%s)", scene.fighters[scene.fighter]->name.c_str(), scene.model->name.c_str());
+        else if (scene.model)
             ImGui::Text("%s", scene.model->name.c_str());
         else
             ImGui::TextWrapped("Pick a model, or drop a .BIN on the window.");
@@ -845,13 +932,13 @@ int main(int argc, char **argv) {
                 ImGui::InputTextWithHint("##filter", "filter", filter, sizeof filter);
                 ImGui::BeginChild("list");
                 for (const Entry &en : list) {
-                    std::string label = en.name + "  #" + std::to_string(en.fid);
+                    std::string label = (en.label.empty() ? "" : en.label + "  ") + en.name + "  #" + std::to_string(en.fid);
                     std::string lo = label, f = filter;
                     std::transform(lo.begin(), lo.end(), lo.begin(), ::tolower);
                     std::transform(f.begin(), f.end(), f.begin(), ::tolower);
                     if (!f.empty() && lo.find(f) == std::string::npos) continue;
                     bool sel = scene.model && scene.model->name == en.name;
-                    if (ImGui::Selectable(label.c_str(), sel)) open_model(scene, view, en.name, fid_path(en.fid), status);
+                    if (ImGui::Selectable(label.c_str(), sel)) open_model(scene, view, en.name, fid_path(en.fid), status, en.fid);
                 }
                 ImGui::EndChild();
                 ImGui::EndTabItem();
@@ -871,7 +958,19 @@ int main(int argc, char **argv) {
                 ImGui::RadioButton("PSX", &view.textures, 1);
                 ImGui::SameLine();
                 ImGui::RadioButton("bilinear", &view.textures, 2);
-                ImGui::Checkbox("Lighting", &view.lighting);
+                ImGui::Text("Lights  ");
+                ImGui::SameLine();
+                ImGui::RadioButton("none", &view.lighting, 0);
+                ImGui::SameLine();
+                ImGui::RadioButton("viewer", &view.lighting, 1);
+                ImGui::SameLine();
+                ImGui::RadioButton("stage", &view.lighting, 2);
+                if (view.lighting == 2 && !g_game.stages.empty()) {
+                    ImGui::SliderInt("stage", &view.stage, 0, (int)g_game.stages.size() - 1);
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("A fight stage's three lights and ambient color (SFSTDATA.PRO)");
+                }
+                ImGui::Checkbox("Face", &view.face);
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("The blinking eyes and the other animated face parts");
                 ImGui::SameLine();
                 ImGui::Checkbox("Wireframe", &view.wireframe);
                 ImGui::SameLine();
@@ -931,6 +1030,76 @@ int main(int argc, char **argv) {
                 }
                 ImGui::EndTabItem();
             }
+            if (scene.model && ImGui::BeginTabItem("Fighter")) {
+                Model &m = *scene.model;
+                if (scene.fighters.empty()) {
+                    ImGui::TextWrapped("No fighter uses this file in the fighters' file (SMDLDATA.PRO): it has no "
+                                       "name, face, cameras or action scripts there.");
+                } else {
+                    /* the fighters that use this file: each may name other entries */
+                    if (scene.fighters.size() > 1) {
+                        std::string cur = std::to_string(scene.fighters[scene.fighter]->id) + " " + scene.fighters[scene.fighter]->name;
+                        if (ImGui::BeginCombo("fighter", cur.c_str())) {
+                            for (int i = 0; i < (int)scene.fighters.size(); i++) {
+                                std::string l = std::to_string(scene.fighters[i]->id) + " " + scene.fighters[i]->name +
+                                                (scene.fighters[i]->enemy ? "  (enemy)" : "  (partner)");
+                                if (ImGui::Selectable(l.c_str(), i == scene.fighter)) {
+                                    std::string name = m.name;
+                                    open_model(scene, view, name, scene.path, status, scene.fid, i);
+                                }
+                            }
+                            ImGui::EndCombo();
+                        }
+                    }
+                    const Fighter &f = *scene.fighters[scene.fighter];
+                    Model &mm = *scene.model;
+                    ImGui::Text("fighter %d, %s (kind 0x%X)", f.id, f.enemy ? "an enemy" : "a partner", f.kind);
+                    ImGui::Text("entries: bones %d, motions %d, scripts %d", f.modelEntry, f.motionsEntry, f.effectsEntry);
+                    int parts = 0;
+                    for (bool u : f.faceUsed) parts += u;
+                    ImGui::Text("face: %d parts", parts);
+                    ImGui::SeparatorText("Cameras");
+                    if (ImGui::Button("Free")) frame_model(scene, view);
+                    for (int i = 0; i < (int)f.cameras.size(); i++) {
+                        static const char *HINT[12] = {"", "", "", "", "", "", "portrait", "portrait, 2nd idle",
+                                                       "battle", "battle", "battle", "battle"};
+                        char l[48];
+                        snprintf(l, sizeof l, "%d%s%s", i, !f.enemy && *HINT[i] ? " " : "", !f.enemy ? HINT[i] : "");
+                        if (i % 4) ImGui::SameLine();
+                        if (ImGui::RadioButton(l, view.gameCamera == i)) apply_camera(view, f, i);
+                    }
+                    ImGui::SeparatorText("Action scripts");
+                    ImGui::TextDisabled("Click a motion to play it, a camera to look through it.");
+                    ImGui::BeginChild("scripts");
+                    for (int i = 0; i < (int)mm.scripts.size(); i++) {
+                        const std::vector<ScriptLine> &sc = mm.scripts[i];
+                        char h[48];
+                        snprintf(h, sizeof h, "script %d  (%d commands)", i, (int)sc.size());
+                        if (!ImGui::CollapsingHeader(h)) continue;
+                        ImGui::PushID(i);
+                        for (int k = 0; k < (int)sc.size(); k++) {
+                            const ScriptLine &ln = sc[k];
+                            ImGui::PushID(k);
+                            bool active = ln.motion > 0 || ln.camera >= 0;
+                            if (!active) ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                            if (ImGui::Selectable(ln.text.c_str(), false) && active) {
+                                if (ln.motion > 0 && ln.motion <= (int)mm.motions.size()) {
+                                    mm.setMotion(ln.motion);
+                                    view.playing = true;
+                                }
+                                int c = ln.camera >= 100 ? ln.camera - 100 : ln.camera;
+                                if (c >= 0 && c < (int)f.cameras.size() && (ln.camera >= 100) == f.enemy)
+                                    apply_camera(view, f, c);
+                            }
+                            if (!active) ImGui::PopStyleColor();
+                            ImGui::PopID();
+                        }
+                        ImGui::PopID();
+                    }
+                    ImGui::EndChild();
+                }
+                ImGui::EndTabItem();
+            }
             if (scene.model && ImGui::BeginTabItem("Textures")) {
                 Model &m = *scene.model;
                 /* the texture page and CLUT pairs its polygons read */
@@ -958,7 +1127,7 @@ int main(int argc, char **argv) {
                     int w = 256, h = 256;
                     std::string key = m.name + std::to_string(tp) + "/" + std::to_string(cl);
                     if (key != texKey) {
-                        texPixels = decode_page(scene.vramCpu, tp, cl, w, h);
+                        texPixels = decode_page(m.vram, tp, cl, w, h);
                         texView = rgba_texture(texView, texPixels, w, h);
                         texKey = key, texW = w, texH = h;
                     }
