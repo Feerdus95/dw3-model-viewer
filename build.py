@@ -40,6 +40,23 @@ def find_sdl():
     sys.exit("no SDL3: unpack SDL3-devel-<version>-mingw into third_party, or set SDL3_DIR")
 
 
+def icon(cxx):
+    """res/dw3mv.ico as the exe's icon, through windres (next to the compiler);
+    SDL gives the window the exe's first icon"""
+    rc = HERE / "res/dw3mv.rc"
+    obj = OBJ / "dw3mv_res.o"
+    bin_dir = Path(cxx).parent
+    windres = next((str(w) for w in (bin_dir / "x86_64-w64-mingw32-windres.exe", bin_dir / "windres.exe") if w.exists()),
+                   shutil.which("windres"))
+    if not (HERE / "res/dw3mv.ico").exists() or not windres:
+        return []
+    if not obj.exists() or obj.stat().st_mtime < max(rc.stat().st_mtime, (HERE / "res/dw3mv.ico").stat().st_mtime):
+        print("compile", rc.name)
+        if subprocess.run([windres, "-O", "coff", "-i", rc, "-o", obj]).returncode:
+            sys.exit(1)
+    return [obj]
+
+
 def main():
     cxx, sdl = find_cxx(), find_sdl()
     cflags = ["-std=c++17", "-O2", "-Wall", f"-I{IMGUI}", f"-I{sdl / 'include'}"]
@@ -54,6 +71,7 @@ def main():
         print("compile", src.name)
         if subprocess.run([cxx, *cflags, "-c", src, "-o", obj]).returncode:
             sys.exit(1)
+    objs += icon(cxx)
     exe = OUT / "dw3mv.exe"
     # SDL3 as a DLL (through its import library), the C++ runtime linked in
     if subprocess.run([cxx, *objs, "-o", exe, f"-L{sdl / 'lib'}", "-l:libSDL3.dll.a", "-mwindows", "-static"]).returncode:
