@@ -41,9 +41,26 @@ trademark of its owners.
   image, either a `.bin`/`.cue` pair or a `.iso`. Other versions (Digimon World 3,
   USA/Japan) aren't supported: the file tables are read from the European executable.
 - **Python 3.8 or later** ([python.org](https://www.python.org/downloads/)), to read the
-  models from the disc image, and to build.
+  models from your disc image (and to build from source).
 
-To build it you also need:
+## Download
+
+1. Download `dw3-model-viewer-<version>-win64.zip` from
+   [Releases](https://github.com/Feerdus95/dw3-model-viewer/releases) and unpack it.
+2. In the unpacked `dw3-model-viewer` folder, read the models from your disc (once):
+
+       python tools/setup_disc.py "path/to/Digimon World 2003 (Europe).cue"
+
+   This takes a few seconds and writes `data/` next to the exe: the 434 battle model
+   files (about 17 MB) and the disc's file names. Given a `.cue`, it reads the `.bin`
+   with the same name next to it; if yours is named differently, give the `.bin`
+   itself. It checks the disc first: if it says "this isn't Digimon World 2003
+   (Europe), SLES-03936", the image is another version or is damaged.
+3. Run `dw3mv.exe`.
+
+## Building from source
+
+On top of the requirements above:
 
 - **A MinGW-w64 C++ compiler for x86_64.** Either one works:
   - **llvm-mingw**: download `llvm-mingw-<date>-ucrt-x86_64.zip` from
@@ -56,31 +73,21 @@ To build it you also need:
   unpack it into `third_party/`, so that `third_party/SDL3-<version>/` exists.
 - **Dear ImGui** is already in `third_party/imgui`.
 
-## Setup
+### 1. Get the source
 
-### 0. Get the source
-
-    git clone <this repository's URL>
-    cd <its folder>
+    git clone https://github.com/Feerdus95/dw3-model-viewer.git
+    cd dw3-model-viewer
 
 Or download it as a ZIP from GitHub's **Code** button and unpack it. Every command
 below runs from this folder.
 
-### 1. Read the models from your disc
+### 2. Read the models from your disc
 
     python tools/setup_disc.py "path/to/Digimon World 2003 (Europe).cue"
 
-This takes a few seconds and writes `data/`:
-- `data/files/`: the 434 battle model files, about 17 MB;
-- `data/names.txt`: the disc's file names.
+As in [Download](#download): it writes `data/` in this folder, once.
 
-Given a `.cue`, it reads the `.bin` with the same name next to it; if yours is named
-differently, give the `.bin` itself. You only need to do this once.
-
-It checks the executable on the disc first. If it says "this isn't Digimon World 2003
-(Europe), SLES-03936", the image is another version or is damaged.
-
-### 2. Build
+### 3. Build
 
     python build.py
 
@@ -94,24 +101,33 @@ If it fails:
 - **"no SDL3"**: `third_party/SDL3-<version>/` is missing, or it isn't the MinGW
   package (it needs `x86_64-w64-mingw32/include/SDL3/SDL.h`).
 
-### 3. Run
+### 4. Run
 
     build\dw3mv.exe
 
-Or double-click `dw3mv.exe` in the `build` folder. To check the setup:
+Or double-click `dw3mv.exe` in the `build` folder.
 
-    build\dw3mv.exe --check | more
+### Making a release
 
-It reads every model and should end with `434 models, 0 unread`. (It's a window app:
-in cmd or PowerShell, pipe its output, as here, so that the prompt waits for it.)
+    python tools/package.py v0.1.0
 
-If it doesn't start:
-- **"SDL3.dll was not found"**: `SDL3.dll` must be next to `dw3mv.exe`; `build.py`
-  copies it there.
+It builds, packs `build/dw3-model-viewer-v0.1.0-win64.zip` (the exe, `SDL3.dll`,
+`setup_disc.py`, this README and the licenses), then unpacks it to a temporary folder
+and checks that it reads every model.
+
+## Troubleshooting
+
+To check a setup, `dw3mv.exe --check | more` reads every model and should end with
+`434 models, 0 unread`. (It's a window app: in cmd or PowerShell, pipe its output, as
+here, so that the prompt waits for it.)
+
+- **"SDL3.dll was not found"**: `SDL3.dll` must be next to `dw3mv.exe`.
 - **"This needs a graphics card with OpenGL 3.3"**: update the graphics driver. On a
   remote desktop or a virtual machine there may be no OpenGL 3.3.
-- **The list of models is empty**: `data/` is missing; run step 1 again. The viewer
-  looks for it next to `build/`, or next to the exe.
+- **The list of models is empty**: `data/` is missing; run `setup_disc.py` again. The
+  viewer looks for it next to the exe, or next to its `build` folder.
+- **"python" isn't recognized**: install Python from python.org with **Add python.exe
+  to PATH** ticked, then open a new terminal.
 
 ## Use
 
@@ -143,7 +159,7 @@ The window is the 3D view, with a panel on the right:
     dw3mv --shot out.bmp [--motion N] [--key K] file.bin
                                           draws one frame to a BMP and exits
 
-By default `data/` is looked for next to `build/`, then next to the exe.
+By default `data/` is looked for next to the exe, or next to its `build` folder.
 
 ## How it reads a model
 
