@@ -4,9 +4,8 @@ A viewer for the battle models of **Digimon World 2003** (PAL, SLES-03936), in t
 spirit of Half-Life's model viewer: open a model and look at its mesh, its textures and
 their UVs, its skeleton, and each of its motions, frame by frame.
 
-It is a separate tool from the native PC port and never changes the game's files: it
-reads the same `native/data/files` the port extracts from your disc. No game data is
-included; you need your own copy of the game.
+It only reads: it never changes the game's files. **No game data is included**; it reads
+the models from your own disc image.
 
 ## What it shows
 
@@ -33,28 +32,64 @@ included; you need your own copy of the game.
 
 ## Requirements
 
-- Windows 10 or 11, 64-bit, and a graphics card with OpenGL 3.3.
-- Python 3, for the build and the setup scripts.
-- The native port's toolchain (llvm-mingw, in `%LOCALAPPDATA%\retcomm\toolchains`) and
-  its SDL3 (`native/third_party/SDL3-3.4.16`).
-- Your disc as a `.bin`/`.cue` image, already extracted for the port:
+- **Windows 10 or 11**, 64-bit, with a graphics card that supports **OpenGL 3.3**.
+- **Your own copy of the game**: Digimon World 2003 (Europe), SLES-03936, as a disc
+  image, either a `.bin`/`.cue` pair or a `.iso`. Other versions (Digimon World 3,
+  USA/Japan) aren't supported: the file tables are read from the European executable.
+- **Python 3.8 or later** ([python.org](https://www.python.org/downloads/)), to read the
+  models from the disc image, and to build.
 
-      python native/tools/extract_iso.py "path/to/Digimon World 2003 (Europe).cue"
+To build it you also need:
 
-## Build and setup
+- **A MinGW-w64 C++ compiler for x86_64.** Either one works:
+  - **llvm-mingw**: download `llvm-mingw-<date>-ucrt-x86_64.zip` from
+    [its releases](https://github.com/mstorsjo/llvm-mingw/releases), unpack it, and add
+    its `bin` folder to `PATH`;
+  - **MSYS2**: from [msys2.org](https://www.msys2.org/), run
+    `pacman -S mingw-w64-ucrt-x86_64-gcc`, and add `C:\msys64\ucrt64\bin` to `PATH`.
+- **SDL3's development files for MinGW**: download `SDL3-devel-<version>-mingw.zip`
+  (3.2 or later) from [SDL's releases](https://github.com/libsdl-org/SDL/releases) and
+  unpack it into `third_party/`, so that `third_party/SDL3-<version>/` exists.
+- **Dear ImGui** is already in `third_party/imgui`.
 
-    python viewer/build.py
-    python viewer/tools/disc_names.py "path/to/Digimon World 2003 (Europe).cue"
+## Setup
 
-- `build.py` makes `viewer/build/dw3mv.exe` and copies `SDL3.dll` next to it.
-- `disc_names.py` reads the file names (such as `M384KOET.BIN`) from your disc into
-  `viewer/build/names.txt`. You only need to run it once. Without it, the model list is
-  empty; a dropped `.BIN` still opens.
+### 1. Read the models from your disc
+
+    python tools/setup_disc.py "path/to/Digimon World 2003 (Europe).cue"
+
+This takes a few seconds and writes `data/`:
+- `data/files/`: the 434 battle model files, about 17 MB;
+- `data/names.txt`: the disc's file names.
+
+It checks the executable on the disc first. If it says "this isn't Digimon World 2003
+(Europe), SLES-03936", the image is another version or is damaged.
+
+### 2. Build
+
+    python build.py
+
+This makes `build/dw3mv.exe` and copies `SDL3.dll` next to it. The compiler is the
+first of these found: `$CXX`, `x86_64-w64-mingw32-clang++`, `x86_64-w64-mingw32-g++`,
+`clang++`, `g++`. To use SDL3 from elsewhere, set `SDL3_DIR` to its folder.
+
+If it fails:
+- **"no C++ compiler"**: the compiler's `bin` folder isn't on `PATH`. Open a new
+  terminal after changing `PATH`.
+- **"no SDL3"**: `third_party/SDL3-<version>/` is missing, or it isn't the MinGW
+  package (it needs `x86_64-w64-mingw32/include/SDL3/SDL.h`).
+
+### 3. Run
+
+    build/dw3mv.exe
+
+To check the setup, `build/dw3mv.exe --check` reads every model and should end with
+`434 models, 0 unread`.
 
 ## Use
 
-Run `viewer/build/dw3mv.exe`. Pick a model in **Files** (the filter takes part of a name
-or a file number), or drop a `.BIN` on the window.
+Pick a model in **Files**; the filter takes part of a name (`M384`, `KOET`) or a file
+number. You can also drop a model's `.BIN` on the window.
 
 | Control | Action |
 |---|---|
@@ -67,13 +102,12 @@ or a file number), or drop a `.BIN` on the window.
 ### Command line
 
     dw3mv [file.bin]                      opens the viewer, and the model
-    dw3mv --data DIR                      reads the disc's files from DIR
+    dw3mv --data DIR                      reads data/ (files and names.txt) from DIR
     dw3mv --check                         reads every model, prints a line for each
     dw3mv --shot out.bmp [--motion N] [--key K] file.bin
                                           draws one frame to a BMP and exits
 
-By default the files are looked for in `native/data/files`, from the viewer's
-`build` folder.
+By default `data/` is looked for next to `build/`, then next to the exe.
 
 ## How it reads a model
 
@@ -111,4 +145,4 @@ window, the renderer and the interface.
 See [CREDITS.md](CREDITS.md):
 - the model reading is ported from **dw3_decomp** (MIT);
 - **Dear ImGui** 1.91.8 (MIT, `third_party/imgui`);
-- **SDL3** (zlib), from the native port.
+- **SDL3** (zlib), linked as `SDL3.dll`.

@@ -36,4 +36,4 @@ SOFTWARE.
 
 ## SDL3
 
-Linked from the native port's `third_party/SDL3-3.4.16`: zlib license.
+Linked as `SDL3.dll`, from SDL3's MinGW development package: zlib license.

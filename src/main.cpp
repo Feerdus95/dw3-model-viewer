@@ -6,8 +6,10 @@
                                draws one frame of the model to a BMP and exits
    dw3mv --check               reads every model of the disc and prints what it found
 
-   The disc's files are the native port's data/files/<fid>.bin (its
-   tools/extract_iso.py), found from the exe's folder or given with --data. */
+   dw3mv --data DIR            reads the data from DIR instead
+
+   The data is what tools/setup_disc.py reads from your disc: the models'
+   files (files/<fid>.bin) and the disc's names (names.txt). */
 #define GL_GLEXT_PROTOTYPES
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_opengl.h>
@@ -251,27 +253,26 @@ static std::string fid_name(int fid) {
     return fid < (int)g_names.size() ? g_names[fid] : "#" + std::to_string(fid);
 }
 
+/* The data tools/setup_disc.py writes: files/<fid>.bin and names.txt, in
+   data/ (from the exe in build/) or next to the exe */
 static void find_data(const std::string &given) {
-    const char *tries[] = {"../../native/data/files", "../native/data/files", "data/files", "files"};
-    std::vector<uint8_t> probe;
-    if (!given.empty()) {
-        g_data = given;
-    } else {
-        for (const char *t : tries) {
-            g_data = g_exe_dir + t;
-            std::ifstream f(fid_path(1));
-            if (f) break;
+    std::vector<std::string> tries = {g_exe_dir + "../data", g_exe_dir + "data"};
+    if (!given.empty()) tries.insert(tries.begin(), given);
+    for (const std::string &dir : tries) {
+        std::ifstream names(dir + "/names.txt");
+        if (!names) continue;
+        g_data = dir + "/files";
+        for (std::string line; std::getline(names, line);) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            g_names.push_back(line);
         }
+        return;
     }
-    std::ifstream names(g_exe_dir + "names.txt");
-    for (std::string line; std::getline(names, line);) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        g_names.push_back(line);
-    }
+    g_data = tries[0] + "/files";
 }
 
-/* The disc's models: the files whose names start M (FIGHT/MODEL) or E
-   (FIGHT/EFFECT) and that have a bone list */
+/* The disc's models: the files there whose names start M (FIGHT/MODEL,
+   FIGHT/EFFECT) and that have a bone list */
 struct Entry {
     int fid;
     std::string name;
@@ -282,7 +283,7 @@ static std::vector<Entry> scan_models() {
     std::vector<uint8_t> bytes;
     for (int fid = 1; fid < (int)g_names.size(); fid++) {
         const std::string &n = g_names[fid];
-        if (n.empty() || (n[0] != 'M' && n[0] != 'E') || !read_file(fid_path(fid), bytes)) continue;
+        if (n.empty() || n[0] != 'M' || !read_file(fid_path(fid), bytes)) continue;
         Archive a{bytes.data(), bytes.size()};
         if (a.count() > 0 && (size_t)a.count() * 4 <= a.size && find_bone_entry(a) >= 0) out.push_back({fid, n});
     }
@@ -818,7 +819,7 @@ int main(int argc, char **argv) {
                     list = scan_models();
                     listed = true;
                 }
-                if (list.empty()) ImGui::TextWrapped("No models found in %s", g_data.c_str());
+                if (list.empty()) ImGui::TextWrapped("No models found in %s: run tools/setup_disc.py with your disc.", g_data.c_str());
                 ImGui::InputTextWithHint("##filter", "filter", filter, sizeof filter);
                 ImGui::BeginChild("list");
                 for (const Entry &en : list) {

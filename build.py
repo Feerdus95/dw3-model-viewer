@@ -1,7 +1,11 @@
-"""Builds the model viewer: viewer/build/dw3mv.exe (64-bit), with the native
-port's toolchain (llvm-mingw) and SDL3, and Dear ImGui from third_party.
+"""Builds the model viewer: build/dw3mv.exe (Windows, 64-bit).
 
-    python viewer/build.py
+    python build.py
+
+Needs a MinGW-w64 C++ compiler for x86_64 (llvm-mingw or MSYS2's), found as
+$CXX or on PATH, and SDL3's MinGW development files: $SDL3_DIR, or
+third_party/SDL3-<version> as unpacked from SDL3-devel-<version>-mingw.
+Dear ImGui is in third_party/imgui.
 """
 import os
 import shutil
@@ -12,18 +16,33 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 OUT = HERE / "build"
 OBJ = OUT / "obj"
-TC = Path(os.environ["LOCALAPPDATA"]) / "retcomm/toolchains/cmake-clang-v1/1.0.14/bin"
-CXX = TC / "x86_64-w64-mingw32-clang++.exe"
-SDL = HERE.parent / "native/third_party/SDL3-3.4.16/x86_64-w64-mingw32"
 IMGUI = HERE / "third_party/imgui"
-
 SOURCES = [HERE / "src/main.cpp", HERE / "src/model.cpp"] + [
     IMGUI / f for f in ("imgui.cpp", "imgui_draw.cpp", "imgui_tables.cpp", "imgui_widgets.cpp",
                         "backends/imgui_impl_sdl3.cpp", "backends/imgui_impl_opengl3.cpp")]
-CFLAGS = ["-std=c++17", "-O2", "-Wall", f"-I{IMGUI}", f"-I{SDL / 'include'}"]
+
+
+def find_cxx():
+    for c in (os.environ.get("CXX"), "x86_64-w64-mingw32-clang++", "x86_64-w64-mingw32-g++", "clang++", "g++"):
+        if c and shutil.which(c):
+            return shutil.which(c)
+    sys.exit("no C++ compiler: install llvm-mingw (or MSYS2's mingw-w64 g++) and put it on PATH, or set CXX")
+
+
+def find_sdl():
+    """The x86_64-w64-mingw32 folder of SDL3's MinGW development package."""
+    roots = [Path(os.environ["SDL3_DIR"])] if os.environ.get("SDL3_DIR") else []
+    roots += sorted((HERE / "third_party").glob("SDL3-*"), reverse=True)
+    for root in roots:
+        for d in (root / "x86_64-w64-mingw32", root):
+            if (d / "include/SDL3/SDL.h").exists() and (d / "bin/SDL3.dll").exists():
+                return d
+    sys.exit("no SDL3: unpack SDL3-devel-<version>-mingw into third_party, or set SDL3_DIR")
 
 
 def main():
+    cxx, sdl = find_cxx(), find_sdl()
+    cflags = ["-std=c++17", "-O2", "-Wall", f"-I{IMGUI}", f"-I{sdl / 'include'}"]
     OBJ.mkdir(parents=True, exist_ok=True)
     objs = []
     for src in SOURCES:
@@ -33,15 +52,15 @@ def main():
         if obj.exists() and obj.stat().st_mtime > max(d.stat().st_mtime for d in deps):
             continue
         print("compile", src.name)
-        if subprocess.run([CXX, *CFLAGS, "-c", src, "-o", obj]).returncode:
+        if subprocess.run([cxx, *cflags, "-c", src, "-o", obj]).returncode:
             sys.exit(1)
     exe = OUT / "dw3mv.exe"
-    if subprocess.run([CXX, *objs, "-o", exe, f"-L{SDL / 'lib'}", "-l:libSDL3.dll.a", "-mwindows", "-static"]).returncode:
+    # SDL3 as a DLL (through its import library), the C++ runtime linked in
+    if subprocess.run([cxx, *objs, "-o", exe, f"-L{sdl / 'lib'}", "-l:libSDL3.dll.a", "-mwindows", "-static"]).returncode:
         sys.exit(1)
-    for f in (SDL / "bin/SDL3.dll",):
-        dst = OUT / f.name
-        if not dst.exists() or dst.read_bytes() != f.read_bytes():
-            shutil.copy2(f, dst)
+    dll = OUT / "SDL3.dll"
+    if not dll.exists() or dll.read_bytes() != (sdl / "bin/SDL3.dll").read_bytes():
+        shutil.copy2(sdl / "bin/SDL3.dll", dll)
     print("ok", exe)
 
 
