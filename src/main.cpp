@@ -966,7 +966,7 @@ int main(int argc, char **argv) {
                 ImGui::SameLine();
                 ImGui::RadioButton("stage", &view.lighting, 2);
                 if (view.lighting == 2 && !g_game.stages.empty()) {
-                    ImGui::SliderInt("stage", &view.stage, 0, (int)g_game.stages.size() - 1);
+                    ImGui::SliderInt("fight stage", &view.stage, 0, (int)g_game.stages.size() - 1);
                     if (ImGui::IsItemHovered()) ImGui::SetTooltip("A fight stage's three lights and ambient color (SFSTDATA.PRO)");
                 }
                 ImGui::Checkbox("Face", &view.face);
