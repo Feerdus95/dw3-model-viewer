@@ -176,6 +176,10 @@ window, the renderer and the interface.
 - **Lighting**: an approximation, not the PSX's light matrices.
 - **Export and replacement** of models and textures, beyond saving a texture as a BMP.
 
+## License
+
+MIT, see [LICENSE](LICENSE). The game and its data are not covered: they belong to their owners.
+
 ## Credits
 
 See [CREDITS.md](CREDITS.md):
