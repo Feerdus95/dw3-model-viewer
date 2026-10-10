@@ -468,6 +468,85 @@ static GLuint rgba_texture(GLuint tex, const std::vector<uint32_t> &px, int w, i
     return tex;
 }
 
+static const char *VERSION = "0.2.2";
+
+/* The exe's icon (res/dw3mv.rc's icon 1) as a texture, for the About window; 0 without one */
+static GLuint icon_texture(int size) {
+#ifdef _WIN32
+    HICON icon = (HICON)LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON, size, size, 0);
+    if (!icon) return 0;
+    ICONINFO info;
+    GLuint tex = 0;
+    if (GetIconInfo(icon, &info)) {
+        BITMAPINFO bi = {};
+        bi.bmiHeader.biSize = sizeof bi.bmiHeader;
+        bi.bmiHeader.biWidth = size, bi.bmiHeader.biHeight = -size; /* top-down */
+        bi.bmiHeader.biPlanes = 1, bi.bmiHeader.biBitCount = 32, bi.bmiHeader.biCompression = BI_RGB;
+        std::vector<uint32_t> px(size * size);
+        HDC dc = GetDC(nullptr);
+        if (GetDIBits(dc, info.hbmColor, 0, size, px.data(), &bi, DIB_RGB_COLORS)) {
+            for (uint32_t &c : px) c = (c & 0xFF00FF00) | (c >> 16 & 0xFF) | (c & 0xFF) << 16; /* BGRA to RGBA */
+            tex = rgba_texture(0, px, size, size);
+            GL(glTexParameteri)(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            GL(glTexParameteri)(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        }
+        ReleaseDC(nullptr, dc);
+        DeleteObject(info.hbmColor);
+        DeleteObject(info.hbmMask);
+    }
+    DestroyIcon(icon);
+    return tex;
+#else
+    return 0;
+#endif
+}
+
+/* The About window: what the viewer is, its version, license and credits */
+static void about_window(bool &open, GLuint &icon) {
+    if (!open) return;
+    if (!icon) icon = icon_texture(96);
+    ImGui::SetNextWindowSize(ImVec2(460, 0), ImGuiCond_Appearing);
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowBgAlpha(1);
+    if (!ImGui::Begin("About DW3 Model Viewer", &open, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
+                                                     ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::End();
+        return;
+    }
+    if (icon) {
+        ImGui::Image((ImTextureID)(intptr_t)icon, ImVec2(96, 96));
+        ImGui::SameLine();
+    }
+    ImGui::BeginGroup();
+    ImGui::Text("DW3 Model Viewer");
+    ImGui::TextDisabled("Version %s", VERSION);
+    ImGui::Spacing();
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 320);
+    ImGui::TextWrapped("A viewer for Digimon World 2003's battle models: their meshes, textures, bones, "
+                       "motions, faces, cameras and action scripts.");
+    ImGui::PopTextWrapPos();
+    ImGui::EndGroup();
+    ImGui::Separator();
+    ImGui::Text("(c) 2026 Feerdus - MIT License");
+    auto link = [](const char *label, const char *url) {
+        ImGui::TextColored(ImVec4(0.45f, 0.7f, 1, 1), "%s", label);
+        if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+        if (ImGui::IsItemClicked()) SDL_OpenURL(url);
+    };
+    link("github.com/Feerdus95/dw3-model-viewer", "https://github.com/Feerdus95/dw3-model-viewer");
+    ImGui::Spacing();
+    ImGui::Text("Built on:");
+    link("  dw3_decomp (MIT, juandav)", "https://github.com/ReGame-Labs/dw3_decomp");
+    link("  Dear ImGui (MIT)", "https://github.com/ocornut/imgui");
+    link("  SDL3 (zlib)", "https://libsdl.org");
+    ImGui::Spacing();
+    ImGui::TextDisabled("Not affiliated with Bandai. No game data is included:");
+    ImGui::TextDisabled("it reads your own copy of the game.");
+    ImGui::Spacing();
+    if (ImGui::Button("Close", ImVec2(120, 0))) open = false;
+    ImGui::End();
+}
+
 static void save_bmp(const std::string &path, const std::vector<uint32_t> &px, int w, int h) {
     SDL_Surface *s = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_ABGR8888, (void *)px.data(), w * 4);
     if (s) {
@@ -790,6 +869,8 @@ int main(int argc, char **argv) {
     Scene scene;
     View view;
     std::string status;
+    bool aboutOpen = false;
+    GLuint aboutIcon = 0;
     std::vector<Entry> list;
     bool listed = false;
     auto open_entry = [&](const std::string &path, int fighter) {
@@ -921,6 +1002,8 @@ int main(int argc, char **argv) {
             ImGui::Text("%s", scene.model->name.c_str());
         else
             ImGui::TextWrapped("Pick a model, or drop a .BIN on the window.");
+        ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - ImGui::CalcTextSize("About").x - ImGui::GetStyle().FramePadding.x * 2);
+        if (ImGui::SmallButton("About")) aboutOpen = true;
         if (!status.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", status.c_str());
         if (ImGui::BeginTabBar("tabs")) {
             if (ImGui::BeginTabItem("Files")) {
@@ -1169,6 +1252,7 @@ int main(int argc, char **argv) {
             ImGui::EndTabBar();
         }
         ImGui::End();
+        about_window(aboutOpen, aboutIcon);
         ImGui::Render();
 
         render(scene, view, ww - (int)(panel * ww / std::max(io.DisplaySize.x, 1.0f)), wh);

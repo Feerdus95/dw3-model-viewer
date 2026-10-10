@@ -158,6 +158,7 @@ The window is the 3D view, with a panel on the right:
   goes back to orbiting) and its action scripts.
 - **Textures**: the texture pages, with the UVs over them. **Save BMP** writes the page
   shown next to `dw3mv.exe`, named after the model, the page and the palette.
+- **About** (the panel's top right): the version, license and credits.
 
 | Control | Action |
 |---|---|
