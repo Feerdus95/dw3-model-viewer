@@ -6,6 +6,7 @@
                                draws one frame of the model to a BMP and exits
    dw3mv --check               reads every model of the disc and prints what it found
    dw3mv --effect ID           saves 2D effect ID's frames as PNGs and exits
+   dw3mv --effect-users        prints which Digimon's action scripts start each 2D effect
 
    dw3mv --data DIR            reads the data from DIR instead
 
@@ -597,6 +598,45 @@ static int export_effect(const Effect &fx, std::string &dir) {
     return n;
 }
 
+/* Who starts each sprite effect: the Digimon (by name) whose action scripts
+   have its line. The effects no script names (the hits' own, digivolving,
+   items) are the battle's own */
+static std::map<int, std::set<std::string>> effect_users() {
+    std::map<int, std::set<std::string>> out;
+    std::map<int, std::vector<uint8_t>> files;
+    for (const Fighter &f : g_game.fighters) {
+        if (f.effectsFid <= 0) continue;
+        std::vector<uint8_t> &file = files[f.effectsFid];
+        if (file.empty() && !read_file(fid_path(f.effectsFid), file)) continue;
+        Archive a{file.data(), file.size()};
+        if (f.effectsEntry >= a.count() || !a.entry(f.effectsEntry)) continue;
+        for (const std::vector<ScriptLine> &sc : read_scripts(a.entry(f.effectsEntry), a.entry_size(f.effectsEntry)))
+            for (const ScriptLine &ln : sc)
+                if (ln.effect >= 0) out[ln.effect].insert(f.name);
+    }
+    return out;
+}
+
+/* The effects with own images in ROOT (<root>/<id>/, or its critical/) */
+static std::set<int> own_effects(const std::string &root) {
+    std::set<int> out;
+    int n = 0;
+    char **dirs = SDL_GlobDirectory(root.c_str(), "*", 0, &n);
+    for (int i = 0; i < n; i++) {
+        char *end;
+        long id = strtol(dirs[i], &end, 10);
+        if (*end || end == dirs[i]) continue;
+        for (const char *sub : {"", "/critical"}) {
+            int k = 0;
+            char **pngs = SDL_GlobDirectory((root + "/" + dirs[i] + sub).c_str(), "*.png", SDL_GLOB_CASEINSENSITIVE, &k);
+            SDL_free(pngs);
+            if (k > 0) out.insert((int)id);
+        }
+    }
+    SDL_free(dirs);
+    return out;
+}
+
 /* --- the viewer --- */
 
 struct View {
@@ -833,7 +873,7 @@ static void bone_tree(Scene &s, int b) {
 int main(int argc, char **argv) {
     std::string shot, open_path, data;
     int shot_motion = 1, shot_key = 0, shot_cam = -1, shot_stage = 0, shot_fighter = 0;
-    bool check = false;
+    bool check = false, users = false;
     int effect = -1;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -846,13 +886,23 @@ int main(int argc, char **argv) {
         else if (a == "--data" && i + 1 < argc) data = argv[++i];
         else if (a == "--check") check = true;
         else if (a == "--effect" && i + 1 < argc) effect = atoi(argv[++i]);
+        else if (a == "--effect-users") users = true;
         else open_path = a;
     }
     const char *base = SDL_GetBasePath();
     g_exe_dir = base ? base : "";
     find_data(data);
 
-    if (check || !shot.empty() || effect >= 0) attach_console();
+    if (check || users || !shot.empty() || effect >= 0) attach_console();
+    if (users) {
+        std::map<int, std::set<std::string>> by = effect_users();
+        for (int id : effect_ids()) {
+            printf("%4d %2d", id, (int)by[id].size());
+            for (const std::string &n : by[id]) printf(" %s", n.c_str());
+            printf("\n");
+        }
+        return 0;
+    }
     if (effect >= 0) {
         Effect fx;
         if (!fx.load(effect, g_data)) {
@@ -970,9 +1020,31 @@ int main(int argc, char **argv) {
         std::vector<std::string> files;
         std::string folder;
     } picked;
+    std::set<int> ownIds; /* the effects with own images in ownRoot */
     auto own_load = [&]() {
         own.load(ownRoot + "/" + std::to_string(fx.id) + (ownCritical ? "/critical" : ""));
         ownShow = !own.frames.empty(), ownDirty = false, fxDrawn = -1;
+        ownIds = own_effects(ownRoot);
+    };
+    /* the list's groups: the effects no script starts or several Digimon's
+       do, and each Digimon's own (its Black King, MP and MF forms with it) */
+    bool fxGrouped = false;
+    std::map<int, std::set<std::string>> fxUsers;
+    std::vector<int> fxCommon;
+    std::map<std::string, std::vector<int>> fxByDigimon;
+    auto group_effects = [&]() {
+        fxUsers = effect_users();
+        for (int id : fxIds) {
+            std::set<std::string> base;
+            for (std::string n : fxUsers[id]) {
+                if (n.rfind("BK ", 0) == 0) n = n.substr(3);
+                if (n.size() > 3 && (n.compare(n.size() - 3, 3, " MP") == 0 || n.compare(n.size() - 3, 3, " MF") == 0)) n.resize(n.size() - 3);
+                base.insert(n);
+            }
+            if (base.size() == 1) fxByDigimon[*base.begin()].push_back(id);
+            else fxCommon.push_back(id);
+        }
+        fxGrouped = true;
     };
     auto fx_length = [&]() { return ownShow ? own.duration() : fx.duration; };
     auto open_effect = [&](int id, bool select) {
@@ -980,6 +1052,19 @@ int main(int argc, char **argv) {
         fxTime = 0, fxDrawn = -1, fxPlaying = true, fxSelect = select;
         fxDir.clear();
         if (fx.id >= 0) own_load();
+    };
+    auto effect_item = [&](int id) {
+        char l[64];
+        const std::set<std::string> &u = fxUsers[id];
+        if (u.size() > 1) snprintf(l, sizeof l, "effect %d  (%d Digimon)", id, (int)u.size());
+        else if (u.empty()) snprintf(l, sizeof l, "effect %d  (the battle's own)", id);
+        else snprintf(l, sizeof l, "effect %d", id);
+        if (ImGui::Selectable(l, fx.id == id)) open_effect(id, false);
+        if (u.size() > 1 && ImGui::IsItemHovered()) {
+            std::string all;
+            for (const std::string &n : u) all += (all.empty() ? "" : ", ") + n;
+            ImGui::SetTooltip("%s", all.c_str());
+        }
     };
     auto fx_render = [&](int t, uint32_t bg) {
         std::fill(fxPx.begin(), fxPx.end(), bg);
@@ -1097,6 +1182,7 @@ int main(int argc, char **argv) {
             std::lock_guard<std::mutex> lock(picked.m);
             if (!picked.files.empty()) {
                 int n = own.import(picked.files);
+                ownIds = own_effects(ownRoot);
                 status = own.error.empty() ? "imported " + std::to_string(n) + " PNGs to " + own.dir : own.error;
                 ownShow = ownShow || n > 0, ownDirty = ownDirty || n > 0, fxDrawn = -1;
                 picked.files.clear();
@@ -1378,7 +1464,7 @@ int main(int argc, char **argv) {
                         }
                         ImGui::SameLine();
                         if (ImGui::Button(ownDirty ? "Save*" : "Save")) {
-                            if (own.save()) ownDirty = false, status = "saved " + own.dir + "/effect.json";
+                            if (own.save()) ownDirty = false, ownIds = own_effects(ownRoot), status = "saved " + own.dir + "/effect.json";
                             else status = own.error;
                         }
                         ImGui::SameLine();
@@ -1440,13 +1526,38 @@ int main(int argc, char **argv) {
                 } else {
                     ImGui::TextWrapped("Pick an effect: the battle's 2D effects, its sparks, hits and techniques' sprites.");
                 }
-                ImGui::BeginChild("fxlist");
-                for (int id : fxIds) {
-                    char l[32];
-                    snprintf(l, sizeof l, "effect %d", id);
-                    if (ImGui::Selectable(l, fx.id == id)) open_effect(id, false);
+                if (!fxGrouped) group_effects(), ownIds = own_effects(ownRoot);
+                if (ImGui::BeginTabBar("fxlists")) {
+                    if (ImGui::BeginTabItem("Original")) {
+                        ImGui::BeginChild("fxlist");
+                        if (ImGui::CollapsingHeader("Common", ImGuiTreeNodeFlags_DefaultOpen)) {
+                            ImGui::TextDisabled("The battle's own (hits, digivolving, items) and those several Digimon start");
+                            for (int id : fxCommon) effect_item(id);
+                        }
+                        if (ImGui::CollapsingHeader("By Digimon", ImGuiTreeNodeFlags_DefaultOpen)) {
+                            for (const auto &it : fxByDigimon) {
+                                bool open = std::find(it.second.begin(), it.second.end(), fx.id) != it.second.end();
+                                ImGui::SetNextItemOpen(open, ImGuiCond_Once);
+                                if (ImGui::TreeNode(it.first.c_str())) {
+                                    for (int id : it.second) effect_item(id);
+                                    ImGui::TreePop();
+                                }
+                            }
+                        }
+                        ImGui::EndChild();
+                        ImGui::EndTabItem();
+                    }
+                    char modTab[32];
+                    snprintf(modTab, sizeof modTab, "Mod (%d)###mod", (int)ownIds.size());
+                    if (ImGui::BeginTabItem(modTab)) {
+                        ImGui::BeginChild("fxmods");
+                        if (ownIds.empty()) ImGui::TextWrapped("No effect has own images in %s yet.", ownRoot.c_str());
+                        for (int id : ownIds) effect_item(id);
+                        ImGui::EndChild();
+                        ImGui::EndTabItem();
+                    }
+                    ImGui::EndTabBar();
                 }
-                ImGui::EndChild();
                 ImGui::EndTabItem();
             }
             if (scene.model && ImGui::BeginTabItem("Textures")) {

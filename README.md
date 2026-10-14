@@ -48,6 +48,9 @@ trademark of its owners.
     the battle counts time: an effect lasts ticks / 60 seconds);
   - export its frames as PNGs (30 a second, with a transparent background), and open
     their folder;
+  - the list in two tabs: Original, grouped into Common (the battle's own, and those
+    several Digimon start) and By Digimon (each one's own, from the action scripts),
+    and Mod, the effects with own images;
   - click an action script's "sprite effect" line to see it;
   - **own images for the native port**: import PNGs into the port's
     `data/mods/effects/<id>/` (or its `critical/`, for a critical hit; pick the
@@ -189,6 +192,8 @@ The window is the 3D view, with a panel on the right:
     dw3mv --check                         reads every model, prints a line for each
     dw3mv --effect ID                     saves 2D effect ID's frames as PNGs in
                                           effects/effect_ID next to the exe
+    dw3mv --effect-users                  prints which Digimon's action scripts start
+                                          each 2D effect
     dw3mv --shot out.bmp [--motion N] [--key K] [--cam N] [--stage N] [--fighter N] file.bin
                                           draws one frame to a BMP and exits: at a
                                           motion's keyframe, through a fighter's
