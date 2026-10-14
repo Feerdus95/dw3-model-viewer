@@ -2,12 +2,13 @@
 
 ## dw3_decomp
 
-`src/model.cpp` and `src/game.cpp` port what the battle does with its models and
-fighters from dw3_decomp's C decompilation of the game, under its license: the models'
+`src/model.cpp`, `src/game.cpp` and `src/effect.cpp` port what the battle does with
+its models, fighters and 2D effects from dw3_decomp's C decompilation of the game, under its license: the models'
 reading and posing (`src/fightstg/fightstg.c`, `src/main/gfx/tim_loader.c`,
 `src/main/file/decompressor.c`), and the fighters' file, faces, action scripts and
 stage lights (`src/fightstg/fighter_info.c`, `face.c`, `battle_script.c`, `lights.c`,
-`models.c`, and their headers).
+`models.c`, and their headers), and the 2D effects (`src/fightstg/sprite_effect.c`,
+`sprite_anim.c`, `src/main/gfx/sprite_drawer.c`, `src/wfightmn/wfightmn.c`).
 
 ```
 MIT License

@@ -470,7 +470,7 @@ static GLuint rgba_texture(GLuint tex, const std::vector<uint32_t> &px, int w, i
     return tex;
 }
 
-static const char *VERSION = "0.2.2";
+static const char *VERSION = "0.3.0";
 
 /* The exe's icon (res/dw3mv.rc's icon 1) as a texture, for the About window; 0 without one */
 static GLuint icon_texture(int size) {
@@ -525,7 +525,7 @@ static void about_window(bool &open, GLuint &icon) {
     ImGui::Spacing();
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 320);
     ImGui::TextWrapped("A viewer for Digimon World 2003's battle models: their meshes, textures, bones, "
-                       "motions, faces, cameras and action scripts.");
+                       "motions, faces, cameras, action scripts and 2D effects.");
     ImGui::PopTextWrapPos();
     ImGui::EndGroup();
     ImGui::Separator();
