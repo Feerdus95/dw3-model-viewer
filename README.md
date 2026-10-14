@@ -44,10 +44,16 @@ trademark of its owners.
   - every sprite effect, played as the battle plays it: each of its sprite
     animations' frames, palettes, offsets, scales and rotations, blended as the PSX
     blends them;
-  - play, pause, restart, loop, speed, and a slider over its fields;
+  - play, pause, restart, loop, speed, and a slider over its ticks (1/60 s each, as
+    the battle counts time: an effect lasts ticks / 60 seconds);
   - export its frames as PNGs (30 a second, with a transparent background), and open
     their folder;
-  - click an action script's "sprite effect" line to see it.
+  - click an action script's "sprite effect" line to see it;
+  - **own images for the native port**: import PNGs into the port's
+    `data/mods/effects/<id>/` (or its `critical/`, for a critical hit; pick the
+    folder with "Mods folder..."), see them play in the effect's place, and set each
+    frame's PNG and ticks (reorder, copy, remove), the offset, scale and blend (alpha
+    or add); Save writes the folder's `effect.json`, which the port plays as shown.
 - **Textures**:
   - every texture page and palette pair the polygons use, decoded;
   - the UVs drawn over it (the selected part's in yellow);
@@ -214,7 +220,7 @@ The reading is a port of what the game itself does, from the dw3_decomp decompil
   scale), and a bone scaled under 48/4096 is hidden.
 
 `src/model.cpp` reads and poses a model, `src/game.cpp` reads the fighters' data and
-`src/effect.cpp` reads and draws the 2D effects, with no OpenGL in any. `src/main.cpp` is the window, the renderer and the interface.
+`src/effect.cpp` reads and draws the 2D effects, `src/custom.cpp` an effect's own images for the native port, with no OpenGL in any. `src/main.cpp` is the window, the renderer and the interface.
 
 ## Not there yet
 

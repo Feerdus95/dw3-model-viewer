@@ -18,6 +18,7 @@
 #include "imgui.h"
 #include "backends/imgui_impl_opengl3.h"
 #include "backends/imgui_impl_sdl3.h"
+#include "custom.h"
 #include "effect.h"
 #include "model.h"
 #include <algorithm>
@@ -27,6 +28,7 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <set>
 #ifdef _WIN32
 #include <io.h>
@@ -947,14 +949,36 @@ int main(int argc, char **argv) {
     int fxDrawn = -1;
     bool fxPlaying = true, fxLoop = true, fxSelect = false;
     std::string fxDir; /* the last export's folder */
+    /* its own images for the native port (custom.h), in <root>/<id>/ (the
+       port's data/mods/effects, kept in effects_dir.txt by the exe) */
+    CustomEffect own;
+    bool ownShow = false, ownCritical = false, ownDirty = false;
+    std::string ownRoot = g_data + "/../mods/effects";
+    {
+        std::ifstream f(g_exe_dir + "effects_dir.txt");
+        std::string line;
+        if (f && std::getline(f, line) && !line.empty()) ownRoot = line;
+    }
+    struct Picked { /* what the file dialogs gave, maybe from another thread */
+        std::mutex m;
+        std::vector<std::string> files;
+        std::string folder;
+    } picked;
+    auto own_load = [&]() {
+        own.load(ownRoot + "/" + std::to_string(fx.id) + (ownCritical ? "/critical" : ""));
+        ownShow = !own.frames.empty(), ownDirty = false, fxDrawn = -1;
+    };
+    auto fx_length = [&]() { return ownShow ? own.duration() : fx.duration; };
     auto open_effect = [&](int id, bool select) {
         if (!fx.load(id, g_data)) status = fx.error;
         fxTime = 0, fxDrawn = -1, fxPlaying = true, fxSelect = select;
         fxDir.clear();
+        if (fx.id >= 0) own_load();
     };
     auto fx_render = [&](int t, uint32_t bg) {
         std::fill(fxPx.begin(), fxPx.end(), bg);
-        if (fx.id >= 0) fx.draw(t, fxPx.data(), FX_W, FX_H, FX_W / 2, FX_H / 2);
+        if (fx.id >= 0 && ownShow) own.draw(t, fxPx.data(), FX_W, FX_H, FX_W / 2, FX_H / 2);
+        else if (fx.id >= 0) fx.draw(t, fxPx.data(), FX_W, FX_H, FX_W / 2, FX_H / 2);
     };
 
     if (!shot.empty()) { /* one frame, drawn off screen */
@@ -1059,9 +1083,24 @@ int main(int argc, char **argv) {
             if (faced) upload_vram(scene);
         }
 
-        if (fx.id >= 0 && fxPlaying) { /* in fields, 60 a second, as FIGHTSTG_battle.frames counts */
+        if (fx.id >= 0 && fxPlaying) { /* in ticks, 60 a second, as FIGHTSTG_battle.frames counts */
             fxTime += dt * 60 * view.speed;
-            if (fxTime >= fx.duration) fxTime = fxLoop ? 0 : (float)fx.duration;
+            if (fxTime >= fx_length()) fxTime = fxLoop ? 0 : (float)fx_length();
+        }
+        {
+            std::lock_guard<std::mutex> lock(picked.m);
+            if (!picked.files.empty()) {
+                int n = own.import(picked.files);
+                status = own.error.empty() ? "imported " + std::to_string(n) + " PNGs to " + own.dir : own.error;
+                ownShow = ownShow || n > 0, ownDirty = ownDirty || n > 0, fxDrawn = -1;
+                picked.files.clear();
+            }
+            if (!picked.folder.empty()) {
+                ownRoot = picked.folder;
+                std::ofstream(g_exe_dir + "effects_dir.txt") << ownRoot << "\n";
+                own_load();
+                picked.folder.clear();
+            }
         }
 
         ImGui_ImplOpenGL3_NewFrame();
@@ -1293,7 +1332,104 @@ int main(int argc, char **argv) {
                     }
                     ImGui::SliderFloat("speed##fx", &view.speed, 0.05f, 4, "%.2fx");
                     float ft = fxTime;
-                    if (ImGui::SliderFloat("field", &ft, 0, (float)std::max(fx.duration - 1, 0), "%.0f")) fxTime = ft, fxPlaying = false;
+                    if (ImGui::SliderFloat("tick", &ft, 0, (float)std::max(fx_length() - 1, 0), "%.0f")) fxTime = ft, fxPlaying = false;
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("1 tick = 1/60 s, as the battle counts time");
+                    if (ImGui::CollapsingHeader("Own images (native port)", ImGuiTreeNodeFlags_DefaultOpen)) {
+                        bool changed = false;
+                        ImGui::TextDisabled("%s", own.dir.c_str());
+                        if (ImGui::Button("Mods folder...")) {
+                            SDL_ShowOpenFolderDialog(
+                                [](void *u, const char *const *list, int) {
+                                    if (!list || !*list) return;
+                                    Picked *p = (Picked *)u;
+                                    std::lock_guard<std::mutex> lock(p->m);
+                                    p->folder = *list;
+                                },
+                                &picked, win, ownRoot.c_str(), false);
+                        }
+                        if (ImGui::IsItemHovered()) ImGui::SetTooltip("The native port's data/mods/effects folder");
+                        ImGui::SameLine();
+                        if (ImGui::Button("Open##own")) {
+                            SDL_CreateDirectory(own.dir.c_str());
+                            SDL_OpenURL(("file:///" + own.dir).c_str());
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::RadioButton("Hit", !ownCritical)) ownCritical = false, own_load();
+                        ImGui::SameLine();
+                        if (ImGui::RadioButton("Critical hit", ownCritical)) ownCritical = true, own_load();
+                        if (ImGui::Checkbox("Show them", &ownShow)) fxTime = 0, fxDrawn = -1;
+                        ImGui::SameLine();
+                        if (ImGui::Button("Import PNGs...")) {
+                            static const SDL_DialogFileFilter PNG = {"PNG images", "png"};
+                            SDL_ShowOpenFileDialog(
+                                [](void *u, const char *const *list, int) {
+                                    if (!list) return;
+                                    Picked *p = (Picked *)u;
+                                    std::lock_guard<std::mutex> lock(p->m);
+                                    for (; *list; list++) p->files.push_back(*list);
+                                },
+                                &picked, win, &PNG, 1, nullptr, true);
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::Button(ownDirty ? "Save*" : "Save")) {
+                            if (own.save()) ownDirty = false, status = "saved " + own.dir + "/effect.json";
+                            else status = own.error;
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::Button("Reload")) own_load();
+                        ImGui::Text("%d frames, %d ticks = %.2f s (the original: %d ticks = %.2f s)", (int)own.frames.size(),
+                                    own.duration(), own.duration() / 60.0f, fx.duration, fx.duration / 60.0f);
+                        ImGui::PushItemWidth(120);
+                        changed |= ImGui::DragFloat("x", &own.x, 0.5f, -320, 320, "%.1f");
+                        ImGui::SameLine();
+                        changed |= ImGui::DragFloat("y", &own.y, 0.5f, -240, 240, "%.1f");
+                        ImGui::SameLine();
+                        changed |= ImGui::DragFloat("scale", &own.scale, 0.01f, 0.05f, 8, "%.2f");
+                        ImGui::SameLine();
+                        int blend = own.add;
+                        if (ImGui::Combo("blend", &blend, "alpha\0add\0")) own.add = blend != 0, changed = true;
+                        ImGui::PopItemWidth();
+                        int playing = ownShow ? own.frameAt((int)fxTime) : -1, move = -1, dir = 0, drop = -1, dup = -1;
+                        if (ImGui::BeginTable("ownframes", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit)) {
+                            for (int i = 0; i < (int)own.frames.size(); i++) {
+                                CustomFrame &fr = own.frames[i];
+                                ImGui::PushID(i);
+                                ImGui::TableNextRow();
+                                if (i == playing) ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, IM_COL32(70, 90, 140, 160));
+                                ImGui::TableNextColumn();
+                                ImGui::Text("%d", i);
+                                ImGui::TableNextColumn();
+                                ImGui::SetNextItemWidth(160);
+                                if (ImGui::BeginCombo("##file", fr.file.c_str())) {
+                                    for (const auto &it : own.images)
+                                        if (ImGui::Selectable(it.first.c_str(), it.first == fr.file)) fr.file = it.first, changed = true;
+                                    ImGui::EndCombo();
+                                }
+                                ImGui::TableNextColumn();
+                                ImGui::SetNextItemWidth(90);
+                                if (ImGui::InputInt("ticks", &fr.ticks)) fr.ticks = std::clamp(fr.ticks, 1, 600), changed = true;
+                                ImGui::TableNextColumn();
+                                if (ImGui::SmallButton("up")) move = i, dir = -1;
+                                ImGui::SameLine();
+                                if (ImGui::SmallButton("down")) move = i, dir = 1;
+                                ImGui::SameLine();
+                                if (ImGui::SmallButton("copy")) dup = i;
+                                ImGui::SameLine();
+                                if (ImGui::SmallButton("remove")) drop = i;
+                                ImGui::PopID();
+                            }
+                            ImGui::EndTable();
+                        }
+                        if (move >= 0 && move + dir >= 0 && move + dir < (int)own.frames.size())
+                            std::swap(own.frames[move], own.frames[move + dir]), changed = true;
+                        if (dup >= 0) {
+                            CustomFrame copy = own.frames[dup];
+                            own.frames.insert(own.frames.begin() + dup + 1, copy), changed = true;
+                        }
+                        if (drop >= 0) own.frames.erase(own.frames.begin() + drop), changed = true;
+                        if (changed) ownDirty = true, fxDrawn = -1;
+                        if (!own.error.empty()) ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "%s", own.error.c_str());
+                    }
                     ImGui::Separator();
                 } else {
                     ImGui::TextWrapped("Pick an effect: the battle's 2D effects, its sparks, hits and techniques' sprites.");
