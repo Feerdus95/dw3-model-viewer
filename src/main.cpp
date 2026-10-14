@@ -958,6 +958,12 @@ int main(int argc, char **argv) {
         std::ifstream f(g_exe_dir + "effects_dir.txt");
         std::string line;
         if (f && std::getline(f, line) && !line.empty()) ownRoot = line;
+        else /* the port's, beside the viewer's folder (both built from their sources) */
+            for (const char *dir : {"../../native/data/mods/effects", "../native/data/mods/effects"})
+                if (SDL_GetPathInfo((g_exe_dir + dir).c_str(), nullptr)) {
+                    ownRoot = g_exe_dir + dir;
+                    break;
+                }
     }
     struct Picked { /* what the file dialogs gave, maybe from another thread */
         std::mutex m;
