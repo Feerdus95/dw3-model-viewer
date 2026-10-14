@@ -213,7 +213,7 @@ static bool read_motions(const Archive &a, std::vector<std::vector<MotionStep>> 
     return true;
 }
 
-bool Model::load(const std::string &n, std::vector<uint8_t> bytes, const Fighter *f) {
+bool Model::load(const std::string &n, std::vector<uint8_t> bytes, const Fighter *f, int entry) {
     name = n;
     fighter = f;
     file = std::move(bytes);
@@ -223,7 +223,7 @@ bool Model::load(const std::string &n, std::vector<uint8_t> bytes, const Fighter
         error = "not an archive";
         return false;
     }
-    boneEntry = f ? f->modelEntry : find_bone_entry(arc);
+    boneEntry = f ? f->modelEntry : entry >= 0 ? entry : find_bone_entry(arc);
     if (boneEntry >= arc.count() || !arc.entry(boneEntry)) boneEntry = -1;
     if (boneEntry < 0) {
         error = "no bone list (not a model?)";
@@ -471,20 +471,8 @@ void Model::computeWorld() {
             continue;
         }
         p.visible = true;
-        const float k = 6.2831853f / 4096;
-        float cx = cosf(p.rot.x * k), sx = sinf(p.rot.x * k);
-        float cy = cosf(p.rot.y * k), sy = sinf(p.rot.y * k);
-        float cz = cosf(p.rot.z * k), sz = sinf(p.rot.z * k);
-        float r[3][3] = { /* Rz * Ry * Rx */
-            {cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx},
-            {sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx},
-            {-sy, cy * sx, cy * cx},
-        };
-        float s[3] = {p.scale.x / 4096.0f, p.scale.y / 4096.0f, p.scale.z / 4096.0f};
-        float local[16] = {};
-        for (int i = 0; i < 3; i++)
-            for (int j = 0; j < 3; j++) local[j * 4 + i] = r[i][j] * s[j];
-        local[12] = p.pos.x, local[13] = p.pos.y, local[14] = p.pos.z, local[15] = 1;
+        float local[16];
+        bone_matrix(p.pos, p.rot, p.scale, local);
         if (b == 0) {
             memcpy(p.world, local, sizeof local);
             continue;
@@ -496,4 +484,46 @@ void Model::computeWorld() {
                 w[c * 4 + i] = a[i] * local[c * 4] + a[4 + i] * local[c * 4 + 1] + a[8 + i] * local[c * 4 + 2] + a[12 + i] * local[c * 4 + 3];
         memcpy(p.world, w, sizeof w);
     }
+}
+
+void bone_matrix(const Vec3s &pos, const Vec3s &rot, const Vec3s &scale, float out[16]) {
+    const float k = 6.2831853f / 4096;
+    float cx = cosf(rot.x * k), sx = sinf(rot.x * k);
+    float cy = cosf(rot.y * k), sy = sinf(rot.y * k);
+    float cz = cosf(rot.z * k), sz = sinf(rot.z * k);
+    float r[3][3] = { /* Rz * Ry * Rx */
+        {cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx},
+        {sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx},
+        {-sy, cy * sx, cy * cx},
+    };
+    float s[3] = {scale.x / 4096.0f, scale.y / 4096.0f, scale.z / 4096.0f};
+    memset(out, 0, 16 * sizeof(float));
+    for (int i = 0; i < 3; i++)
+        for (int j = 0; j < 3; j++) out[j * 4 + i] = r[i][j] * s[j];
+    out[12] = pos.x, out[13] = pos.y, out[14] = pos.z, out[15] = 1;
+}
+
+/* --- the textures, decoded on the CPU --- */
+
+static uint32_t rgba(uint16_t p, bool stp) {
+    uint32_t r = (p & 31) * 255 / 31, g = (p >> 5 & 31) * 255 / 31, b = (p >> 10 & 31) * 255 / 31;
+    return r | g << 8 | b << 16 | (!p ? 0 : stp && (p & 0x8000) ? 0x80000000u : 0xFF000000u);
+}
+
+std::vector<uint32_t> decode_page(const std::vector<uint16_t> &vram, uint16_t tpage, uint16_t clut, int w, int h, bool stp) {
+    std::vector<uint32_t> out(w * h);
+    int px = tpage_x(tpage), py = tpage_y(tpage), cx = clut_x(clut), cy = clut_y(clut), depth = tpage_depth(tpage);
+    auto at = [&](int x, int y) { return vram[(y & 511) * 1024 + (x & 1023)]; };
+    for (int v = 0; v < h; v++)
+        for (int u = 0; u < w; u++) {
+            uint16_t p;
+            if (depth == 0)
+                p = at(cx + (at(px + u / 4, py + v) >> (u & 3) * 4 & 15), cy);
+            else if (depth == 1)
+                p = at(cx + (at(px + u / 2, py + v) >> (u & 1) * 8 & 255), cy);
+            else
+                p = at(px + u, py + v);
+            out[v * w + u] = rgba(p, stp);
+        }
+    return out;
 }

@@ -22,6 +22,7 @@
 #include "custom.h"
 #include "effect.h"
 #include "model.h"
+#include "stage.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -444,32 +445,6 @@ static void upload(Scene &s) {
     }
 }
 
-/* --- the textures, decoded on the CPU for the textures' tab --- */
-
-static uint32_t rgba(uint16_t p) {
-    uint32_t r = (p & 31) * 255 / 31, g = (p >> 5 & 31) * 255 / 31, b = (p >> 10 & 31) * 255 / 31;
-    return r | g << 8 | b << 16 | (p ? 0xFF000000u : 0);
-}
-
-/* A texture page as its polygons see it: 256 texels wide (64 halfwords at 16-bit) */
-static std::vector<uint32_t> decode_page(const std::vector<uint16_t> &vram, uint16_t tpage, uint16_t clut, int w, int h) {
-    std::vector<uint32_t> out(w * h);
-    int px = tpage_x(tpage), py = tpage_y(tpage), cx = clut_x(clut), cy = clut_y(clut), depth = tpage_depth(tpage);
-    auto at = [&](int x, int y) { return vram[(y & 511) * 1024 + (x & 1023)]; };
-    for (int v = 0; v < h; v++)
-        for (int u = 0; u < w; u++) {
-            uint16_t p;
-            if (depth == 0)
-                p = at(cx + (at(px + u / 4, py + v) >> (u & 3) * 4 & 15), cy);
-            else if (depth == 1)
-                p = at(cx + (at(px + u / 2, py + v) >> (u & 1) * 8 & 255), cy);
-            else
-                p = at(px + u, py + v);
-            out[v * w + u] = rgba(p);
-        }
-    return out;
-}
-
 static GLuint rgba_texture(GLuint tex, const std::vector<uint32_t> &px, int w, int h) {
     if (!tex) GL(glGenTextures)(1, &tex);
     GL(glBindTexture)(GL_TEXTURE_2D, tex);
@@ -663,6 +638,8 @@ struct View {
     int texCombo = 0;
     float texZoom = 2;
     bool uvs = true;
+    bool stageView = false;          /* a fight stage: its background, no grid */
+    float stageBg[3] = {0, 0, 0};
 };
 
 static GLuint g_mesh, g_line, g_lineVao, g_lineVbo;
@@ -684,11 +661,14 @@ static void line(std::vector<float> &v, const float *a, const float *b, float r,
 
 static void render(Scene &s, View &v, int w, int h) {
     GL(glViewport)(0, 0, w, h);
-    GL(glClearColor)(0.18f, 0.2f, 0.24f, 1);
+    if (v.stageView)
+        GL(glClearColor)(v.stageBg[0], v.stageBg[1], v.stageBg[2], 1);
+    else
+        GL(glClearColor)(0.18f, 0.2f, 0.24f, 1);
     GL(glClear)(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     M4 proj = perspective(v.fov, (float)w / std::max(h, 1), v.cam.dist * 0.01f, v.cam.dist * 50);
     M4 vp = mul(proj, v.cam.view());
-    if (v.grid) {
+    if (v.grid && !v.stageView) {
         std::vector<float> g;
         float step = 250, n = 8;
         for (int i = -8; i <= 8; i++) {
@@ -776,6 +756,104 @@ static void render(Scene &s, View &v, int w, int h) {
         GL(glDisable)(GL_DEPTH_TEST);
         draw_lines(l, vp);
     }
+}
+
+/* A fight stage, from inside: the arena's middle, a little above the ground */
+static void frame_stage(View &v) {
+    v.cam.target[0] = 0, v.cam.target[1] = 1500, v.cam.target[2] = 0;
+    v.cam.dist = 9000, v.cam.pitch = 0.2f, v.cam.yaw = 0.6f;
+    v.fov = 0.8f;
+    v.gameCamera = -1;
+}
+
+/* A 4-bit polygon's texel at its corner K, as the GPU reads it */
+static uint16_t corner_texel(const Model &m, const Poly &p, int k) {
+    int u = p.uv[k][0], v = p.uv[k][1];
+    int i = m.vram[(tpage_y(p.tpage) + v) * 1024 + tpage_x(p.tpage) + u / 4] >> (u & 3) * 4 & 15;
+    return m.vram[clut_y(p.clut) * 1024 + clut_x(p.clut) + i];
+}
+
+/* --stages: each stage read, built back (and through an OBJ) and read
+   again; what changed of its polygons and their corners' texels */
+static int check_stages() {
+    std::vector<uint8_t> table;
+    read_file(fid_path(459), table);
+    int bad = 0;
+    auto corners = [](const Model &m) {
+        std::vector<uint32_t> out;
+        for (size_t b = 1; b < m.bones.size(); b++)
+            for (const Poly &p : m.meshes[m.bones[b].mesh].polys)
+                for (int k = 0; k < (p.quad ? 4 : 3); k++) {
+                    uint16_t t = corner_texel(m, p, k);
+                    out.push_back((uint32_t)b << 17 | (p.abr ? t : (t & 0x7FFF) | (t ? 0 : 0x10000)));
+                }
+        std::sort(out.begin(), out.end());
+        return out;
+    };
+    for (const StageInfo &si : read_stage_infos(table)) {
+        std::vector<uint8_t> disc, built, again;
+        read_file(fid_path(si.fid), disc);
+        Model m, m2, m3;
+        if (!m.load("", disc, nullptr, si.boneEntry)) {
+            printf("stage %2d: %s\n", si.id, m.error.c_str());
+            bad++;
+            continue;
+        }
+        StageEdit e;
+        e.fromModel(m, si);
+        StageInfo info = si, info2 = si;
+        StageBuild made, made2;
+        if (!e.build(disc, si.boneEntry, built, info, made) || !m2.load("", built, nullptr, si.boneEntry)) {
+            printf("stage %2d: %s%s\n", si.id, e.error.c_str(), m2.error.c_str());
+            bad++;
+            continue;
+        }
+        std::string dir = g_exe_dir + "stages/check";
+        StageEdit e2 = e;
+        bool obj = e.exportObj(dir, "check") && e2.importObj(dir + "/check.obj") &&
+                   e2.build(disc, si.boneEntry, again, info2, made2) && m3.load("", again, nullptr, si.boneEntry);
+        std::vector<uint32_t> a = corners(m), b = corners(m2), c = obj ? corners(m3) : std::vector<uint32_t>();
+        int same = 0, same3 = 0;
+        for (size_t i = 0; i < std::min(a.size(), b.size()); i++) same += a[i] == b[i];
+        for (size_t i = 0; i < std::min(a.size(), c.size()); i++) same3 += a[i] == c[i];
+        bool ok = a.size() == b.size() && obj && a.size() == c.size() && memcmp(info.noBounds, si.noBounds, 8) == 0;
+        printf("stage %2d: %2d bones, %4d corners: built %4d same, OBJ %4d same; %3d pieces%s, %6d bytes%s\n", si.id,
+               (int)m.bones.size() - 1, (int)a.size(), same, same3, made.islands,
+               made.shrink < 1 ? " (shrunk)" : "", (int)built.size(), ok ? "" : "  BAD");
+        bad += !ok;
+    }
+    /* harder: stage 13 with all of 8's and 24's parts, and with its images changed (new texels, 16 colors a piece) */
+    std::vector<StageInfo> infos = read_stage_infos(table);
+    if (infos.size() > 24) {
+        StageEdit e[3];
+        for (int k = 0; k < 3; k++) {
+            std::vector<uint8_t> f;
+            Model m;
+            const StageInfo &si = infos[k == 0 ? 13 : k == 1 ? 8 : 24];
+            read_file(fid_path(si.fid), f);
+            if (m.load("", f, nullptr, si.boneEntry)) e[k].fromModel(m, si);
+        }
+        StageEdit mixed = e[0], edited = e[0];
+        for (int k = 1; k < 3; k++)
+            for (int p = 0; p < (int)e[k].parts.size(); p++) mixed.append(e[k], p, "x_");
+        for (StageImage &im : edited.images) {
+            im.source = -1;
+            for (uint32_t &c : im.px) c ^= 0x00102030u;
+        }
+        std::vector<uint8_t> disc, out;
+        read_file(fid_path(infos[13].fid), disc);
+        for (StageEdit *t : {&mixed, &edited}) {
+            StageInfo info = infos[13];
+            StageBuild made;
+            Model m;
+            bool ok = t->build(disc, info.boneEntry, out, info, made) && m.load("", out, nullptr, info.boneEntry);
+            printf("stage 13 %s: %d parts -> %d bones, %d pieces, shrunk to %.2f, %d bytes %s%s\n", t == &mixed ? "+ 8 + 24" : "edited",
+                   (int)t->parts.size(), ok ? (int)m.bones.size() - 1 : 0, made.islands, made.shrink, (int)out.size(),
+                   ok ? "" : "BAD ", t->error.c_str());
+            bad += !ok;
+        }
+    }
+    return bad != 0;
 }
 
 static void frame_model(Scene &s, View &v) {
@@ -883,7 +961,7 @@ static void bone_tree(Scene &s, int b) {
 int main(int argc, char **argv) {
     std::string shot, open_path, data;
     int shot_motion = 1, shot_key = 0, shot_cam = -1, shot_stage = 0, shot_fighter = 0;
-    bool check = false, users = false;
+    bool check = false, users = false, stages = false;
     int effect = -1;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -895,6 +973,7 @@ int main(int argc, char **argv) {
         else if (a == "--fighter" && i + 1 < argc) shot_fighter = atoi(argv[++i]);
         else if (a == "--data" && i + 1 < argc) data = argv[++i];
         else if (a == "--check") check = true;
+        else if (a == "--stages") stages = true;
         else if (a == "--effect" && i + 1 < argc) effect = atoi(argv[++i]);
         else if (a == "--effect-users") users = true;
         else open_path = a;
@@ -903,7 +982,8 @@ int main(int argc, char **argv) {
     g_exe_dir = base ? base : "";
     find_data(data);
 
-    if (check || users || !shot.empty() || effect >= 0) attach_console();
+    if (check || users || stages || !shot.empty() || effect >= 0) attach_console();
+    if (stages) return check_stages();
     if (users) {
         std::map<int, std::set<std::string>> by = effect_users();
         for (int id : effect_ids()) {
@@ -996,7 +1076,7 @@ int main(int argc, char **argv) {
             fid = atoi(name.c_str());
             name = fid_name(fid);
         }
-        open_model(scene, view, name, path, status, fid, fighter);
+        if (open_model(scene, view, name, path, status, fid, fighter)) view.stageView = false;
     };
     if (!open_path.empty()) open_entry(open_path, shot_fighter);
 
@@ -1031,9 +1111,62 @@ int main(int argc, char **argv) {
     struct Picked { /* what the file dialogs gave, maybe from another thread */
         std::mutex m;
         std::vector<std::string> files;
-        std::string folder, data;
+        std::string folder, data, obj;
     } picked;
     std::set<int> ownIds; /* the effects with own images in ownRoot */
+
+    /* the Stages tab: a fight stage, edited (stage.h), saved for the native
+       port in its data/mods (ownRoot's parent): <fid>.bin and the stages'
+       table, 0459.bin */
+    std::vector<StageInfo> stageInfos; /* the disc's table */
+    std::set<int> stageFids, stageMods; /* the stages' model files; those with a mod */
+    int stageId = -1, stageFromId = -1, stagePart = -1;
+    StageEdit stageEdit, stageFrom;
+    StageInfo stageInfo; /* the stage's entry, as edited */
+    StageBuild stageMade;
+    std::vector<uint8_t> stageDisc; /* its file on the disc, what builds start from */
+    bool stageDirty = false;
+    std::string stageDir; /* the last export's folder */
+    auto mods_root = [&]() {
+        size_t e = ownRoot.find_last_of("/\\");
+        return e == std::string::npos ? ownRoot : ownRoot.substr(0, e);
+    };
+    auto mod_path = [&](int fid) {
+        char b[16];
+        snprintf(b, sizeof b, "/%04d.bin", fid);
+        return mods_root() + b;
+    };
+    auto stage_tables = [&]() {
+        std::vector<uint8_t> t;
+        read_file(fid_path(459), t);
+        stageInfos = read_stage_infos(t);
+        stageFids.clear(), stageMods.clear();
+        for (const StageInfo &si : stageInfos) {
+            stageFids.insert(si.fid);
+            if (SDL_GetPathInfo(mod_path(si.fid).c_str(), nullptr)) stageMods.insert(si.fid);
+        }
+    };
+    stage_tables();
+    /* a stage as the port has it: its mod's model and table entry, else the disc's */
+    auto stage_load = [&](int id, StageEdit &edit, StageInfo &info, std::vector<uint8_t> &bytes) {
+        info = stageInfos[id];
+        std::vector<uint8_t> table;
+        if (read_file(mod_path(459), table)) {
+            std::vector<StageInfo> mod = read_stage_infos(table);
+            if (id < (int)mod.size()) memcpy(info.bg, mod[id].bg, 3), memcpy(info.noBounds, mod[id].noBounds, 8);
+        }
+        if (!read_file(mod_path(info.fid), bytes) && !read_file(fid_path(info.fid), bytes)) {
+            status = "can't read " + fid_path(info.fid);
+            return false;
+        }
+        Model m;
+        if (!m.load(fid_name(info.fid), bytes, nullptr, info.boneEntry)) {
+            status = "stage " + std::to_string(id) + ": " + m.error;
+            return false;
+        }
+        edit.fromModel(m, info);
+        return true;
+    };
     auto own_load = [&]() {
         own.load(ownRoot + "/" + std::to_string(fx.id) + (ownCritical ? "/critical" : ""));
         ownShow = !own.frames.empty(), ownDirty = false, fxDrawn = -1;
@@ -1101,6 +1234,82 @@ int main(int argc, char **argv) {
         fxPan[0] = (box[0] + box[2]) / 2.0f - FXC_W / 2, fxPan[1] = (box[1] + box[3]) / 2.0f - FXC_H / 2;
         fxZoom = std::clamp(0.8f * std::min(w / (box[2] - box[0] + 1), h / (box[3] - box[1] + 1)), 0.25f, 8.0f);
         fxDrawn = -1;
+    };
+
+    /* the stage's model in the view, as the game will draw it */
+    auto stage_show = [&](std::vector<uint8_t> bytes, bool reframe) {
+        auto m = std::make_unique<Model>();
+        if (!m->load(fid_name(stageInfo.fid), std::move(bytes), nullptr, stageInfo.boneEntry)) {
+            status = m->error;
+            return;
+        }
+        scene.fid = -1, scene.path.clear(), scene.fighters.clear(), scene.fighter = 0;
+        scene.model = std::move(m);
+        scene.selected = -1;
+        upload(scene);
+        view.stageView = true;
+        for (int k = 0; k < 3; k++) view.stageBg[k] = stageEdit.bg[k] / 255.0f;
+        if (reframe) frame_stage(view);
+        view.texCombo = 0;
+    };
+    auto stage_open = [&](int id) {
+        std::vector<uint8_t> bytes;
+        if (!stage_load(id, stageEdit, stageInfo, bytes)) return;
+        read_file(fid_path(stageInfo.fid), stageDisc);
+        stageId = id, stagePart = -1, stageDirty = false, stageMade = StageBuild();
+        for (int k = 0; k < (int)stageEdit.parts.size(); k++) stageMade.firstBone.push_back(k + 1);
+        status.clear();
+        stage_show(std::move(bytes), true);
+    };
+    /* after an edit: built, and shown as built */
+    auto stage_rebuild = [&]() {
+        std::vector<uint8_t> bytes;
+        if (!stageEdit.build(stageDisc, stageInfo.boneEntry, bytes, stageInfo, stageMade)) {
+            status = stageEdit.error;
+            return false;
+        }
+        stageDirty = true;
+        status = stageMade.warning;
+        stage_show(std::move(bytes), false);
+        if (stagePart >= 0 && stagePart < (int)stageMade.firstBone.size()) scene.selected = stageMade.firstBone[stagePart];
+        return true;
+    };
+    /* the stage's model and its entry of the table to the mods folder; the
+       stages that share its model (0 and 1, 34 and 56) take its bones'
+       bounds check too */
+    auto stage_save = [&]() {
+        std::vector<uint8_t> bytes, table;
+        if (!stageEdit.build(stageDisc, stageInfo.boneEntry, bytes, stageInfo, stageMade)) {
+            status = stageEdit.error;
+            return;
+        }
+        SDL_CreateDirectory(mods_root().c_str());
+        if (!read_file(mod_path(459), table)) read_file(fid_path(459), table);
+        std::vector<StageInfo> now = read_stage_infos(table);
+        for (StageInfo si : now) {
+            if (si.fid != stageInfo.fid) continue;
+            memcpy(si.noBounds, stageInfo.noBounds, 8);
+            if (si.id == stageId) memcpy(si.bg, stageInfo.bg, 3);
+            write_stage_info(table, si);
+        }
+        std::ofstream(mod_path(stageInfo.fid), std::ios::binary).write((const char *)bytes.data(), (std::streamsize)bytes.size());
+        std::ofstream(mod_path(459), std::ios::binary).write((const char *)table.data(), (std::streamsize)table.size());
+        stageDirty = false;
+        stageMods.insert(stageInfo.fid);
+        status = "saved " + mod_path(stageInfo.fid) + ": the game reads it when it starts";
+    };
+    /* back to the disc's: the mod's model gone, its table entries the disc's */
+    auto stage_revert = [&]() {
+        SDL_RemovePath(mod_path(stageInfo.fid).c_str());
+        stageMods.erase(stageInfo.fid);
+        std::vector<uint8_t> table, disc;
+        if (read_file(mod_path(459), table) && read_file(fid_path(459), disc)) {
+            for (const StageInfo &si : stageInfos)
+                if (si.fid == stageInfo.fid) write_stage_info(table, si);
+            if (table == disc) SDL_RemovePath(mod_path(459).c_str());
+            else std::ofstream(mod_path(459), std::ios::binary).write((const char *)table.data(), (std::streamsize)table.size());
+        }
+        stage_open(stageId);
     };
 
     if (!shot.empty()) { /* one frame, drawn off screen */
@@ -1188,7 +1397,7 @@ int main(int argc, char **argv) {
             if (e.type == SDL_EVENT_KEY_DOWN && !io.WantCaptureKeyboard && fxActive && e.key.key == SDLK_F) fxFitPending = true;
             else if (e.type == SDL_EVENT_KEY_DOWN && !io.WantCaptureKeyboard && scene.model) {
                 if (e.key.key == SDLK_SPACE) view.playing = !view.playing;
-                if (e.key.key == SDLK_F) frame_model(scene, view);
+                if (e.key.key == SDLK_F) view.stageView ? frame_stage(view) : frame_model(scene, view);
             }
         }
         uint64_t now = SDL_GetTicksNS();
@@ -1228,7 +1437,18 @@ int main(int argc, char **argv) {
                 ownRoot = picked.folder;
                 std::ofstream(g_exe_dir + "effects_dir.txt") << ownRoot << "\n";
                 own_load();
+                stage_tables();
                 picked.folder.clear();
+            }
+            if (!picked.obj.empty()) {
+                if (stageId >= 0 && stageEdit.importObj(picked.obj)) {
+                    std::string warning = stageEdit.error;
+                    stagePart = -1;
+                    if (stage_rebuild() && !warning.empty()) status = warning;
+                } else if (stageId >= 0) {
+                    status = stageEdit.error;
+                }
+                picked.obj.clear();
             }
             if (!picked.data.empty()) { /* another data folder: everything read again from it */
                 if (std::ifstream(picked.data + "/names.txt")) {
@@ -1236,6 +1456,7 @@ int main(int argc, char **argv) {
                     find_data(picked.data);
                     scene.model.reset(), scene.fighters.clear(), scene.fid = -1;
                     fx = Effect(), listed = false;
+                    stage_tables(), stageId = -1, stageFromId = -1, view.stageView = false;
                     fxGrouped = false, fxCommon.clear(), fxByDigimon.clear();
                     status.clear();
                 } else {
@@ -1264,6 +1485,14 @@ int main(int argc, char **argv) {
         ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - ImGui::CalcTextSize("About").x - ImGui::GetStyle().FramePadding.x * 2);
         if (ImGui::SmallButton("About")) aboutOpen = true;
         if (!status.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", status.c_str());
+        /* SameLine only when the next widget, w wide, fits the panel */
+        auto same_line = [](float w) {
+            float x = ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x;
+            if (x + w <= ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x) ImGui::SameLine();
+        };
+        auto bw = [](const char *l) {
+            return ImGui::CalcTextSize(l, nullptr, true).x + ImGui::GetStyle().FramePadding.x * 2;
+        };
         if (ImGui::BeginTabBar("tabs")) {
             if (ImGui::BeginTabItem("Files")) {
                 if (!listed) {
@@ -1287,13 +1516,156 @@ int main(int argc, char **argv) {
                 ImGui::InputTextWithHint("##filter", "filter", filter, sizeof filter);
                 ImGui::BeginChild("list");
                 for (const Entry &en : list) {
+                    if (stageFids.count(en.fid)) continue; /* in the Stages tab */
                     std::string label = (en.label.empty() ? "" : en.label + "  ") + en.name + "  #" + std::to_string(en.fid);
                     std::string lo = label, f = filter;
                     std::transform(lo.begin(), lo.end(), lo.begin(), ::tolower);
                     std::transform(f.begin(), f.end(), f.begin(), ::tolower);
                     if (!f.empty() && lo.find(f) == std::string::npos) continue;
-                    bool sel = scene.model && scene.model->name == en.name;
-                    if (ImGui::Selectable(label.c_str(), sel)) open_model(scene, view, en.name, fid_path(en.fid), status, en.fid);
+                    bool sel = scene.model && !view.stageView && scene.model->name == en.name;
+                    if (ImGui::Selectable(label.c_str(), sel) && open_model(scene, view, en.name, fid_path(en.fid), status, en.fid))
+                        view.stageView = false, stageId = -1;
+                }
+                ImGui::EndChild();
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Stages")) {
+                if (stageId >= 0 && view.stageView) {
+                    const StageInfo &si = stageInfos[stageId];
+                    std::string shared;
+                    for (const StageInfo &o : stageInfos)
+                        if (o.fid == si.fid && o.id != si.id) shared += (shared.empty() ? "" : ", ") + std::to_string(o.id);
+                    ImGui::Text("Stage %d: %s", stageId, stage_look(stageId));
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                    ImGui::TextWrapped("%s #%d, bone list entry %d%s%s", fid_name(si.fid).c_str(), si.fid, si.boneEntry,
+                                       shared.empty() ? "" : "; its model is stage ", shared.c_str());
+                    ImGui::TextWrapped("%s", stageMods.count(si.fid) ? ("mod: " + mod_path(si.fid)).c_str() : "the disc's (no mod)");
+                    ImGui::PopStyleColor();
+                    float bgc[3] = {stageEdit.bg[0] / 255.0f, stageEdit.bg[1] / 255.0f, stageEdit.bg[2] / 255.0f};
+                    if (ImGui::ColorEdit3("background", bgc)) {
+                        for (int k = 0; k < 3; k++) stageEdit.bg[k] = stageInfo.bg[k] = (uint8_t)lroundf(bgc[k] * 255), view.stageBg[k] = bgc[k];
+                        stageDirty = true;
+                    }
+                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("What shows through the panorama's gaps (the stage's bgColor)");
+                    if (ImGui::Button("Export OBJ")) {
+                        char nm[16];
+                        snprintf(nm, sizeof nm, "stage_%02d", stageId);
+                        stageDir = g_exe_dir + "stages";
+                        SDL_CreateDirectory(stageDir.c_str());
+                        stageDir += std::string("/") + nm;
+                        status = stageEdit.exportObj(stageDir, nm) ? "exported to " + stageDir : "can't write " + stageDir;
+                    }
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("An OBJ with its MTL and PNGs (y up, 1 unit = 100 of the game's), for Blender and the like.\n"
+                                          "Keep the objects' names to keep their parts; a material's _abrN is its semi-transparency.");
+                    if (!stageDir.empty()) {
+                        same_line(bw("Open folder"));
+                        if (ImGui::Button("Open folder##stage")) SDL_OpenURL(("file:///" + stageDir).c_str());
+                    }
+                    same_line(bw("Import OBJ..."));
+                    if (ImGui::Button("Import OBJ...")) {
+                        static const SDL_DialogFileFilter OBJ = {"OBJ models", "obj"};
+                        SDL_ShowOpenFileDialog(
+                            [](void *u, const char *const *l, int) {
+                                if (!l || !*l) return;
+                                Picked *p = (Picked *)u;
+                                std::lock_guard<std::mutex> lock(p->m);
+                                p->obj = *l;
+                            },
+                            &picked, win, &OBJ, 1, stageDir.empty() ? nullptr : stageDir.c_str(), false);
+                    }
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("Its objects become the stage's parts: textures repacked into the stage's\n"
+                                          "three pages, 16 colors each piece, shrunk when they don't fit");
+                    if (ImGui::Button(stageDirty ? "Save to game*" : "Save to game")) stage_save();
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("Writes %s and the stages' table, 0459.bin,\nwhich the native port reads instead of the disc's",
+                                          mod_path(si.fid).c_str());
+                    if (stageMods.count(si.fid) || stageDirty) {
+                        same_line(bw("Revert to the disc's"));
+                        if (ImGui::Button("Revert to the disc's")) stage_revert();
+                    }
+                    int polys = 0;
+                    for (const StagePart &pt : stageEdit.parts) polys += (int)pt.faces.size();
+                    ImGui::Text("%d parts, %d polygons", (int)stageEdit.parts.size(), polys);
+                    if (stageMade.islands) {
+                        ImGui::SameLine();
+                        ImGui::TextDisabled("textures: %d pieces%s", stageMade.islands, stageMade.shrink < 1 ? ", shrunk to fit" : "");
+                    }
+                    ImGui::SeparatorText("Parts");
+                    ImGui::BeginChild("parts", ImVec2(0, ImGui::GetTextLineHeightWithSpacing() * 8), ImGuiChildFlags_Borders);
+                    int drop = -1;
+                    bool rebuild = false;
+                    for (int k = 0; k < (int)stageEdit.parts.size(); k++) {
+                        StagePart &pt = stageEdit.parts[k];
+                        ImGui::PushID(k);
+                        rebuild |= ImGui::Checkbox("##nb", &pt.noBounds);
+                        if (ImGui::IsItemHovered())
+                            ImGui::SetTooltip("No bounds check: drawn even when its box seems off screen\n(the ground and the panorama; 8 bones at most)");
+                        ImGui::SameLine();
+                        char l[96];
+                        snprintf(l, sizeof l, "%s  (%d polys)", pt.name.c_str(), (int)pt.faces.size());
+                        if (ImGui::Selectable(l, stagePart == k, 0, ImVec2(ImGui::GetContentRegionAvail().x - bw("x") - 8, 0))) {
+                            stagePart = stagePart == k ? -1 : k;
+                            scene.selected = stagePart >= 0 && stagePart < (int)stageMade.firstBone.size() ? stageMade.firstBone[stagePart] : -1;
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("x")) drop = k;
+                        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Remove");
+                        ImGui::PopID();
+                    }
+                    ImGui::EndChild();
+                    if (drop >= 0) {
+                        stageEdit.remove(drop);
+                        stagePart = -1;
+                        rebuild = true;
+                    }
+                    if (stagePart >= 0 && stagePart < (int)stageEdit.parts.size()) {
+                        StagePart &pt = stageEdit.parts[stagePart];
+                        ImGui::DragFloat3("move", pt.move, 10, -40000, 40000, "%.0f");
+                        rebuild |= ImGui::IsItemDeactivatedAfterEdit();
+                        if (ImGui::IsItemHovered()) ImGui::SetTooltip("In the game's units: x, y (down), z");
+                        ImGui::DragFloat("turn", &pt.turn, 0.5f, -180, 180, "%.1f deg");
+                        rebuild |= ImGui::IsItemDeactivatedAfterEdit();
+                        ImGui::DragFloat("scale", &pt.scale, 0.01f, 0.05f, 20, "%.2f");
+                        rebuild |= ImGui::IsItemDeactivatedAfterEdit();
+                    }
+                    if (rebuild) stage_rebuild();
+                    ImGui::SeparatorText("Add from a stage");
+                    std::string from = stageFromId >= 0 ? std::to_string(stageFromId) + "  " + stage_look(stageFromId) : "pick a stage";
+                    if (ImGui::BeginCombo("##from", from.c_str())) {
+                        for (const StageInfo &o : stageInfos) {
+                            std::string l = std::to_string(o.id) + "  " + stage_look(o.id);
+                            StageInfo oi;
+                            std::vector<uint8_t> ob;
+                            if (ImGui::Selectable(l.c_str(), o.id == stageFromId) && stage_load(o.id, stageFrom, oi, ob)) stageFromId = o.id;
+                        }
+                        ImGui::EndCombo();
+                    }
+                    if (stageFromId >= 0) {
+                        ImGui::BeginChild("from", ImVec2(0, ImGui::GetTextLineHeightWithSpacing() * 6), ImGuiChildFlags_Borders);
+                        for (int k = 0; k < (int)stageFrom.parts.size(); k++) {
+                            ImGui::PushID(k);
+                            if (ImGui::SmallButton("add")) {
+                                char pre[8];
+                                snprintf(pre, sizeof pre, "s%02d_", stageFromId);
+                                stageEdit.append(stageFrom, k, pre);
+                                stagePart = (int)stageEdit.parts.size() - 1;
+                                stage_rebuild();
+                            }
+                            ImGui::SameLine();
+                            ImGui::Text("%s  (%d polys)", stageFrom.parts[k].name.c_str(), (int)stageFrom.parts[k].faces.size());
+                            ImGui::PopID();
+                        }
+                        ImGui::EndChild();
+                    }
+                }
+                ImGui::SeparatorText("Stages");
+                ImGui::BeginChild("stagelist");
+                for (const StageInfo &si : stageInfos) {
+                    char l[96];
+                    snprintf(l, sizeof l, "%2d  %s%s", si.id, stage_look(si.id), stageMods.count(si.fid) ? "  (mod)" : "");
+                    if (ImGui::Selectable(l, si.id == stageId && view.stageView)) stage_open(si.id);
                 }
                 ImGui::EndChild();
                 ImGui::EndTabItem();
@@ -1478,14 +1850,6 @@ int main(int argc, char **argv) {
                                 IM_COL32(255, 255, 255, 60));
                     dl->AddLine(ImVec2(cx - 8, cy), ImVec2(cx + 8, cy), IM_COL32(255, 220, 80, 160));
                     dl->AddLine(ImVec2(cx, cy - 8), ImVec2(cx, cy + 8), IM_COL32(255, 220, 80, 160));
-                    /* SameLine only when the next widget, w wide, fits the panel */
-                    auto same_line = [](float w) {
-                        float x = ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x;
-                        if (x + w <= ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x) ImGui::SameLine();
-                    };
-                    auto bw = [](const char *l) {
-                        return ImGui::CalcTextSize(l, nullptr, true).x + ImGui::GetStyle().FramePadding.x * 2;
-                    };
                     if (ImGui::Button("Fit (F)")) fxFitPending = true;
                     if (ImGui::IsItemHovered())
                         ImGui::SetTooltip("Drag to move, wheel to zoom. The box is the 320x240 screen around the effect's point (the cross).");

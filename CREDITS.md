@@ -9,6 +9,8 @@ reading and posing (`src/fightstg/fightstg.c`, `src/main/gfx/tim_loader.c`,
 stage lights (`src/fightstg/fighter_info.c`, `face.c`, `battle_script.c`, `lights.c`,
 `models.c`, and their headers), and the 2D effects (`src/fightstg/sprite_effect.c`,
 `sprite_anim.c`, `src/main/gfx/sprite_drawer.c`, `src/wfightmn/wfightmn.c`).
+`src/stage.cpp` writes the fight stages back in the format that reading follows, with
+the stages' table (`src/fightstg/stage.c`, `include/fightstg/stage.h`).
 
 ```
 MIT License

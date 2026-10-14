@@ -4,7 +4,8 @@ A viewer for the battle models of **Digimon World 2003** (PAL, SLES-03936), in t
 spirit of Half-Life's model viewer: open a model and look at its mesh, its textures and
 their UVs, its skeleton, and each of its motions, frame by frame.
 
-It only reads: it never changes the game's files. **No game data is included**; it reads
+It never changes the game's own files: what you edit with it (effects' images, fight
+stages) goes to the native port's mods folder. **No game data is included**; it reads
 the models from your own disc image.
 
 This is a fan project, not affiliated with or endorsed by Bandai Namco. Digimon is a
@@ -57,6 +58,20 @@ trademark of its owners.
     folder with "Mods folder..."), see them play in the effect's place, and set each
     frame's PNG and ticks (reorder, copy, remove), the offset, scale and blend (alpha
     or add); Save writes the folder's `effect.json`, which the port plays as shown.
+- **Stages** (the 57 fight stages, in a tab of their own):
+  - each one inside, as a battle sees it, with its background color;
+  - its parts (ground, props, panorama): pick one to move, turn or scale it, remove it,
+    or tick it to skip the bounds check (the ground's and the panorama's);
+  - add parts from any other stage (a forest's trees in another stage), fixed where
+    they stood;
+  - export it as an OBJ with its MTL and PNGs (y up, 1 unit = 100 of the game's) to
+    edit in Blender, and import it back: each object is a part (keep their names to
+    keep their keys), its textures repacked into the stage's three texture pages, 16
+    colors a piece, shrunk only when they don't fit;
+  - **Save to game** writes the stage in the game's own format to the native port's
+    `data/mods/<file>.bin` (with the stages' table, `0459.bin`), which the port reads
+    instead of the disc's when it starts; **Revert to the disc's** takes it back.
+    Stages 0 and 1, and 34 and 56, share their model.
 - **Textures**:
   - every texture page and palette pair the polygons use, decoded;
   - the UVs drawn over it (the selected part's in yellow);
@@ -164,9 +179,11 @@ here, so that the prompt waits for it.)
 
 The window is the 3D view, with a panel on the right:
 
-- **Files**: the disc's models by name, file name and file number. The filter takes
-  part of any of them (`Monmon`, `M384`, `KOET`). You can also drop a model's `.BIN` on
-  the window.
+- **Files**: the disc's models by name, file name and file number (the stages' are
+  in Stages). The filter takes part of any of them (`Monmon`, `M384`, `KOET`). You can
+  also drop a model's `.BIN` on the window.
+- **Stages**: the fight stages, and the one open's editor (see above). **F** looks from
+  the arena's middle again.
 - **Model**: what the file holds, the display options (textures, lights and their
   stage, face, wireframe), and the bone tree. Click a bone to highlight it, untick it
   to hide it.
@@ -195,6 +212,8 @@ The window is the 3D view, with a panel on the right:
                                           effects/effect_ID next to the exe
     dw3mv --effect-users                  prints which Digimon's action scripts start
                                           each 2D effect
+    dw3mv --stages                        builds every stage back (and through an
+                                          OBJ) and checks what changed: nothing
     dw3mv --shot out.bmp [--motion N] [--key K] [--cam N] [--stage N] [--fighter N] file.bin
                                           draws one frame to a BMP and exits: at a
                                           motion's keyframe, through a fighter's

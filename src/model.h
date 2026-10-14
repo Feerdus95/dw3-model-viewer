@@ -96,8 +96,9 @@ struct Model {
     int blend = 0, blendTarget = 0, idleFrames[2] = {0, 0};
     std::vector<uint16_t> keyframes, blendTargets, blendSources;
 
-    /* FIGHTER, when given, names its bone list, motions and scripts */
-    bool load(const std::string &name, std::vector<uint8_t> bytes, const Fighter *fighter = nullptr);
+    /* FIGHTER, when given, names its bone list, motions and scripts; else
+       ENTRY (a stage's), else the first entry that reads as one */
+    bool load(const std::string &name, std::vector<uint8_t> bytes, const Fighter *fighter = nullptr, int entry = -1);
     bool stepFace(); /* one battle frame of the face; true when VRAM changed */
     void setMotion(int m);  /* 1-based, as the game's */
     void evaluate();        /* the pose at the current keyframe */
@@ -119,3 +120,13 @@ inline int tpage_y(uint16_t tp) { return (tp >> 4 & 1) * 256; }
 inline int tpage_depth(uint16_t tp) { return tp >> 7 & 3; } /* 0 4-bit, 1 8-bit, 2 16-bit */
 inline int clut_x(uint16_t c) { return (c & 63) * 16; }
 inline int clut_y(uint16_t c) { return c >> 6 & 511; }
+
+/* A texture page as its polygons see it, W x H texels of RGBA (R in the low
+   byte), a texel of 0 transparent; STP: the texels with the semi-transparency
+   bit half opaque (the ones a semi-transparent polygon blends) */
+std::vector<uint32_t> decode_page(const std::vector<uint16_t> &vram, uint16_t tpage, uint16_t clut, int w, int h,
+                                  bool stp = false);
+
+/* A bone's matrix (column-major) from its position, rotation and scale: Rz *
+   Ry * Rx (RotMatrixZYX), its columns scaled, at its position */
+void bone_matrix(const Vec3s &pos, const Vec3s &rot, const Vec3s &scale, float out[16]);
