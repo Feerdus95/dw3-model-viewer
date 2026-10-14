@@ -1598,7 +1598,7 @@ int main(int argc, char **argv) {
                     if (ImGui::BeginTabItem(modTab)) {
                         ImGui::BeginChild("fxmods");
                         if (ownIds.empty()) ImGui::TextWrapped("No effect has own images in %s yet.", ownRoot.c_str());
-                        for (int id : ownIds) effect_item(id);
+                        for (int id : std::set<int>(ownIds)) effect_item(id); /* a copy: opening one rescans ownIds */
                         ImGui::EndChild();
                         ImGui::EndTabItem();
                     }
