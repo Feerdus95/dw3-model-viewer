@@ -1445,26 +1445,35 @@ int main(int argc, char **argv) {
                                 IM_COL32(255, 255, 255, 60));
                     dl->AddLine(ImVec2(cx - 8, cy), ImVec2(cx + 8, cy), IM_COL32(255, 220, 80, 160));
                     dl->AddLine(ImVec2(cx, cy - 8), ImVec2(cx, cy + 8), IM_COL32(255, 220, 80, 160));
+                    /* SameLine only when the next widget, w wide, fits the panel */
+                    auto same_line = [](float w) {
+                        float x = ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x;
+                        if (x + w <= ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x) ImGui::SameLine();
+                    };
+                    auto bw = [](const char *l) {
+                        return ImGui::CalcTextSize(l, nullptr, true).x + ImGui::GetStyle().FramePadding.x * 2;
+                    };
                     if (ImGui::Button("Fit (F)")) fxFitPending = true;
                     if (ImGui::IsItemHovered())
                         ImGui::SetTooltip("Drag to move, wheel to zoom. The box is the 320x240 screen around the effect's point (the cross).");
-                    ImGui::SameLine();
-                    ImGui::Text("effect %d: sheet %d, %d sprite animations, %d fields", fx.id, fx.sheetIndex,
-                                (int)fx.anims.size(), fx.duration);
-                    ImGui::TextDisabled("animations %s #%d entry %d, sheet %s #%d entry %d", fid_name(fx.fid).c_str(), fx.fid,
-                                        fx.entry, fid_name(fx.sheetFid).c_str(), fx.sheetFid, fx.sheetEntry);
+                    ImGui::TextWrapped("effect %d: sheet %d, %d sprite animations, %d fields", fx.id, fx.sheetIndex,
+                                       (int)fx.anims.size(), fx.duration);
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                    ImGui::TextWrapped("animations %s #%d entry %d, sheet %s #%d entry %d", fid_name(fx.fid).c_str(), fx.fid,
+                                       fx.entry, fid_name(fx.sheetFid).c_str(), fx.sheetFid, fx.sheetEntry);
+                    ImGui::PopStyleColor();
                     if (ImGui::Button(fxPlaying ? "Pause" : "Play")) fxPlaying = !fxPlaying;
-                    ImGui::SameLine();
+                    same_line(bw("Restart"));
                     if (ImGui::Button("Restart")) fxTime = 0;
-                    ImGui::SameLine();
+                    same_line(bw("Loop") + ImGui::GetFrameHeight());
                     ImGui::Checkbox("Loop##fx", &fxLoop);
-                    ImGui::SameLine();
+                    same_line(bw("Export PNGs"));
                     if (ImGui::Button("Export PNGs")) {
                         int n = export_effect(fx, fxDir);
                         status = "saved " + std::to_string(n) + " frames to effects/effect_" + std::to_string(fx.id);
                     }
                     if (!fxDir.empty()) {
-                        ImGui::SameLine();
+                        same_line(bw("Open folder"));
                         if (ImGui::Button("Open folder")) SDL_OpenURL(("file:///" + fxDir).c_str());
                         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", fxDir.c_str());
                     }
@@ -1474,7 +1483,9 @@ int main(int argc, char **argv) {
                     if (ImGui::IsItemHovered()) ImGui::SetTooltip("1 tick = 1/60 s, as the battle counts time");
                     if (ImGui::CollapsingHeader("Own images (native port)", ImGuiTreeNodeFlags_DefaultOpen)) {
                         bool changed = false;
-                        ImGui::TextDisabled("%s", own.dir.c_str());
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                        ImGui::TextWrapped("%s", own.dir.c_str());
+                        ImGui::PopStyleColor();
                         if (ImGui::Button("Mods folder...")) {
                             SDL_ShowOpenFolderDialog(
                                 [](void *u, const char *const *list, int) {
@@ -1486,17 +1497,17 @@ int main(int argc, char **argv) {
                                 &picked, win, ownRoot.c_str(), false);
                         }
                         if (ImGui::IsItemHovered()) ImGui::SetTooltip("The native port's data/mods/effects folder");
-                        ImGui::SameLine();
+                        same_line(bw("Open"));
                         if (ImGui::Button("Open##own")) {
                             SDL_CreateDirectory(own.dir.c_str());
                             SDL_OpenURL(("file:///" + own.dir).c_str());
                         }
-                        ImGui::SameLine();
+                        same_line(bw("Hit") + ImGui::GetFrameHeight());
                         if (ImGui::RadioButton("Hit", !ownCritical)) ownCritical = false, own_load();
-                        ImGui::SameLine();
+                        same_line(bw("Critical hit") + ImGui::GetFrameHeight());
                         if (ImGui::RadioButton("Critical hit", ownCritical)) ownCritical = true, own_load();
                         if (ImGui::Checkbox("Show them", &ownShow)) fxTime = 0, fxDrawn = -1;
-                        ImGui::SameLine();
+                        same_line(bw("Import PNGs..."));
                         if (ImGui::Button("Import PNGs...")) {
                             static const SDL_DialogFileFilter PNG = {"PNG images", "png"};
                             SDL_ShowOpenFileDialog(
@@ -1508,27 +1519,33 @@ int main(int argc, char **argv) {
                                 },
                                 &picked, win, &PNG, 1, nullptr, true);
                         }
-                        ImGui::SameLine();
+                        same_line(bw("Save*"));
                         if (ImGui::Button(ownDirty ? "Save*" : "Save")) {
                             if (own.save()) ownDirty = false, ownIds = own_effects(ownRoot), status = "saved " + own.dir + "/effect.json";
                             else status = own.error;
                         }
-                        ImGui::SameLine();
+                        same_line(bw("Reload"));
                         if (ImGui::Button("Reload")) own_load();
-                        ImGui::Text("%d frames, %d ticks = %.2f s (the original: %d ticks = %.2f s)", (int)own.frames.size(),
+                        ImGui::TextWrapped("%d frames, %d ticks = %.2f s (the original: %d ticks = %.2f s)", (int)own.frames.size(),
                                     own.duration(), own.duration() / 60.0f, fx.duration, fx.duration / 60.0f);
-                        ImGui::PushItemWidth(120);
+                        /* two to a row, each half the panel with its label */
+                        float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2 - bw("scale");
+                        ImGui::PushItemWidth(half);
                         changed |= ImGui::DragFloat("x", &own.x, 0.5f, -320, 320, "%.1f");
                         ImGui::SameLine();
                         changed |= ImGui::DragFloat("y", &own.y, 0.5f, -240, 240, "%.1f");
-                        ImGui::SameLine();
                         changed |= ImGui::DragFloat("scale", &own.scale, 0.01f, 0.05f, 8, "%.2f");
                         ImGui::SameLine();
                         int blend = own.add;
                         if (ImGui::Combo("blend", &blend, "alpha\0add\0")) own.add = blend != 0, changed = true;
                         ImGui::PopItemWidth();
                         int playing = ownShow ? own.frameAt((int)fxTime) : -1, move = -1, dir = 0, drop = -1, dup = -1;
-                        if (ImGui::BeginTable("ownframes", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit)) {
+                        if (!own.frames.empty() && ImGui::BeginTable("ownframes", 4, ImGuiTableFlags_RowBg)) {
+                            ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed);
+                            ImGui::TableSetupColumn("image", ImGuiTableColumnFlags_WidthStretch);
+                            ImGui::TableSetupColumn("ticks", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 6);
+                            ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed);
+                            ImGui::TableHeadersRow();
                             for (int i = 0; i < (int)own.frames.size(); i++) {
                                 CustomFrame &fr = own.frames[i];
                                 ImGui::PushID(i);
@@ -1537,23 +1554,27 @@ int main(int argc, char **argv) {
                                 ImGui::TableNextColumn();
                                 ImGui::Text("%d", i);
                                 ImGui::TableNextColumn();
-                                ImGui::SetNextItemWidth(160);
+                                ImGui::SetNextItemWidth(-FLT_MIN);
                                 if (ImGui::BeginCombo("##file", fr.file.c_str())) {
                                     for (const auto &it : own.images)
                                         if (ImGui::Selectable(it.first.c_str(), it.first == fr.file)) fr.file = it.first, changed = true;
                                     ImGui::EndCombo();
                                 }
                                 ImGui::TableNextColumn();
-                                ImGui::SetNextItemWidth(90);
-                                if (ImGui::InputInt("ticks", &fr.ticks)) fr.ticks = std::clamp(fr.ticks, 1, 600), changed = true;
+                                ImGui::SetNextItemWidth(-FLT_MIN);
+                                if (ImGui::InputInt("##ticks", &fr.ticks)) fr.ticks = std::clamp(fr.ticks, 1, 600), changed = true;
                                 ImGui::TableNextColumn();
-                                if (ImGui::SmallButton("up")) move = i, dir = -1;
+                                if (ImGui::SmallButton("^")) move = i, dir = -1;
+                                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Up");
                                 ImGui::SameLine();
-                                if (ImGui::SmallButton("down")) move = i, dir = 1;
+                                if (ImGui::SmallButton("v")) move = i, dir = 1;
+                                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Down");
                                 ImGui::SameLine();
-                                if (ImGui::SmallButton("copy")) dup = i;
+                                if (ImGui::SmallButton("+")) dup = i;
+                                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Copy");
                                 ImGui::SameLine();
-                                if (ImGui::SmallButton("remove")) drop = i;
+                                if (ImGui::SmallButton("x")) drop = i;
+                                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Remove");
                                 ImGui::PopID();
                             }
                             ImGui::EndTable();
