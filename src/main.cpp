@@ -293,22 +293,29 @@ static std::string fid_name(int fid) {
 }
 
 /* The data tools/setup_disc.py writes: files/<fid>.bin and names.txt, in
-   data/ (from the exe in build/) or next to the exe */
-static void find_data(const std::string &given) {
+   the folder given, the one picked last (data_dir.txt by the exe), data/
+   (from the exe in build/) or next to the exe. Whether one was found. */
+static bool find_data(const std::string &given) {
     std::vector<std::string> tries = {g_exe_dir + "../data", g_exe_dir + "data"};
+    std::ifstream saved(g_exe_dir + "data_dir.txt");
+    std::string line;
+    if (saved && std::getline(saved, line) && !line.empty()) tries.insert(tries.begin(), line);
     if (!given.empty()) tries.insert(tries.begin(), given);
     for (const std::string &dir : tries) {
         std::ifstream names(dir + "/names.txt");
         if (!names) continue;
         g_data = dir + "/files";
+        g_names.clear();
+        g_game = GameData();
         for (std::string line; std::getline(names, line);) {
             if (!line.empty() && line.back() == '\r') line.pop_back();
             g_names.push_back(line);
         }
         g_game.load(g_data);
-        return;
+        return true;
     }
     g_data = tries[0] + "/files";
+    return false;
 }
 
 /* The disc's models: the files there whose names start M (FIGHT/MODEL,
@@ -1024,7 +1031,7 @@ int main(int argc, char **argv) {
     struct Picked { /* what the file dialogs gave, maybe from another thread */
         std::mutex m;
         std::vector<std::string> files;
-        std::string folder;
+        std::string folder, data;
     } picked;
     std::set<int> ownIds; /* the effects with own images in ownRoot */
     auto own_load = [&]() {
@@ -1223,6 +1230,19 @@ int main(int argc, char **argv) {
                 own_load();
                 picked.folder.clear();
             }
+            if (!picked.data.empty()) { /* another data folder: everything read again from it */
+                if (std::ifstream(picked.data + "/names.txt")) {
+                    std::ofstream(g_exe_dir + "data_dir.txt") << picked.data << "\n";
+                    find_data(picked.data);
+                    scene.model.reset(), scene.fighters.clear(), scene.fid = -1;
+                    fx = Effect(), listed = false;
+                    fxGrouped = false, fxCommon.clear(), fxByDigimon.clear();
+                    status.clear();
+                } else {
+                    status = "no names.txt in " + picked.data + ": pick the data folder tools/setup_disc.py wrote";
+                }
+                picked.data.clear();
+            }
         }
 
         ImGui_ImplOpenGL3_NewFrame();
@@ -1250,7 +1270,20 @@ int main(int argc, char **argv) {
                     list = scan_models();
                     listed = true;
                 }
-                if (list.empty()) ImGui::TextWrapped("No models found in %s: run tools/setup_disc.py with your disc.", g_data.c_str());
+                if (ImGui::Button("Data folder...")) {
+                    SDL_ShowOpenFolderDialog(
+                        [](void *u, const char *const *l, int) {
+                            if (!l || !*l) return;
+                            Picked *p = (Picked *)u;
+                            std::lock_guard<std::mutex> lock(p->m);
+                            p->data = *l;
+                        },
+                        &picked, win, nullptr, false);
+                }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("The data folder tools/setup_disc.py wrote (with names.txt). Now: %s",
+                                      g_data.substr(0, g_data.size() - 6).c_str());
+                if (list.empty()) ImGui::TextWrapped("No models found in %s: run tools/setup_disc.py with your disc, or pick its data folder.", g_data.c_str());
                 ImGui::InputTextWithHint("##filter", "filter", filter, sizeof filter);
                 ImGui::BeginChild("list");
                 for (const Entry &en : list) {

@@ -154,8 +154,9 @@ here, so that the prompt waits for it.)
 - **"SDL3.dll was not found"**: `SDL3.dll` must be next to `dw3mv.exe`.
 - **"This needs a graphics card with OpenGL 3.3"**: update the graphics driver. On a
   remote desktop or a virtual machine there may be no OpenGL 3.3.
-- **The list of models is empty**: `data/` is missing; run `setup_disc.py` again. The
-  viewer looks for it next to the exe, or next to its `build` folder.
+- **The list of models is empty**: `data/` is missing; run `setup_disc.py` again, or
+  pick it with **Data folder...** in the Files tab (it's remembered in `data_dir.txt`).
+  Otherwise the viewer looks for it next to the exe, or next to its `build` folder.
 - **"python" isn't recognized**: install Python from python.org with **Add python.exe
   to PATH** ticked, then open a new terminal.
 
@@ -199,7 +200,7 @@ The window is the 3D view, with a panel on the right:
                                           motion's keyframe, through a fighter's
                                           camera, with a stage's lights
 
-By default `data/` is looked for next to the exe, or next to its `build` folder.
+By default `data/` is the one picked with **Data folder...** (kept in `data_dir.txt`), or next to the exe, or next to its `build` folder.
 
 ## How it reads a model
 
