@@ -4,8 +4,9 @@ SLES-03936): the battle models' files, by file number, and every file's name.
     python tools/setup_disc.py "path/to/Digimon World 2003 (Europe).cue"
 
 writes
-    data/files/NNNN.bin   each battle model's file (M###XXXX, MEFT####), and
-                          the battle's data on its fighters
+    data/files/NNNN.bin   each battle model's file (M###XXXX, MEFT####), the
+                          2D effects' (E###XXXX, F000COM#), and the battle's
+                          data on its fighters
     data/names.txt        the disc's file names, line N for file N
 
 The game finds its files by number through a table in its executable (each
@@ -82,7 +83,7 @@ def main():
     (OUT / "names.txt").write_text("".join(n + "\n" for n in names), encoding="ascii")
     models = 0
     for fid, (start, count, name) in enumerate(zip(starts, counts, names)):
-        if (re.match(r"M(\d|EFT)", name) or fid in BATTLE_DATA) and 0 < start and count and start + count <= sectors:
+        if (re.match(r"M(\d|EFT)|E\d{3}[A-Z]|F000COM", name) or fid in BATTLE_DATA) and 0 < start and count and start + count <= sectors:
             (OUT / "files" / f"{fid:04d}.bin").write_bytes(read(start, count))
             models += 1
     print(f"{sum(1 for n in names if n)} names, {models} files -> {OUT}")

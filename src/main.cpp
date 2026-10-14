@@ -5,6 +5,7 @@
    dw3mv --shot out.bmp [--motion N] [--key K] file.bin
                                draws one frame of the model to a BMP and exits
    dw3mv --check               reads every model of the disc and prints what it found
+   dw3mv --effect ID           saves 2D effect ID's frames as PNGs and exits
 
    dw3mv --data DIR            reads the data from DIR instead
 
@@ -17,6 +18,7 @@
 #include "imgui.h"
 #include "backends/imgui_impl_opengl3.h"
 #include "backends/imgui_impl_sdl3.h"
+#include "effect.h"
 #include "model.h"
 #include <algorithm>
 #include <cmath>
@@ -555,6 +557,29 @@ static void save_bmp(const std::string &path, const std::vector<uint32_t> &px, i
     }
 }
 
+/* An effect's frames as PNGs, every other field (the game draws 30 frames a
+   second) on a 320x240 screen over black, its origin in the middle:
+   <exe>/effects/effect_<id>/frame_NNN.png. Returns how many. */
+static const int FX_W = 320, FX_H = 240;
+
+static int export_effect(const Effect &fx, std::string &dir) {
+    std::vector<uint32_t> px(FX_W * FX_H);
+    dir = g_exe_dir + "effects";
+    SDL_CreateDirectory(dir.c_str());
+    dir += "/effect_" + std::to_string(fx.id);
+    SDL_CreateDirectory(dir.c_str());
+    int n = 0;
+    for (int f = 0; f < fx.duration; f += 2, n++) {
+        std::fill(px.begin(), px.end(), 0xFF000000u);
+        fx.draw(f, px.data(), FX_W, FX_H, FX_W / 2, FX_H / 2);
+        char name[32];
+        snprintf(name, sizeof name, "/frame_%03d.png", n);
+        SDL_Surface *s = SDL_CreateSurfaceFrom(FX_W, FX_H, SDL_PIXELFORMAT_ABGR8888, px.data(), FX_W * 4);
+        if (s) SDL_SavePNG(s, (dir + name).c_str()), SDL_DestroySurface(s);
+    }
+    return n;
+}
+
 /* --- the viewer --- */
 
 struct View {
@@ -792,6 +817,7 @@ int main(int argc, char **argv) {
     std::string shot, open_path, data;
     int shot_motion = 1, shot_key = 0, shot_cam = -1, shot_stage = 0, shot_fighter = 0;
     bool check = false;
+    int effect = -1;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--shot" && i + 1 < argc) shot = argv[++i];
@@ -802,13 +828,25 @@ int main(int argc, char **argv) {
         else if (a == "--fighter" && i + 1 < argc) shot_fighter = atoi(argv[++i]);
         else if (a == "--data" && i + 1 < argc) data = argv[++i];
         else if (a == "--check") check = true;
+        else if (a == "--effect" && i + 1 < argc) effect = atoi(argv[++i]);
         else open_path = a;
     }
     const char *base = SDL_GetBasePath();
     g_exe_dir = base ? base : "";
     find_data(data);
 
-    if (check || !shot.empty()) attach_console();
+    if (check || !shot.empty() || effect >= 0) attach_console();
+    if (effect >= 0) {
+        Effect fx;
+        if (!fx.load(effect, g_data)) {
+            fprintf(stderr, "%s\n", fx.error.c_str());
+            return 1;
+        }
+        std::string dir;
+        int n = export_effect(fx, dir);
+        printf("effect %d: %d animations, %d fields -> %d frames in %s\n", effect, (int)fx.anims.size(), fx.duration, n, dir.c_str());
+        return 0;
+    }
     if (check) {
         std::vector<Entry> list = scan_models();
         int bad = 0;
@@ -884,6 +922,25 @@ int main(int argc, char **argv) {
         open_model(scene, view, name, path, status, fid, fighter);
     };
     if (!open_path.empty()) open_entry(open_path, shot_fighter);
+
+    /* the Effects tab: a sprite effect on a 320x240 screen, its origin in the middle */
+    Effect fx;
+    std::vector<int> fxIds = effect_ids();
+    std::vector<uint32_t> fxPx(FX_W * FX_H);
+    GLuint fxTex = 0;
+    float fxTime = 0;
+    int fxDrawn = -1;
+    bool fxPlaying = true, fxLoop = true, fxSelect = false;
+    std::string fxDir; /* the last export's folder */
+    auto open_effect = [&](int id, bool select) {
+        if (!fx.load(id, g_data)) status = fx.error;
+        fxTime = 0, fxDrawn = -1, fxPlaying = true, fxSelect = select;
+        fxDir.clear();
+    };
+    auto fx_render = [&](int t, uint32_t bg) {
+        std::fill(fxPx.begin(), fxPx.end(), bg);
+        if (fx.id >= 0) fx.draw(t, fxPx.data(), FX_W, FX_H, FX_W / 2, FX_H / 2);
+    };
 
     if (!shot.empty()) { /* one frame, drawn off screen */
         if (!scene.model) {
@@ -985,6 +1042,11 @@ int main(int argc, char **argv) {
                 if (view.face) faced |= m.stepFace();
             }
             if (faced) upload_vram(scene);
+        }
+
+        if (fx.id >= 0 && fxPlaying) { /* in fields, 60 a second, as FIGHTSTG_battle.frames counts */
+            fxTime += dt * 60 * view.speed;
+            if (fxTime >= fx.duration) fxTime = fxLoop ? 0 : (float)fx.duration;
         }
 
         ImGui_ImplOpenGL3_NewFrame();
@@ -1152,7 +1214,7 @@ int main(int argc, char **argv) {
                         if (ImGui::RadioButton(l, view.gameCamera == i)) apply_camera(view, f, i);
                     }
                     ImGui::SeparatorText("Action scripts");
-                    ImGui::TextDisabled("Click a motion to play it, a camera to look through it.");
+                    ImGui::TextDisabled("Click a motion to play it, a camera to look through it, an effect to see it.");
                     ImGui::BeginChild("scripts");
                     for (int i = 0; i < (int)mm.scripts.size(); i++) {
                         const std::vector<ScriptLine> &sc = mm.scripts[i];
@@ -1163,13 +1225,14 @@ int main(int argc, char **argv) {
                         for (int k = 0; k < (int)sc.size(); k++) {
                             const ScriptLine &ln = sc[k];
                             ImGui::PushID(k);
-                            bool active = ln.motion > 0 || ln.camera >= 0;
+                            bool active = ln.motion > 0 || ln.camera >= 0 || ln.effect >= 0;
                             if (!active) ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
                             if (ImGui::Selectable(ln.text.c_str(), false) && active) {
                                 if (ln.motion > 0 && ln.motion <= (int)mm.motions.size()) {
                                     mm.setMotion(ln.motion);
                                     view.playing = true;
                                 }
+                                if (ln.effect >= 0) open_effect(ln.effect, true);
                                 int c = ln.camera >= 100 ? ln.camera - 100 : ln.camera;
                                 if (c >= 0 && c < (int)f.cameras.size() && (ln.camera >= 100) == f.enemy)
                                     apply_camera(view, f, c);
@@ -1181,6 +1244,52 @@ int main(int argc, char **argv) {
                     }
                     ImGui::EndChild();
                 }
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Effects", nullptr, fxSelect ? ImGuiTabItemFlags_SetSelected : 0)) {
+                fxSelect = false;
+                if (fx.id >= 0) {
+                    int t = (int)fxTime;
+                    if (t != fxDrawn) {
+                        fx_render(t, 0xFF302824);
+                        fxTex = rgba_texture(fxTex, fxPx, FX_W, FX_H);
+                        fxDrawn = t;
+                    }
+                    float wdt = ImGui::GetContentRegionAvail().x;
+                    ImGui::Image((ImTextureID)(intptr_t)fxTex, ImVec2(wdt, wdt * FX_H / FX_W));
+                    ImGui::Text("effect %d: sheet %d, %d sprite animations, %d fields", fx.id, fx.sheetIndex,
+                                (int)fx.anims.size(), fx.duration);
+                    ImGui::TextDisabled("animations %s #%d entry %d, sheet %s #%d entry %d", fid_name(fx.fid).c_str(), fx.fid,
+                                        fx.entry, fid_name(fx.sheetFid).c_str(), fx.sheetFid, fx.sheetEntry);
+                    if (ImGui::Button(fxPlaying ? "Pause" : "Play")) fxPlaying = !fxPlaying;
+                    ImGui::SameLine();
+                    if (ImGui::Button("Restart")) fxTime = 0;
+                    ImGui::SameLine();
+                    ImGui::Checkbox("Loop##fx", &fxLoop);
+                    ImGui::SameLine();
+                    if (ImGui::Button("Export PNGs")) {
+                        int n = export_effect(fx, fxDir);
+                        status = "saved " + std::to_string(n) + " frames to effects/effect_" + std::to_string(fx.id);
+                    }
+                    if (!fxDir.empty()) {
+                        ImGui::SameLine();
+                        if (ImGui::Button("Open folder")) SDL_OpenURL(("file:///" + fxDir).c_str());
+                        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", fxDir.c_str());
+                    }
+                    ImGui::SliderFloat("speed##fx", &view.speed, 0.05f, 4, "%.2fx");
+                    float ft = fxTime;
+                    if (ImGui::SliderFloat("field", &ft, 0, (float)std::max(fx.duration - 1, 0), "%.0f")) fxTime = ft, fxPlaying = false;
+                    ImGui::Separator();
+                } else {
+                    ImGui::TextWrapped("Pick an effect: the battle's 2D effects, its sparks, hits and techniques' sprites.");
+                }
+                ImGui::BeginChild("fxlist");
+                for (int id : fxIds) {
+                    char l[32];
+                    snprintf(l, sizeof l, "effect %d", id);
+                    if (ImGui::Selectable(l, fx.id == id)) open_effect(id, false);
+                }
+                ImGui::EndChild();
                 ImGui::EndTabItem();
             }
             if (scene.model && ImGui::BeginTabItem("Textures")) {

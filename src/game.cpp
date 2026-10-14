@@ -222,6 +222,7 @@ static std::vector<ScriptLine> read_script(const uint8_t *p, const uint8_t *end)
             } else {
                 int x = next(), y = next(), z = next();
                 l.text = fmt("sprite effect %s at %d, %d, %d", name.c_str(), x, y, z);
+                if (e != 9999) l.effect = e;
             }
             break;
         }

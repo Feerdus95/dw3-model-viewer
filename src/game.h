@@ -48,6 +48,7 @@ struct ScriptLine {
     std::string text;
     int motion = 0;  /* a motion it plays on its own side's model, 1-based */
     int camera = -1; /* a fighter camera: 0-11 the partner's, 100-102 the enemy's */
+    int effect = -1; /* a sprite effect it starts */
 };
 
 struct GameData {

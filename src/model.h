@@ -109,6 +109,10 @@ struct Model {
    {texFile, count, (parent, mesh, keys) * count}; -1 if none */
 int find_bone_entry(const Archive &a);
 
+/* The TIMs of an archive of images, side by side 0x40 halfwords apart from
+   texX, texY, unpacking the RLEN ones (timLoaderLoadArchive) */
+void read_tims(const Archive &a, int texX, int texY, std::vector<Tim> &out);
+
 /* The texture page and CLUT a polygon reads, in VRAM halfwords */
 inline int tpage_x(uint16_t tp) { return (tp & 15) * 64; }
 inline int tpage_y(uint16_t tp) { return (tp >> 4 & 1) * 256; }

@@ -142,7 +142,7 @@ static bool read_commands(const uint8_t *cmd, const uint8_t *end, int texX, int 
 /* The TIMs of the texture archive, side by side 0x40 halfwords apart
    (timLoaderLoadArchive); the image FIGHTSTG gives the model starts at
    texX, texY */
-static void read_tims(const Archive &a, int texX, int texY, std::vector<Tim> &out) {
+void read_tims(const Archive &a, int texX, int texY, std::vector<Tim> &out) {
     for (int i = 0; i < a.count(); i++) {
         if (rd32(a.data + i * 4) == 0) break; /* the table ends with an offset of 0 */
         const uint8_t *src = a.entry(i);

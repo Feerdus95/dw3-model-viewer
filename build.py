@@ -17,7 +17,7 @@ HERE = Path(__file__).resolve().parent
 OUT = HERE / "build"
 OBJ = OUT / "obj"
 IMGUI = HERE / "third_party/imgui"
-SOURCES = [HERE / "src/main.cpp", HERE / "src/model.cpp", HERE / "src/game.cpp"] + [
+SOURCES = [HERE / "src/main.cpp", HERE / "src/model.cpp", HERE / "src/game.cpp", HERE / "src/effect.cpp"] + [
     IMGUI / f for f in ("imgui.cpp", "imgui_draw.cpp", "imgui_tables.cpp", "imgui_widgets.cpp",
                         "backends/imgui_impl_sdl3.cpp", "backends/imgui_impl_opengl3.cpp")]
 

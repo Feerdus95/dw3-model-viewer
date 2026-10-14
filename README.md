@@ -40,6 +40,13 @@ trademark of its owners.
   - its action scripts, decoded: the motions, cameras, effects, sounds and waits of
     each technique and reaction. Click a motion to play it, a camera to look through
     it.
+- **Effects** (the battle's 2D effects: hit sparks, techniques' sprites):
+  - every sprite effect, played as the battle plays it: each of its sprite
+    animations' frames, palettes, offsets, scales and rotations, blended as the PSX
+    blends them;
+  - play, pause, restart, loop, speed, and a slider over its fields;
+  - export its frames as PNGs (30 a second, over black), and open their folder;
+  - click an action script's "sprite effect" line to see it.
 - **Textures**:
   - every texture page and palette pair the polygons use, decoded;
   - the UVs drawn over it (the selected part's in yellow);
@@ -173,6 +180,8 @@ The window is the 3D view, with a panel on the right:
     dw3mv [file.bin]                      opens the viewer, and the model
     dw3mv --data DIR                      reads data/ (files and names.txt) from DIR
     dw3mv --check                         reads every model, prints a line for each
+    dw3mv --effect ID                     saves 2D effect ID's frames as PNGs in
+                                          effects/effect_ID next to the exe
     dw3mv --shot out.bmp [--motion N] [--key K] [--cam N] [--stage N] [--fighter N] file.bin
                                           draws one frame to a BMP and exits: at a
                                           motion's keyframe, through a fighter's
@@ -203,15 +212,15 @@ The reading is a port of what the game itself does, from the dw3_decomp decompil
 - **Bones**: each one's matrix is built as the game builds it (Z·Y·X rotation, then
   scale), and a bone scaled under 48/4096 is hidden.
 
-`src/model.cpp` reads and poses a model and `src/game.cpp` reads the fighters' data,
-with no OpenGL in either. `src/main.cpp` is the window, the renderer and the interface.
+`src/model.cpp` reads and poses a model, `src/game.cpp` reads the fighters' data and
+`src/effect.cpp` reads and draws the 2D effects, with no OpenGL in any. `src/main.cpp` is the window, the renderer and the interface.
 
 ## Not there yet
 
 - **Export and replacement** of models and textures, beyond saving a texture as a BMP.
 - **Reading the disc without Python**: dropping the disc image on the viewer.
-- **Playing a whole action script**: its effects, sounds and the other side's model;
-  for now a script's motions and cameras play one at a time.
+- **Playing a whole action script**: its effects in place, sounds and the other side's
+  model; for now a script's motions, cameras and effects play one at a time.
 - **Names in other languages**: they are the English ones.
 
 ## License
