@@ -558,12 +558,16 @@ static void save_bmp(const std::string &path, const std::vector<uint32_t> &px, i
 }
 
 /* An effect's frames as PNGs, every other field (the game draws 30 frames a
-   second) on a 320x240 screen over black, its origin in the middle:
-   <exe>/effects/effect_<id>/frame_NNN.png. Returns how many. */
+   second) on a 320x240 screen, its origin in the middle, with a transparent
+   background: <exe>/effects/effect_<id>/frame_NNN.png. Returns how many.
+   Each frame is drawn over black and over white and its alpha is what the
+   two differ by: opaque texels stay opaque, averaged ones are half, and the
+   added ones (no alpha of their own) take their brightness as alpha, which
+   over black is exactly the game's. */
 static const int FX_W = 320, FX_H = 240;
 
 static int export_effect(const Effect &fx, std::string &dir) {
-    std::vector<uint32_t> px(FX_W * FX_H);
+    std::vector<uint32_t> px(FX_W * FX_H), white(FX_W * FX_H);
     dir = g_exe_dir + "effects";
     SDL_CreateDirectory(dir.c_str());
     dir += "/effect_" + std::to_string(fx.id);
@@ -571,7 +575,18 @@ static int export_effect(const Effect &fx, std::string &dir) {
     int n = 0;
     for (int f = 0; f < fx.duration; f += 2, n++) {
         std::fill(px.begin(), px.end(), 0xFF000000u);
+        std::fill(white.begin(), white.end(), 0xFFFFFFFFu);
         fx.draw(f, px.data(), FX_W, FX_H, FX_W / 2, FX_H / 2);
+        fx.draw(f, white.data(), FX_W, FX_H, FX_W / 2, FX_H / 2);
+        for (int i = 0; i < FX_W * FX_H; i++) {
+            int a = 0;
+            for (int c = 0; c < 24; c += 8) a = std::max(a, 255 - (int)(white[i] >> c & 255) + (int)(px[i] >> c & 255));
+            a = std::clamp(a, 0, 255);
+            uint32_t out = 0;
+            for (int c = 0; c < 24; c += 8)
+                if (a) out |= (uint32_t)std::min(255, (int)(px[i] >> c & 255) * 255 / a) << c;
+            px[i] = out | (uint32_t)a << 24;
+        }
         char name[32];
         snprintf(name, sizeof name, "/frame_%03d.png", n);
         SDL_Surface *s = SDL_CreateSurfaceFrom(FX_W, FX_H, SDL_PIXELFORMAT_ABGR8888, px.data(), FX_W * 4);

@@ -45,7 +45,8 @@ trademark of its owners.
     animations' frames, palettes, offsets, scales and rotations, blended as the PSX
     blends them;
   - play, pause, restart, loop, speed, and a slider over its fields;
-  - export its frames as PNGs (30 a second, over black), and open their folder;
+  - export its frames as PNGs (30 a second, with a transparent background), and open
+    their folder;
   - click an action script's "sprite effect" line to see it.
 - **Textures**:
   - every texture page and palette pair the polygons use, decoded;
