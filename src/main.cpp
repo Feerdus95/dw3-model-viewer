@@ -568,6 +568,9 @@ static void save_bmp(const std::string &path, const std::vector<uint32_t> &px, i
    added ones (no alpha of their own) take their brightness as alpha, which
    over black is exactly the game's. */
 static const int FX_W = 320, FX_H = 240;
+/* the Effects tab's canvas: three screens across, the effect's point in its middle */
+static const int FXC_W = 960, FXC_H = 720;
+static const uint32_t FX_BG = 0xFF302824;
 
 static int export_effect(const Effect &fx, std::string &dir) {
     std::vector<uint32_t> px(FX_W * FX_H), white(FX_W * FX_H);
@@ -993,7 +996,10 @@ int main(int argc, char **argv) {
     /* the Effects tab: a sprite effect on a 320x240 screen, its origin in the middle */
     Effect fx;
     std::vector<int> fxIds = effect_ids();
-    std::vector<uint32_t> fxPx(FX_W * FX_H);
+    std::vector<uint32_t> fxPx(FXC_W * FXC_H);
+    bool fxFitPending = false; /* fit the view to the effect when next drawn */
+    bool fxActive = false; /* the Effects tab is open: the view shows the effect, not the model */
+    float fxZoom = 2, fxPan[2] = {0, 0}; /* screen pixels per effect pixel; the view's middle from the point */
     GLuint fxTex = 0;
     float fxTime = 0;
     int fxDrawn = -1;
@@ -1052,6 +1058,7 @@ int main(int argc, char **argv) {
         fxTime = 0, fxDrawn = -1, fxPlaying = true, fxSelect = select;
         fxDir.clear();
         if (fx.id >= 0) own_load();
+        fxFitPending = true;
     };
     auto effect_item = [&](int id) {
         char l[64];
@@ -1068,8 +1075,25 @@ int main(int argc, char **argv) {
     };
     auto fx_render = [&](int t, uint32_t bg) {
         std::fill(fxPx.begin(), fxPx.end(), bg);
-        if (fx.id >= 0 && ownShow) own.draw(t, fxPx.data(), FX_W, FX_H, FX_W / 2, FX_H / 2);
-        else if (fx.id >= 0) fx.draw(t, fxPx.data(), FX_W, FX_H, FX_W / 2, FX_H / 2);
+        if (fx.id >= 0 && ownShow) own.draw(t, fxPx.data(), FXC_W, FXC_H, FXC_W / 2, FXC_H / 2);
+        else if (fx.id >= 0) fx.draw(t, fxPx.data(), FXC_W, FXC_H, FXC_W / 2, FXC_H / 2);
+    };
+    /* the view on all the effect draws over its length, in the view's W x H */
+    auto fx_fit = [&](float w, float h) {
+        int box[4] = {FXC_W, FXC_H, -1, -1};
+        for (int t = 0; t < std::max(fx_length(), 1); t += 2) {
+            fx_render(t, 0);
+            for (int y = 0; y < FXC_H; y++)
+                for (int x = 0; x < FXC_W; x++)
+                    if (fxPx[y * FXC_W + x]) {
+                        box[0] = std::min(box[0], x), box[1] = std::min(box[1], y);
+                        box[2] = std::max(box[2], x), box[3] = std::max(box[3], y);
+                    }
+        }
+        if (box[2] < 0) box[0] = (FXC_W - FX_W) / 2, box[1] = (FXC_H - FX_H) / 2, box[2] = box[0] + FX_W, box[3] = box[1] + FX_H;
+        fxPan[0] = (box[0] + box[2]) / 2.0f - FXC_W / 2, fxPan[1] = (box[1] + box[3]) / 2.0f - FXC_H / 2;
+        fxZoom = std::clamp(0.8f * std::min(w / (box[2] - box[0] + 1), h / (box[3] - box[1] + 1)), 0.25f, 8.0f);
+        fxDrawn = -1;
     };
 
     if (!shot.empty()) { /* one frame, drawn off screen */
@@ -1135,7 +1159,12 @@ int main(int argc, char **argv) {
             ImGui_ImplSDL3_ProcessEvent(&e);
             if (e.type == SDL_EVENT_QUIT) running = false;
             if (e.type == SDL_EVENT_DROP_FILE) open_entry(e.drop.data, 0);
-            if (!io.WantCaptureMouse) {
+            if (!io.WantCaptureMouse && fxActive) { /* the effect: dragged and zoomed */
+                if (e.type == SDL_EVENT_MOUSE_MOTION && e.motion.state)
+                    fxPan[0] -= e.motion.xrel / fxZoom, fxPan[1] -= e.motion.yrel / fxZoom;
+                else if (e.type == SDL_EVENT_MOUSE_WHEEL)
+                    fxZoom = std::clamp(fxZoom * powf(1.15f, e.wheel.y), 0.25f, 16.0f);
+            } else if (!io.WantCaptureMouse) {
                 if (e.type == SDL_EVENT_MOUSE_MOTION && (e.motion.state & SDL_BUTTON_LMASK)) {
                     view.cam.yaw -= e.motion.xrel * 0.008f;
                     view.cam.pitch = std::clamp(view.cam.pitch + e.motion.yrel * 0.008f, -1.5f, 1.5f);
@@ -1149,7 +1178,8 @@ int main(int argc, char **argv) {
                     view.cam.dist *= powf(0.88f, e.wheel.y);
                 }
             }
-            if (e.type == SDL_EVENT_KEY_DOWN && !io.WantCaptureKeyboard && scene.model) {
+            if (e.type == SDL_EVENT_KEY_DOWN && !io.WantCaptureKeyboard && fxActive && e.key.key == SDLK_F) fxFitPending = true;
+            else if (e.type == SDL_EVENT_KEY_DOWN && !io.WantCaptureKeyboard && scene.model) {
                 if (e.key.key == SDLK_SPACE) view.playing = !view.playing;
                 if (e.key.key == SDLK_F) frame_model(scene, view);
             }
@@ -1204,6 +1234,7 @@ int main(int argc, char **argv) {
         ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - panel, 0));
         ImGui::SetNextWindowSize(ImVec2(panel, io.DisplaySize.y));
         ImGui::Begin("##panel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
+        fxActive = false;
         if (scene.model && !scene.fighters.empty() && !scene.fighters[scene.fighter]->name.empty())
             ImGui::Text("%s  (%s)", scene.fighters[scene.fighter]->name.c_str(), scene.model->name.c_str());
         else if (scene.model)
@@ -1394,15 +1425,30 @@ int main(int argc, char **argv) {
             }
             if (ImGui::BeginTabItem("Effects", nullptr, fxSelect ? ImGuiTabItemFlags_SetSelected : 0)) {
                 fxSelect = false;
+                fxActive = true;
                 if (fx.id >= 0) {
+                    if (fxFitPending) fx_fit(io.DisplaySize.x - panel, io.DisplaySize.y), fxFitPending = false;
                     int t = (int)fxTime;
                     if (t != fxDrawn) {
-                        fx_render(t, 0xFF302824);
-                        fxTex = rgba_texture(fxTex, fxPx, FX_W, FX_H);
+                        fx_render(t, FX_BG);
+                        fxTex = rgba_texture(fxTex, fxPx, FXC_W, FXC_H);
                         fxDrawn = t;
                     }
-                    float wdt = ImGui::GetContentRegionAvail().x;
-                    ImGui::Image((ImTextureID)(intptr_t)fxTex, ImVec2(wdt, wdt * FX_H / FX_W));
+                    /* in the view, where the model is: the canvas, the 320x240 screen
+                       around the effect's point (what Export PNGs and own images
+                       span) and the point */
+                    ImDrawList *dl = ImGui::GetBackgroundDrawList();
+                    float cx = (io.DisplaySize.x - panel) / 2 - fxPan[0] * fxZoom, cy = io.DisplaySize.y / 2 - fxPan[1] * fxZoom;
+                    dl->AddImage((ImTextureID)(intptr_t)fxTex, ImVec2(cx - FXC_W / 2 * fxZoom, cy - FXC_H / 2 * fxZoom),
+                                 ImVec2(cx + FXC_W / 2 * fxZoom, cy + FXC_H / 2 * fxZoom));
+                    dl->AddRect(ImVec2(cx - FX_W / 2 * fxZoom, cy - FX_H / 2 * fxZoom), ImVec2(cx + FX_W / 2 * fxZoom, cy + FX_H / 2 * fxZoom),
+                                IM_COL32(255, 255, 255, 60));
+                    dl->AddLine(ImVec2(cx - 8, cy), ImVec2(cx + 8, cy), IM_COL32(255, 220, 80, 160));
+                    dl->AddLine(ImVec2(cx, cy - 8), ImVec2(cx, cy + 8), IM_COL32(255, 220, 80, 160));
+                    if (ImGui::Button("Fit (F)")) fxFitPending = true;
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("Drag to move, wheel to zoom. The box is the 320x240 screen around the effect's point (the cross).");
+                    ImGui::SameLine();
                     ImGui::Text("effect %d: sheet %d, %d sprite animations, %d fields", fx.id, fx.sheetIndex,
                                 (int)fx.anims.size(), fx.duration);
                     ImGui::TextDisabled("animations %s #%d entry %d, sheet %s #%d entry %d", fid_name(fx.fid).c_str(), fx.fid,
@@ -1632,7 +1678,13 @@ int main(int argc, char **argv) {
         about_window(aboutOpen, aboutIcon);
         ImGui::Render();
 
-        render(scene, view, ww - (int)(panel * ww / std::max(io.DisplaySize.x, 1.0f)), wh);
+        if (fxActive) { /* the effect, drawn by ImGui over the cleared view */
+            GL(glViewport)(0, 0, ww, wh);
+            GL(glClearColor)((FX_BG & 255) / 255.0f, (FX_BG >> 8 & 255) / 255.0f, (FX_BG >> 16 & 255) / 255.0f, 1);
+            GL(glClear)(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        } else {
+            render(scene, view, ww - (int)(panel * ww / std::max(io.DisplaySize.x, 1.0f)), wh);
+        }
         GL(glViewport)(0, 0, ww, wh);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         SDL_GL_SwapWindow(win);
