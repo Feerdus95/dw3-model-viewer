@@ -473,7 +473,7 @@ static GLuint rgba_texture(GLuint tex, const std::vector<uint32_t> &px, int w, i
     return tex;
 }
 
-static const char *VERSION = "0.4.0";
+static const char *VERSION = "0.4.1";
 
 /* The exe's icon (res/dw3mv.rc's icon 1) as a texture, for the About window; 0 without one */
 static GLuint icon_texture(int size) {
