@@ -1,0 +1,70 @@
+/* --- the files --- */
+
+static std::string g_data;                  /* data/files */
+static std::vector<std::string> g_names;    /* the disc's names, by fid */
+static std::string g_exe_dir;
+static GameData g_game;                     /* fighters, stages, names */
+
+static bool read_file(const std::string &path, std::vector<uint8_t> &out) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return false;
+    out.assign(std::istreambuf_iterator<char>(f), {});
+    return true;
+}
+
+static std::string fid_path(int fid) {
+    char b[16];
+    snprintf(b, sizeof b, "/%04d.bin", fid);
+    return g_data + b;
+}
+
+static std::string fid_name(int fid) {
+    return fid < (int)g_names.size() ? g_names[fid] : "#" + std::to_string(fid);
+}
+
+/* The data tools/setup_disc.py writes: files/<fid>.bin and names.txt, in
+   the folder given, the one picked last (data_dir.txt by the exe), data/
+   (from the exe in build/) or next to the exe. Whether one was found. */
+static bool find_data(const std::string &given) {
+    std::vector<std::string> tries = {g_exe_dir + "../data", g_exe_dir + "data"};
+    std::ifstream saved(g_exe_dir + "data_dir.txt");
+    std::string line;
+    if (saved && std::getline(saved, line) && !line.empty()) tries.insert(tries.begin(), line);
+    if (!given.empty()) tries.insert(tries.begin(), given);
+    for (const std::string &dir : tries) {
+        std::ifstream names(dir + "/names.txt");
+        if (!names) continue;
+        g_data = dir + "/files";
+        g_names.clear();
+        g_game = GameData();
+        for (std::string line; std::getline(names, line);) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            g_names.push_back(line);
+        }
+        g_game.load(g_data);
+        return true;
+    }
+    g_data = tries[0] + "/files";
+    return false;
+}
+
+/* The disc's models: the files there whose names start M (FIGHT/MODEL,
+   FIGHT/EFFECT) and that have a bone list */
+struct Entry {
+    int fid;
+    std::string name;
+    std::string label; /* who it is: the fighters' names, or the technique's */
+};
+
+static std::vector<Entry> scan_models() {
+    std::vector<Entry> out;
+    std::vector<uint8_t> bytes;
+    for (int fid = 1; fid < (int)g_names.size(); fid++) {
+        const std::string &n = g_names[fid];
+        if (n.empty() || n[0] != 'M' || !read_file(fid_path(fid), bytes)) continue;
+        Archive a{bytes.data(), bytes.size()};
+        if (a.count() > 0 && (size_t)a.count() * 4 <= a.size && find_bone_entry(a) >= 0) out.push_back({fid, n, g_game.fileLabel(fid, n)});
+    }
+    return out;
+}
+

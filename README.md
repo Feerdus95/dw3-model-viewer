@@ -245,7 +245,7 @@ The reading is a port of what the game itself does, from the dw3_decomp decompil
   scale), and a bone scaled under 48/4096 is hidden.
 
 `src/model.cpp` reads and poses a model, `src/game.cpp` reads the fighters' data and
-`src/effect.cpp` reads and draws the 2D effects, `src/custom.cpp` an effect's own images for the native port, with no OpenGL in any. `src/main.cpp` is the window, the renderer and the interface.
+`src/effect.cpp` reads and draws the 2D effects, `src/custom.cpp` an effect's own images for the native port, with no OpenGL in any. `src/main.cpp` is the window, the renderer and the interface, its parts in `src/modules/*.inc` (one translation unit).
 
 ## Not there yet
 
