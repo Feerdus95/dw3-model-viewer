@@ -27,6 +27,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <memory>
@@ -35,6 +36,7 @@
 #ifdef _WIN32
 #include <io.h>
 #include <windows.h>
+#include <shellapi.h>
 #endif
 
 /* A window app has no console: the command-line modes print to the one they
@@ -600,6 +602,39 @@ static std::map<int, std::set<std::string>> effect_users() {
                 if (ln.effect >= 0) out[ln.effect].insert(f.name);
     }
     return out;
+}
+
+/* The techniques whose scripts start each effect by its 9999 (TechData.
+   scriptEffect, +0xE of the exe's TECHS: 443 of 0x12 bytes), by name. The
+   first of EXES that opens is the PAL exe. */
+static std::map<int, std::set<std::string>> effect_techs(const std::vector<std::string> &exes) {
+    std::map<int, std::set<std::string>> out;
+    std::vector<uint8_t> exe;
+    for (const std::string &p : exes)
+        if (read_file(p, exe)) break;
+    if (exe.size() < 0x800) return out;
+    uint32_t text = exe[0x18] | exe[0x19] << 8 | exe[0x1A] << 16 | (uint32_t)exe[0x1B] << 24;
+    size_t techs = 0x80042BDC - text + 0x800;
+    for (int i = 0; i < 443 && techs + (i + 1) * 0x12 <= exe.size(); i++) {
+        int id = i + 1, effect = exe[techs + i * 0x12 + 0xE];
+        if (effect && id < (int)g_game.skillNames.size() && g_game.skillNames[id].size() > 1)
+            out[effect].insert(g_game.skillNames[id]);
+    }
+    return out;
+}
+
+/* Shows a folder in Explorer: ShellExecute takes a plain path, which a
+   file:/// URL with .. or \ in it isn't */
+static void open_folder(const std::string &dir) {
+    std::error_code ec;
+    std::filesystem::path p = std::filesystem::weakly_canonical(std::filesystem::u8path(dir), ec);
+    if (ec) p = std::filesystem::u8path(dir);
+    p.make_preferred();
+#ifdef _WIN32
+    ShellExecuteW(nullptr, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+#else
+    SDL_OpenURL(("file://" + p.u8string()).c_str());
+#endif
 }
 
 /* The effects with own images in ROOT (<root>/<id>/, or its critical/) */
@@ -1172,14 +1207,17 @@ int main(int argc, char **argv) {
         ownShow = !own.frames.empty(), ownDirty = false, fxDrawn = -1;
         ownIds = own_effects(ownRoot);
     };
-    /* the list's groups: the effects no script starts or several Digimon's
-       do, and each Digimon's own (its Black King, MP and MF forms with it) */
+    /* the list's groups: the effects no script starts, several Digimon's do
+       or a technique's does, and each Digimon's own (its Black King, MP and
+       MF forms with it) */
     bool fxGrouped = false;
-    std::map<int, std::set<std::string>> fxUsers;
+    std::map<int, std::set<std::string>> fxUsers, fxTechs;
     std::vector<int> fxCommon;
     std::map<std::string, std::vector<int>> fxByDigimon;
+    char fxFind[64] = "";
     auto group_effects = [&]() {
         fxUsers = effect_users();
+        fxTechs = effect_techs({g_data + "/../SLES_039.36", ownRoot + "/../../SLES_039.36"});
         for (int id : fxIds) {
             std::set<std::string> base;
             for (std::string n : fxUsers[id]) {
@@ -1187,7 +1225,7 @@ int main(int argc, char **argv) {
                 if (n.size() > 3 && (n.compare(n.size() - 3, 3, " MP") == 0 || n.compare(n.size() - 3, 3, " MF") == 0)) n.resize(n.size() - 3);
                 base.insert(n);
             }
-            if (base.size() == 1) fxByDigimon[*base.begin()].push_back(id);
+            if (base.size() == 1 && fxTechs[id].empty()) fxByDigimon[*base.begin()].push_back(id);
             else fxCommon.push_back(id);
         }
         fxGrouped = true;
@@ -1200,18 +1238,33 @@ int main(int argc, char **argv) {
         if (fx.id >= 0) own_load();
         fxFitPending = true;
     };
+    auto joined = [](const std::set<std::string> &s) {
+        std::string all;
+        for (const std::string &n : s) all += (all.empty() ? "" : ", ") + n;
+        return all;
+    };
     auto effect_item = [&](int id) {
-        char l[64];
-        const std::set<std::string> &u = fxUsers[id];
-        if (u.size() > 1) snprintf(l, sizeof l, "effect %d  (%d Digimon)", id, (int)u.size());
-        else if (u.empty()) snprintf(l, sizeof l, "effect %d  (the battle's own)", id);
-        else snprintf(l, sizeof l, "effect %d", id);
-        if (ImGui::Selectable(l, fx.id == id)) open_effect(id, false);
-        if (u.size() > 1 && ImGui::IsItemHovered()) {
-            std::string all;
-            for (const std::string &n : u) all += (all.empty() ? "" : ", ") + n;
-            ImGui::SetTooltip("%s", all.c_str());
+        const std::set<std::string> &u = fxUsers[id], &t = fxTechs[id];
+        std::string l = "effect " + std::to_string(id);
+        if (!t.empty()) l += "  " + joined(t);
+        else if (u.size() > 1) l += "  (" + std::to_string(u.size()) + " Digimon)";
+        else if (u.empty()) l += "  (the battle's own)";
+        if (ImGui::Selectable(l.c_str(), fx.id == id)) open_effect(id, false);
+        if (u.size() > 1 || (!t.empty() && !u.empty())) {
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", joined(u).c_str());
         }
+    };
+    /* the search: an id, or part of a Digimon's or technique's name */
+    auto effect_found = [&](int id) {
+        std::string f = fxFind;
+        if (f.empty()) return true;
+        if (std::all_of(f.begin(), f.end(), ::isdigit)) return std::to_string(id) == f;
+        std::string all = joined(fxUsers[id]) + "," + joined(fxTechs[id]);
+        auto lower = [](std::string s) {
+            std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+            return s;
+        };
+        return lower(all).find(lower(f)) != std::string::npos;
     };
     auto fx_render = [&](int t, uint32_t bg) {
         std::fill(fxPx.begin(), fxPx.end(), bg);
@@ -1560,7 +1613,7 @@ int main(int argc, char **argv) {
                                           "Keep the objects' names to keep their parts; a material's _abrN is its semi-transparency.");
                     if (!stageDir.empty()) {
                         same_line(bw("Open folder"));
-                        if (ImGui::Button("Open folder##stage")) SDL_OpenURL(("file:///" + stageDir).c_str());
+                        if (ImGui::Button("Open folder##stage")) open_folder(stageDir);
                     }
                     same_line(bw("Import OBJ..."));
                     if (ImGui::Button("Import OBJ...")) {
@@ -1871,7 +1924,7 @@ int main(int argc, char **argv) {
                     }
                     if (!fxDir.empty()) {
                         same_line(bw("Open folder"));
-                        if (ImGui::Button("Open folder")) SDL_OpenURL(("file:///" + fxDir).c_str());
+                        if (ImGui::Button("Open folder")) open_folder(fxDir);
                         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", fxDir.c_str());
                     }
                     ImGui::SliderFloat("speed##fx", &view.speed, 0.05f, 4, "%.2fx");
@@ -1897,7 +1950,7 @@ int main(int argc, char **argv) {
                         same_line(bw("Open"));
                         if (ImGui::Button("Open##own")) {
                             SDL_CreateDirectory(own.dir.c_str());
-                            SDL_OpenURL(("file:///" + own.dir).c_str());
+                            open_folder(own.dir);
                         }
                         same_line(bw("Hit") + ImGui::GetFrameHeight());
                         if (ImGui::RadioButton("Hit", !ownCritical)) ownCritical = false, own_load();
@@ -1991,14 +2044,19 @@ int main(int argc, char **argv) {
                     ImGui::TextWrapped("Pick an effect: the battle's 2D effects, its sparks, hits and techniques' sprites.");
                 }
                 if (!fxGrouped) group_effects(), ownIds = own_effects(ownRoot);
+                ImGui::SetNextItemWidth(-FLT_MIN);
+                ImGui::InputTextWithHint("##fxfind", "Search: Digimon, id or technique", fxFind, sizeof fxFind);
                 if (ImGui::BeginTabBar("fxlists")) {
                     if (ImGui::BeginTabItem("Original")) {
                         ImGui::BeginChild("fxlist");
-                        if (ImGui::CollapsingHeader("Common", ImGuiTreeNodeFlags_DefaultOpen)) {
+                        if (*fxFind) {
+                            for (int id : fxIds)
+                                if (effect_found(id)) effect_item(id);
+                        } else if (ImGui::CollapsingHeader("Common", ImGuiTreeNodeFlags_DefaultOpen)) {
                             ImGui::TextDisabled("The battle's own (hits, digivolving, items) and those several Digimon start");
                             for (int id : fxCommon) effect_item(id);
                         }
-                        if (ImGui::CollapsingHeader("By Digimon", ImGuiTreeNodeFlags_DefaultOpen)) {
+                        if (!*fxFind && ImGui::CollapsingHeader("By Digimon", ImGuiTreeNodeFlags_DefaultOpen)) {
                             for (const auto &it : fxByDigimon) {
                                 bool open = std::find(it.second.begin(), it.second.end(), fx.id) != it.second.end();
                                 ImGui::SetNextItemOpen(open, ImGuiCond_Once);
@@ -2016,7 +2074,8 @@ int main(int argc, char **argv) {
                     if (ImGui::BeginTabItem(modTab)) {
                         ImGui::BeginChild("fxmods");
                         if (ownIds.empty()) ImGui::TextWrapped("No effect has own images in %s yet.", ownRoot.c_str());
-                        for (int id : std::set<int>(ownIds)) effect_item(id); /* a copy: opening one rescans ownIds */
+                        for (int id : std::set<int>(ownIds)) /* a copy: opening one rescans ownIds */
+                            if (effect_found(id)) effect_item(id);
                         ImGui::EndChild();
                         ImGui::EndTabItem();
                     }
