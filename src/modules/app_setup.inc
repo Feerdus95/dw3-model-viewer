@@ -46,7 +46,8 @@ int main(int argc, char **argv) {
     }
     if (check) {
         std::vector<Entry> list = scan_models();
-        int bad = 0;
+        int bad = 0, emStarts = 0, emBad = 0, screenFx = 0, ownFx = 0;
+        std::set<int> emSeen;
         for (const Entry &e : list) {
             std::vector<uint8_t> bytes;
             read_file(fid_path(e.fid), bytes);
@@ -57,14 +58,36 @@ int main(int argc, char **argv) {
                 bad++;
                 continue;
             }
+            for (const std::vector<ScriptLine> &sc : m.scripts)
+                for (const ScriptLine &ln : sc) {
+                    int16_t z = (int16_t)ln.pos[2];
+                    screenFx += ln.fxStart && (z == 0x7FFF || z == -1), ownFx += ln.fxStart && ln.fxOwn;
+                    if (!ln.emStart) continue;
+                    emStarts++;
+                    if (!emSeen.insert(ln.emId).second) continue;
+                    const EffectModelRow *row = nullptr;
+                    for (const EffectModelRow &r : EFFECT_MODELS)
+                        if (r.id == ln.emId) row = &r;
+                    Model em;
+                    std::vector<uint8_t> eb;
+                    if (!row) { /* the battle ends such a task at once */
+                        printf("%04d effect model %d: not in the table, the game skips it\n", e.fid, ln.emId);
+                    } else if (!read_file(fid_path((int)(row->file >> 16)), eb) ||
+                               !em.load("em", std::move(eb), nullptr, (int)(row->file & 0xFFFF), (int)(row->motions & 0xFFFF)) || em.motions.empty()) {
+                        printf("%04d effect model %d: unreadable or no motions\n", e.fid, ln.emId);
+                        emBad++;
+                    }
+                }
             size_t polys = 0;
             for (const Mesh &me : m.meshes) polys += me.polys.size();
             printf("%04d %-13s bones %3d polys %5d tims %d motions %2d scripts %2d  %s\n", e.fid, e.name.c_str(),
                    (int)m.bones.size() - 1, (int)polys, (int)m.tims.size(), (int)m.motions.size(), (int)m.scripts.size(),
                    e.label.c_str());
         }
+        printf("scripts: %d effect model starts (%d distinct, %d unreadable), %d sprite effects at a screen position, %d own\n", emStarts,
+               (int)emSeen.size(), emBad, screenFx, ownFx);
         printf("%d models, %d unread\n", (int)list.size(), bad);
-        return bad != 0;
+        return bad != 0 || emBad != 0;
     }
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -91,7 +114,8 @@ int main(int argc, char **argv) {
     SDL_GL_SetSwapInterval(1);
     g_mesh = compile(MESH_VS, MESH_FS);
     g_line = compile(LINE_VS, LINE_FS);
-    if (!g_mesh || !g_line) return 1;
+    g_sprite = compile(SPRITE_VS, SPRITE_FS);
+    if (!g_mesh || !g_line || !g_sprite) return 1;
     GL(glGenVertexArrays)(1, &g_lineVao);
     GL(glGenBuffers)(1, &g_lineVbo);
     GL(glBindVertexArray)(g_lineVao);
@@ -153,6 +177,7 @@ int main(int argc, char **argv) {
         std::string folder, data, obj, bin;
     } picked;
     std::set<int> ownIds = own_effects(ownRoot); /* the effects with own images in ownRoot */
+    read_techs({g_data + "/../SLES_039.36", ownRoot + "/../../SLES_039.36"});
 
     /* the Stages tab: a fight stage, edited (stage.h), saved for the native
        port in its data/mods (ownRoot's parent): <fid>.bin and the stages'
@@ -221,7 +246,7 @@ int main(int argc, char **argv) {
     char fxFind[64] = "";
     auto group_effects = [&]() {
         fxUsers = effect_users();
-        fxTechs = effect_techs({g_data + "/../SLES_039.36", ownRoot + "/../../SLES_039.36"});
+        fxTechs = effect_techs();
         for (int id : fxIds) {
             std::set<std::string> base;
             for (std::string n : fxUsers[id]) {

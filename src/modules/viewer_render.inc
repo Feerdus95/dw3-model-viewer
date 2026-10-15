@@ -18,7 +18,25 @@ struct View {
     float stageBg[3] = {0, 0, 0};
 };
 
-static GLuint g_mesh, g_line, g_lineVao, g_lineVbo;
+static GLuint g_mesh, g_line, g_lineVao, g_lineVbo, g_sprite;
+
+/* A sprite effect's picture (the 320x240 screen around its point) as the
+   battle draws it: at its point in the view's world, or at a screen position
+   (SCREEN 1 in front of everything, 2 behind it), sorted among the models by
+   its depth unless FRONT, the layer drawn over them */
+struct SpriteDraw {
+    GLuint tex = 0;
+    float pos[3] = {0, 0, 0};
+    int screen = 0;
+    bool front = false;
+};
+
+/* A model other than the scene's (an effect model), posed in the scene's
+   space by PRE (its root's matrix, in the model's own PSX space) */
+struct ExtraModel {
+    Scene *scene = nullptr;
+    M4 pre;
+};
 
 static void draw_lines(const std::vector<float> &v, const M4 &mvp) {
     if (v.empty()) return;
@@ -43,8 +61,59 @@ static M4 bone_pose(const Scene &s, int b) {
 /* ... and in the view's world */
 static M4 bone_world(const Scene &s, int b) { return mul(PSX_TO_GL, bone_pose(s, b)); }
 
+/* The sprite effects' pictures, far to near: each a quad as tall as the view (the PSX screen is 240 lines)
+   at its point's depth, so the models in front of it hide it */
+static void draw_sprites(const std::vector<SpriteDraw> &sprites, const M4 &vp, int w, int h) {
+    if (sprites.empty()) return;
+    struct Q {
+        const SpriteDraw *s;
+        float c[3];
+    };
+    std::vector<Q> qs;
+    for (const SpriteDraw &s : sprites) {
+        Q q = {&s, {0, 0, 0}};
+        if (s.screen) { /* the point is a screen pixel from the middle */
+            q.c[0] = s.pos[0] * 2.0f / 240 * h / w;
+            q.c[1] = -s.pos[1] * 2.0f / 240;
+            q.c[2] = s.screen == 1 ? -1.0f : 0.99999f;
+        } else {
+            const float *m = vp.m, *p = s.pos;
+            float cw = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
+            if (cw < 1e-3f) continue;
+            q.c[0] = (m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12]) / cw;
+            q.c[1] = (m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13]) / cw;
+            q.c[2] = (m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14]) / cw;
+        }
+        qs.push_back(q);
+    }
+    /* the front layer last, the rest far to near */
+    std::stable_sort(qs.begin(), qs.end(), [](const Q &a, const Q &b) {
+        if (a.s->front != b.s->front) return !a.s->front;
+        return a.c[2] > b.c[2];
+    });
+    GL(glUseProgram)(g_sprite);
+    GL(glBindVertexArray)(g_lineVao);
+    GL(glActiveTexture)(GL_TEXTURE0);
+    GL(glUniform1i)(GL(glGetUniformLocation)(g_sprite, "tex"), 0);
+    GL(glUniform2f)(GL(glGetUniformLocation)(g_sprite, "h"), 320.0f / 240 * h / w, 1.0f);
+    GL(glEnable)(GL_BLEND);
+    GL(glBlendFunc)(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    GL(glDepthFunc)(GL_LEQUAL);
+    GL(glDepthMask)(GL_FALSE);
+    for (const Q &q : qs) {
+        if (q.s->front || (q.s->screen == 1)) GL(glDisable)(GL_DEPTH_TEST);
+        else GL(glEnable)(GL_DEPTH_TEST);
+        GL(glBindTexture)(GL_TEXTURE_2D, q.s->tex);
+        GL(glUniform3f)(GL(glGetUniformLocation)(g_sprite, "c"), q.c[0], q.c[1], q.c[2]);
+        GL(glDrawArrays)(GL_TRIANGLE_STRIP, 0, 4);
+    }
+    GL(glDisable)(GL_BLEND);
+    GL(glDepthMask)(GL_TRUE);
+}
+
 /* The scene in the view at X, Y (from the window's bottom left), W x H pixels */
-static void render(Scene &s, View &v, int x, int y, int w, int h) {
+static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vector<SpriteDraw> &sprites = {},
+                   const std::vector<ExtraModel> &extras = {}) {
     if (v.stageView)
         GL(glClearColor)(v.stageBg[0], v.stageBg[1], v.stageBg[2], 1);
     else
@@ -78,7 +147,6 @@ static void render(Scene &s, View &v, int x, int y, int w, int h) {
     GL(glPolygonMode)(GL_FRONT_AND_BACK, v.wireframe ? GL_LINE : GL_FILL);
     GL(glUseProgram)(g_mesh);
     GL(glActiveTexture)(GL_TEXTURE0);
-    GL(glBindTexture)(GL_TEXTURE_2D, s.vram);
     GL(glUniform1i)(GL(glGetUniformLocation)(g_mesh, "vram"), 0);
     GL(glUniform1i)(GL(glGetUniformLocation)(g_mesh, "textures"), v.textures);
     int lighting = v.lighting == 2 && g_game.stages.empty() ? 1 : v.lighting;
@@ -92,42 +160,50 @@ static void render(Scene &s, View &v, int x, int y, int w, int h) {
     /* the light: over the camera's shoulder, in the model's (PSX) space */
     float lx = sinf(v.cam.yaw + 0.5f), lz = cosf(v.cam.yaw + 0.5f);
     GL(glUniform3f)(GL(glGetUniformLocation)(g_mesh, "light"), lx * 0.7f, -0.6f, -lz * 0.7f);
-    GL(glBindVertexArray)(s.vao);
     GLint loc_mvp = GL(glGetUniformLocation)(g_mesh, "mvp"), loc_world = GL(glGetUniformLocation)(g_mesh, "world");
     GLint loc_pass = GL(glGetUniformLocation)(g_mesh, "pass"), loc_abr = GL(glGetUniformLocation)(g_mesh, "abr");
     GLint loc_tint = GL(glGetUniformLocation)(g_mesh, "tint");
-    auto draw_bones = [&]() {
-        for (size_t b = 1; b < m.bones.size(); b++) {
-            if (!m.pose[b].visible || s.hidden[b] || !s.count[b]) continue;
-            M4 pose = bone_pose(s, (int)b), mvp = mul(vp, mul(PSX_TO_GL, pose));
-            GL(glUniformMatrix4fv)(loc_mvp, 1, GL_FALSE, mvp.m);
-            GL(glUniformMatrix4fv)(loc_world, 1, GL_FALSE, pose.m);
-            int mark = b < s.mark.size() ? s.mark[b] : 0;
-            if (mark == 2) GL(glUniform4f)(loc_tint, 1, 0.85f, 0.2f, 0.35f);
-            else GL(glUniform4f)(loc_tint, 0.55f, 0.8f, 1, mark == 1 ? 0.22f : 0);
-            GL(glDrawArrays)(GL_TRIANGLES, s.first[b], s.count[b]);
-        }
-    };
-    GL(glUniform1i)(loc_pass, 0);
-    GL(glUniform1i)(loc_abr, -1);
-    GL(glDepthMask)(GL_TRUE);
-    draw_bones();
-    /* the semi-transparent, each blending its own way */
-    GL(glEnable)(GL_BLEND);
-    GL(glDepthMask)(GL_FALSE);
-    GL(glUniform1i)(loc_pass, 1);
-    for (int a = 0; a < 4; a++) {
-        GL(glBlendEquation)(a == 2 ? GL_FUNC_REVERSE_SUBTRACT : GL_FUNC_ADD);
-        if (a == 0)
-            GL(glBlendFunc)(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        else
-            GL(glBlendFunc)(GL_ONE, GL_ONE);
-        GL(glUniform1i)(loc_abr, a);
+    /* a model: its bones through PRE, opaque first and then the semi-transparent, each blending its own way */
+    auto draw_model = [&](Scene &sc, const M4 &pre) {
+        Model &m = *sc.model;
+        GL(glBindTexture)(GL_TEXTURE_2D, sc.vram);
+        GL(glBindVertexArray)(sc.vao);
+        auto draw_bones = [&]() {
+            for (size_t b = 1; b < m.bones.size(); b++) {
+                if (!m.pose[b].visible || sc.hidden[b] || !sc.count[b]) continue;
+                M4 pose = mul(pre, bone_pose(sc, (int)b)), mvp = mul(vp, mul(PSX_TO_GL, pose));
+                GL(glUniformMatrix4fv)(loc_mvp, 1, GL_FALSE, mvp.m);
+                GL(glUniformMatrix4fv)(loc_world, 1, GL_FALSE, pose.m);
+                int mark = b < sc.mark.size() ? sc.mark[b] : 0;
+                if (mark == 2) GL(glUniform4f)(loc_tint, 1, 0.85f, 0.2f, 0.35f);
+                else GL(glUniform4f)(loc_tint, 0.55f, 0.8f, 1, mark == 1 ? 0.22f : 0);
+                GL(glDrawArrays)(GL_TRIANGLES, sc.first[b], sc.count[b]);
+            }
+        };
+        GL(glUniform1i)(loc_pass, 0);
+        GL(glUniform1i)(loc_abr, -1);
+        GL(glDepthMask)(GL_TRUE);
         draw_bones();
-    }
-    GL(glBlendEquation)(GL_FUNC_ADD);
-    GL(glDisable)(GL_BLEND);
-    GL(glDepthMask)(GL_TRUE);
+        GL(glEnable)(GL_BLEND);
+        GL(glDepthMask)(GL_FALSE);
+        GL(glUniform1i)(loc_pass, 1);
+        for (int a = 0; a < 4; a++) {
+            GL(glBlendEquation)(a == 2 ? GL_FUNC_REVERSE_SUBTRACT : GL_FUNC_ADD);
+            if (a == 0)
+                GL(glBlendFunc)(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            else
+                GL(glBlendFunc)(GL_ONE, GL_ONE);
+            GL(glUniform1i)(loc_abr, a);
+            draw_bones();
+        }
+        GL(glBlendEquation)(GL_FUNC_ADD);
+        GL(glDisable)(GL_BLEND);
+        GL(glDepthMask)(GL_TRUE);
+    };
+    const M4 same = {{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}};
+    draw_model(s, same);
+    for (const ExtraModel &e : extras)
+        if (e.scene && e.scene->model && e.scene->vao) draw_model(*e.scene, e.pre);
     GL(glDisable)(GL_CULL_FACE);
     GL(glPolygonMode)(GL_FRONT_AND_BACK, GL_FILL);
     if (v.skeleton) {
@@ -141,6 +217,7 @@ static void render(Scene &s, View &v, int x, int y, int w, int h) {
         GL(glDisable)(GL_DEPTH_TEST);
         draw_lines(l, vp);
     }
+    draw_sprites(sprites, vp, w, h);
 }
 
 /* A fight stage, from inside: the arena's middle, a little above the ground */

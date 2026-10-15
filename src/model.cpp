@@ -213,7 +213,7 @@ static bool read_motions(const Archive &a, std::vector<std::vector<MotionStep>> 
     return true;
 }
 
-bool Model::load(const std::string &n, std::vector<uint8_t> bytes, const Fighter *f, int entry) {
+bool Model::load(const std::string &n, std::vector<uint8_t> bytes, const Fighter *f, int entry, int motionsAt) {
     name = n;
     fighter = f;
     file = std::move(bytes);
@@ -271,6 +271,9 @@ bool Model::load(const std::string &n, std::vector<uint8_t> bytes, const Fighter
        entry 0 of their model's file); without it, the first entry that reads
        as one */
     if (f && f->motionsFid == f->modelFid && read_motions(sub(arc, f->motionsEntry), motions)) motionEntry = f->motionsEntry;
+    if (motionsAt >= 0 && motionsAt != boneEntry && motionsAt != texEntry && motionsAt < arc.count() && arc.entry(motionsAt) &&
+        read_motions(sub(arc, motionsAt), motions))
+        motionEntry = motionsAt;
     if (f && f->effectsFid == f->modelFid) {
         Archive e = sub(arc, f->effectsEntry);
         scripts = read_scripts(e.data, e.size);

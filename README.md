@@ -53,14 +53,18 @@ trademark of its owners.
     techniques; support and field ones. The scripts that no technique's number names
     stay as "Script N" (hover one for what uses it). Click a motion to play it, a
     camera to look through it;
-  - **Play the script** runs it as the battle does (the motions and their waits, the
-    cameras, the sprite effects), and each sprite effect draws over the view where the
-    battle puts it, at its point in the world (an attack's is at the enemy's side,
-    out of sight of the partner's own cameras: the view says so) and the screen's
-    320x240 scale. It
-    leaves out the jumps and moves, the other side's fighter, the sounds and the
-    fades, and shows no effect for a script's "own" one (the technique's) except the
-    Fight command's.
+  - **Play the script** runs it as the battle does: the motions and their waits, the
+    cameras (the view stays where the battle puts it, the default view first, unless
+    you uncheck "Keep the game's camera"), the sprite effects and the effect models.
+    A sprite effect draws where the battle puts it: at its point in the world, sorted
+    with the models by its depth (a fighter in front hides it), or at a screen
+    position when the script gives one, in front of the models or behind them; an
+    attack's is at the enemy's side, out of sight of the partner's own cameras (the
+    view says so). Effect models (the 3D effects, like Thundermon's lightning ring)
+    play from their first motion where the script puts them. A script's "own" sprite
+    effect is its technique's: pick which technique's look it plays (the Fight
+    command's is effect 2). It leaves out the jumps and moves, the other side's
+    fighter, the sounds, the fades, the stages and the models a script adds.
     A checkbox picks what plays for an effect that has own images in the mods
     folder: those (the mod) or the original sprites.
 

@@ -262,6 +262,8 @@ static std::vector<ScriptLine> read_script(const uint8_t *p, const uint8_t *end)
                 int v[6];
                 for (int &x : v) x = next();
                 l.text = fmt("effect model %d at %d, %d, %d turned %d, %d, %d", id, v[0], v[1], v[2], v[3], v[4], v[5]);
+                l.emStart = true, l.emId = id;
+                for (int k = 0; k < 3; k++) l.emPos[k] = v[k], l.emRot[k] = v[3 + k];
             }
             break;
         }

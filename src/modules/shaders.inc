@@ -135,3 +135,21 @@ static GLuint compile(const char *vs, const char *fs) {
     return ok ? p : 0;
 }
 
+/* A sprite effect's picture: a quad given in clip space (its middle C, half size H), no vertex data */
+static const char *SPRITE_VS = R"(#version 330 core
+uniform vec3 c;
+uniform vec2 h;
+out vec2 uv;
+void main() {
+    vec2 q = vec2(gl_VertexID & 1, gl_VertexID >> 1);
+    uv = vec2(q.x, 1.0 - q.y);
+    gl_Position = vec4(c.xy + (q * 2.0 - 1.0) * h, c.z, 1.0);
+}
+)";
+
+static const char *SPRITE_FS = R"(#version 330 core
+uniform sampler2D tex;
+in vec2 uv;
+out vec4 frag;
+void main() { frag = texture(tex, uv); }
+)";

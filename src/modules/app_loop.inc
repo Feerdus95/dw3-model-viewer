@@ -308,6 +308,7 @@
                 view.gameCamera = -1;
             }
             if (vpHover && io.MouseWheel != 0) view.cam.dist *= powf(0.88f, io.MouseWheel), view.gameCamera = -1;
+            if (run.on && lockCam && run.camSet) view.cam = run.cam, view.fov = run.fov, view.gameCamera = run.camIdx;
             if (vpHover && !anyDown) hoverBone = pick_bone(scene, view, vw, vh, mp.x - vx, mp.y - vy);
         }
         for (int b = 0; b < 3; b++) {
@@ -505,14 +506,16 @@
             }
         } else if (scene.model) {
             M4 vp = view_proj(view, (int)vw, (int)vh);
-            /* the sprite effects a script is running, where the battle puts them: at their point in the world,
-               one PSX pixel (the screen is 320x240) the view's height over 240 */
+            /* the sprite effects a script is running, where the battle puts them: at their point in the world
+               (or at a screen position), one PSX pixel (the screen is 320x240) the view's height over 240. The
+               view draws them with the models, by their depth */
             for (size_t k = 0; k < shots.size() && k < 8; k++) {
                 Effect *e = shot_effect(shots[k].id);
                 const float *gp = shots[k].pos;
                 ImVec2 c;
                 if (!e) continue;
-                if (!to_screen(vp, gp, vw, vh, c) || c.x < -FX_W || c.x > vw + FX_W || c.y < -FX_H || c.y > vh + FX_H) {
+                bool seen = shots[k].screen || (to_screen(vp, gp, vw, vh, c) && !(c.x < -FX_W || c.x > vw + FX_W || c.y < -FX_H || c.y > vh + FX_H));
+                if (!seen) {
                     char t[96];
                     snprintf(t, sizeof t, "Sprite effect %d plays out of view: it is at the enemy's side", shots[k].id);
                     ImVec2 ts = bold->CalcTextSizeA(bold->FontSize, FLT_MAX, 0, t) + pad * 2;
@@ -526,9 +529,10 @@
                 else
                     fx_alpha(*e, tick, shotPx, shotWhite);
                 shotTex[k] = rgba_texture(shotTex[k], shotPx, FX_W, FX_H);
-                float px = vh / 240.0f;
-                ImVec2 mid = ImVec2(vx, vy) + c, half(FX_W / 2 * px, FX_H / 2 * px);
-                dl->AddImage((ImTextureID)(intptr_t)shotTex[k], mid - half, mid + half);
+                SpriteDraw d;
+                d.tex = shotTex[k], d.screen = shots[k].screen, d.front = fx_front(shots[k].id);
+                memcpy(d.pos, gp, sizeof d.pos);
+                spriteDraws.push_back(d);
             }
             /* the selection's label: its name, as the lists have it, over it */
             std::vector<int> bs = selected_bones();
@@ -790,7 +794,7 @@
             GL(glClear)(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         } else {
             float sx = ww / std::max(ds.x, 1.0f), sy = wh / std::max(ds.y, 1.0f);
-            render(scene, view, (int)(vx * sx), (int)((ds.y - vy - vh) * sy), (int)(vw * sx), (int)(vh * sy));
+            render(scene, view, (int)(vx * sx), (int)((ds.y - vy - vh) * sy), (int)(vw * sx), (int)(vh * sy), spriteDraws, extraModels);
         }
         GL(glViewport)(0, 0, ww, wh);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());

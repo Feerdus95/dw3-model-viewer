@@ -51,6 +51,7 @@
 #include "modules/disc_data.inc"
 #include "modules/model_scene.inc"
 #include "modules/about_effects.inc"
+#include "modules/effect_models.inc"
 #include "modules/viewer_render.inc"
 #include "modules/ui_kit.inc"
 #include "modules/stage_validation.inc"

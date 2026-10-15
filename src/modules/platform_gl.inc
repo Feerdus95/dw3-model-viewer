@@ -25,8 +25,8 @@ static int fatal(const char *what) {
     X(glFrontFace) X(glPolygonMode) X(glCreateShader) X(glShaderSource) X(glCompileShader) X(glGetShaderiv)       \
     X(glGetShaderInfoLog) X(glCreateProgram) X(glAttachShader) X(glLinkProgram) X(glGetProgramiv)                 \
     X(glGetProgramInfoLog) X(glUseProgram) X(glGetUniformLocation) X(glUniform1i) X(glUniform1f) X(glUniform3f)   \
-    X(glUniform4f) X(glUniform3fv) X(glUniformMatrix4fv) X(glGenVertexArrays) X(glBindVertexArray) X(glGenBuffers)                \
-    X(glDeleteBuffers) X(glBindBuffer) X(glBufferData) X(glEnableVertexAttribArray) X(glVertexAttribPointer)     \
+    X(glUniform4f) X(glUniform2f) X(glUniform3fv) X(glUniformMatrix4fv) X(glGenVertexArrays) X(glBindVertexArray) X(glGenBuffers)                \
+    X(glDeleteBuffers) X(glDeleteVertexArrays) X(glBindBuffer) X(glBufferData) X(glEnableVertexAttribArray) X(glVertexAttribPointer)     \
     X(glVertexAttribIPointer) X(glGenFramebuffers) X(glBindFramebuffer) X(glFramebufferTexture2D)                \
     X(glGenRenderbuffers) X(glBindRenderbuffer) X(glRenderbufferStorage) X(glFramebufferRenderbuffer)
 

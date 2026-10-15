@@ -155,22 +155,35 @@ static std::map<int, std::set<std::string>> effect_users() {
     return out;
 }
 
-/* The techniques whose scripts start each effect by its 9999 (TechData.
-   scriptEffect, +0xE of the exe's TECHS: 443 of 0x12 bytes), by name. The
-   first of EXES that opens is the PAL exe. */
-static std::map<int, std::set<std::string>> effect_techs(const std::vector<std::string> &exes) {
-    std::map<int, std::set<std::string>> out;
+/* A technique (TechData: the exe's TECHS, 443 of 0x12 bytes, technique n at n - 1) as a battle script
+   uses it: the script it runs and the sprite effect, stage and sound its 9999, 0x38 and hit sound name */
+struct TechRow {
+    int id, script, effect, stage, sound;
+    std::string name;
+};
+static std::vector<TechRow> g_techs;
+
+/* Reads TECHS from the first of EXES that opens (the PAL exe) */
+static void read_techs(const std::vector<std::string> &exes) {
+    g_techs.clear();
     std::vector<uint8_t> exe;
     for (const std::string &p : exes)
         if (read_file(p, exe)) break;
-    if (exe.size() < 0x800) return out;
+    if (exe.size() < 0x800) return;
     uint32_t text = exe[0x18] | exe[0x19] << 8 | exe[0x1A] << 16 | (uint32_t)exe[0x1B] << 24;
     size_t techs = 0x80042BDC - text + 0x800;
     for (int i = 0; i < 443 && techs + (i + 1) * 0x12 <= exe.size(); i++) {
-        int id = i + 1, effect = exe[techs + i * 0x12 + 0xE];
-        if (effect && id < (int)g_game.skillNames.size() && g_game.skillNames[id].size() > 1)
-            out[effect].insert(g_game.skillNames[id]);
+        const uint8_t *r = &exe[techs + i * 0x12];
+        int id = i + 1;
+        g_techs.push_back({id, r[0x10], r[0xE], r[0xD], r[0xF], id < (int)g_game.skillNames.size() ? g_game.skillNames[id] : ""});
     }
+}
+
+/* The techniques whose scripts start each effect by its 9999 (TechData.scriptEffect), by name */
+static std::map<int, std::set<std::string>> effect_techs() {
+    std::map<int, std::set<std::string>> out;
+    for (const TechRow &t : g_techs)
+        if (t.effect && t.name.size() > 1) out[t.effect].insert(t.name);
     return out;
 }
 

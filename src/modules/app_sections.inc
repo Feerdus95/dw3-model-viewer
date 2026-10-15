@@ -1049,18 +1049,97 @@
     struct FxShot {
         int id;
         float t, pos[3];
+        int screen = 0; /* the point is a screen pixel: 1 in front of everything, 2 behind it */
     };
+    /* the sprites and models the view draws this frame */
+    std::vector<SpriteDraw> spriteDraws;
+    std::vector<ExtraModel> extraModels;
+    /* the front layer's effects (FIGHTSTG_updateSpriteEffect) draw over the models; the rest sort with them */
+    auto fx_front = [](int id) { return (id >= 1000 && id < 1003) || id == 1007; };
     struct ScriptRun {
         bool on = false;
         int script = 0, pc = 0;
         float wait = 0;
         bool waitMotion = false;
+        /* the game's camera the script has set (or the battle's default view), kept while it plays */
+        bool camSet = false;
+        Camera cam;
+        float fov = 0.8f;
+        int camIdx = -1;
     } run;
+    bool lockCam = true;
+    /* the technique whose look a script's own (9999) sprite effect takes: TechData.scriptEffect. The Fight
+       command is no technique: its effect is 2 */
+    int ownTech = 0;
+    /* the technique that gives script SCRIPT's own effect: the chosen one when it runs that script, else
+       (not for the Fight command's 5) the first that does; nullptr for none */
+    auto own_tech = [&](int script) -> const TechRow * {
+        for (const TechRow &t : g_techs)
+            if (t.id == ownTech && t.script == script) return &t;
+        if (script == 5) return nullptr;
+        for (const TechRow &t : g_techs)
+            if (t.script == script && t.effect) return &t;
+        return nullptr;
+    };
+    auto own_effect_id = [&](int script) {
+        const TechRow *t = own_tech(script);
+        return t ? t->effect : script == 5 ? 2 : -1;
+    };
+    auto snap_cam = [&]() { run.cam = view.cam, run.fov = view.fov, run.camIdx = view.gameCamera, run.camSet = true; };
     std::vector<FxShot> shots;
     std::map<int, std::unique_ptr<Effect>> shotFx;
     /* the effect's own images (the mod), when it has them and they are on: they play in the original's place */
     bool shotMods = true;
     std::map<int, std::unique_ptr<CustomEffect>> shotOwnFx;
+    /* the effect models a script has started (3 at most, as the battle has): each its own model, played once
+       from its first motion until it ends */
+    struct FxModel {
+        int id = 0;
+        std::unique_ptr<Scene> scene;
+        float acc = 0;
+        M4 pre;
+    };
+    std::vector<FxModel> fxModels;
+    auto free_fx_models = [&]() {
+        for (FxModel &e : fxModels) {
+            GL(glDeleteBuffers)(1, &e.scene->vbo);
+            GL(glDeleteVertexArrays)(1, &e.scene->vao);
+            GL(glDeleteTextures)(1, &e.scene->vram);
+        }
+        fxModels.clear();
+    };
+    /* Starts the effect model of LN (FIGHTSTG_runScriptEffectModel) where the script puts it: its position and
+       rotation are the battle's (y and z negated into the model's PSX space), the fighter standing at its home */
+    auto start_fx_model = [&](const ScriptLine &ln, const Fighter &f) {
+        const EffectModelRow *row = nullptr;
+        for (const EffectModelRow &r : EFFECT_MODELS)
+            if (r.id == ln.emId) row = &r;
+        if (!row || fxModels.size() >= 3) return;
+        char b[32];
+        snprintf(b, sizeof b, "/%04d.bin", (int)(row->file >> 16));
+        std::vector<uint8_t> bytes;
+        auto sc = std::make_unique<Scene>();
+        sc->model = std::make_unique<Model>();
+        if (!read_file(g_data + b, bytes) ||
+            !sc->model->load("effect model " + std::to_string(ln.emId), std::move(bytes), nullptr, (int)(row->file & 0xFFFF), (int)(row->motions & 0xFFFF))) {
+            note(NOTE_INFO, "Effect model " + std::to_string(ln.emId) + " couldn't be read: " + sc->model->error);
+            return;
+        }
+        upload(*sc);
+        /* the model's root in its PSX space, turned and put where the script says, then into the fighter's view */
+        Vec3s pos = {(int16_t)ln.emPos[0], (int16_t)-ln.emPos[1], (int16_t)-ln.emPos[2]};
+        Vec3s rot = {(int16_t)ln.emRot[0], (int16_t)-ln.emRot[1], (int16_t)-ln.emRot[2]};
+        M4 w;
+        bone_matrix(pos, rot, {4096, 4096, 4096}, w.m);
+        float bp[3] = {(float)ln.emPos[0], (float)ln.emPos[1], (float)ln.emPos[2]}, v[3];
+        battle_to_view(f, bp, v);
+        float a = f.enemy ? 1.0f : -1.0f; /* a partner's turn about y: x and z flip */
+        for (int c = 0; c < 3; c++) w.m[c * 4] *= a, w.m[c * 4 + 2] *= a;
+        w.m[12] = v[0], w.m[13] = -v[1], w.m[14] = -v[2];
+        FxModel e;
+        e.id = ln.emId, e.scene = std::move(sc), e.pre = w;
+        fxModels.push_back(std::move(e));
+    };
     GLuint shotTex[8] = {};
     std::vector<uint32_t> shotPx, shotWhite;
     auto shot_effect = [&](int id) -> Effect * {
@@ -1093,11 +1172,34 @@
         run = ScriptRun{true, i, 0, 0, false};
         shots.clear();
         shotOwnFx.clear(), ownIds = own_effects(ownRoot); /* the mod's files may have changed since */
+        free_fx_models();
         scene.model->setMotion(1);
         view.playing = true;
+        /* the battle's default view, which the script's cameras then change: a partner's camera 2, the one
+           for an enemy of 2 cameras, the most common */
+        const Fighter *f = scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter];
+        if (lockCam && f && !f->enemy && f->cameras.size() > 1) apply_camera(view, *f, 1), snap_cam();
     };
     auto run_step = [&](float dt) {
         float ticks = view.playing ? dt * 60 * view.speed : 0;
+        spriteDraws.clear();
+        extraModels.clear();
+        for (FxModel &e : fxModels) { /* one keyframe a field, until its motion is over */
+            Model &em = *e.scene->model;
+            e.acc += ticks;
+            int n = (int)e.acc;
+            e.acc -= n;
+            for (int i = 0; i < std::min(n, 8); i++) em.advance(1), em.evaluate();
+        }
+        fxModels.erase(std::remove_if(fxModels.begin(), fxModels.end(), [&](FxModel &e) {
+                           if (!e.scene->model->motionDone) return false;
+                           GL(glDeleteBuffers)(1, &e.scene->vbo);
+                           GL(glDeleteVertexArrays)(1, &e.scene->vao);
+                           GL(glDeleteTextures)(1, &e.scene->vram);
+                           return true;
+                       }),
+                       fxModels.end());
+        for (FxModel &e : fxModels) extraModels.push_back({e.scene.get(), e.pre});
         for (FxShot &s : shots) s.t += ticks;
         shots.erase(std::remove_if(shots.begin(), shots.end(),
                                    [&](const FxShot &s) { return !shot_effect(s.id) || s.t >= shot_len(s.id); }),
@@ -1127,17 +1229,23 @@
             if (ln.motion > 0 && ln.motion <= (int)m.motions.size()) m.setMotion(ln.motion);
             if (ln.camera >= 0 && f) {
                 int c = ln.camera >= 100 ? ln.camera - 100 : ln.camera;
-                if (c < (int)f->cameras.size() && (ln.camera >= 100) == f->enemy) apply_camera(view, *f, c);
+                if (c < (int)f->cameras.size() && (ln.camera >= 100) == f->enemy) apply_camera(view, *f, c), snap_cam();
             }
+            if (ln.emStart && f) start_fx_model(ln, *f);
             if (ln.fxStart) {
                 /* 9999 is the technique's own: the Fight command's, 2, is the only one every script of its number shares */
-                int id = ln.fxOwn ? (run.script == 5 ? 2 : -1) : ln.effect;
-                if (id < 0) note(NOTE_INFO, "This script's own sprite effect is its technique's; it isn't shown here.");
+                int id = ln.fxOwn ? own_effect_id(run.script) : ln.effect;
+                if (id < 0) note(NOTE_INFO, "This script's own sprite effect is its technique's, and no technique uses this script.");
                 else if (shots.size() < 8 && shot_effect(id)) {
                     /* the point is in the PSX's space; the view's is the battle's (y and z negated) about the fighter */
                     float b[3] = {(float)ln.pos[0], -(float)ln.pos[1], -(float)ln.pos[2]}, p[3] = {b[0], b[1], b[2]};
-                    if (f) battle_to_view(*f, b, p);
-                    shots.push_back({id, 0, {p[0], p[1], p[2]}});
+                    int16_t z = (int16_t)ln.pos[2]; /* 0x7FFF and -1 are not a depth: x, y are screen pixels */
+                    if (z == 0x7FFF || z == -1) {
+                        shots.push_back({id, 0, {(float)ln.pos[0], (float)ln.pos[1], 0}, z == 0x7FFF ? 1 : 2});
+                    } else {
+                        if (f) battle_to_view(*f, b, p);
+                        shots.push_back({id, 0, {p[0], p[1], p[2]}});
+                    }
                 }
             }
             if (ln.waitTicks >= 0) run.wait = (float)ln.waitTicks;
@@ -1157,7 +1265,9 @@
         } else {
             hint("No effect has own images in the mods folder, so a script plays the original sprites.");
         }
-        if (run.on && button(IC_PAUSE "  Stop the script")) run.on = false;
+        ImGui::Checkbox("Keep the game's camera", &lockCam);
+        tip("While a script plays the view stays where the battle puts the camera (its default view, then the script's cameras). Off, you can move around it: a sprite effect then shows from where you look, not as the game shows it");
+        if (run.on && button(IC_PAUSE "  Stop the script")) run.on = false, free_fx_models();
         ImGui::BeginChild("scripts");
         for (int g = 0; g < 4; g++) {
             bool titled = false;
@@ -1179,6 +1289,24 @@
                 ImGui::PushID(i);
                 if (button(run.on && run.script == i ? IC_RESTART "  Play again" : IC_PLAY "  Play the script")) run_script(i);
                 tip("Runs its commands in order: motions, waits, cameras and sprite effects");
+                if (std::any_of(sc.begin(), sc.end(), [](const ScriptLine &l) { return l.fxOwn; })) {
+                    /* its "own" sprite effect is the technique's: TechData.scriptEffect */
+                    const TechRow *cur = own_tech(i);
+                    char prev[160];
+                    snprintf(prev, sizeof prev, "%s  (effect %d)", cur ? cur->name.c_str() : "Fight command", own_effect_id(i));
+                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    if (ImGui::BeginCombo("##owntech", prev)) {
+                        if (i == 5 && ImGui::Selectable("Fight command  (effect 2)", !cur)) ownTech = 0;
+                        for (const TechRow &t : g_techs) {
+                            if (t.script != i || t.name.size() < 2) continue;
+                            char l[160];
+                            snprintf(l, sizeof l, "%s  (effect %d)##t%d", t.name.c_str(), t.effect, t.id);
+                            if (ImGui::Selectable(l, cur == &t)) ownTech = t.id;
+                        }
+                        ImGui::EndCombo();
+                    }
+                    tip("The technique whose look this script plays: its \"own\" sprite effect is the one the technique names");
+                }
                 for (int k = 0; k < (int)sc.size(); k++) {
                     const ScriptLine &ln = sc[k];
                     ImGui::PushID(k);

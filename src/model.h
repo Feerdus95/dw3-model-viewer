@@ -97,8 +97,10 @@ struct Model {
     std::vector<uint16_t> keyframes, blendTargets, blendSources;
 
     /* FIGHTER, when given, names its bone list, motions and scripts; else
-       ENTRY (a stage's), else the first entry that reads as one */
-    bool load(const std::string &name, std::vector<uint8_t> bytes, const Fighter *fighter = nullptr, int entry = -1);
+       ENTRY (a stage's), else the first entry that reads as one; MOTIONS
+       (an effect model's) the entry its motions are in */
+    bool load(const std::string &name, std::vector<uint8_t> bytes, const Fighter *fighter = nullptr, int entry = -1,
+              int motions = -1);
     bool stepFace(); /* one battle frame of the face; true when VRAM changed */
     void setMotion(int m);  /* 1-based, as the game's */
     void evaluate();        /* the pose at the current keyframe */

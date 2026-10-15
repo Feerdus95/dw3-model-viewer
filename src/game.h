@@ -52,6 +52,8 @@ struct ScriptLine {
     int effect = -1; /* a sprite effect it starts */
     bool fxStart = false, fxOwn = false; /* it starts one, at POS; its id 9999: the technique's own */
     int pos[3] = {0, 0, 0};
+    bool emStart = false;     /* it starts an effect model, EMID, at EMPOS (x, y, z) turned by EMROT, as the script gives them */
+    int emId = 0, emPos[3] = {0, 0, 0}, emRot[3] = {0, 0, 0};
     int waitTicks = -1;       /* a wait, in ticks */
     bool waitMotion = false;  /* waits for its own model's motion to end */
 };
