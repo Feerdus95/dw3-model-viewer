@@ -99,13 +99,21 @@ int main(int argc, char **argv) {
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4);
     SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
-    SDL_Window *win = SDL_CreateWindow("DW3 Model Viewer", 1440, 900,
+    cfg_load();
+    SDL_Window *win = SDL_CreateWindow("DW3 Model Viewer", g_cfg.w, g_cfg.h,
                                        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
                                            (shot.empty() ? 0 : SDL_WINDOW_HIDDEN));
     if (!win) {
         SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
         SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0);
         win = SDL_CreateWindow("DW3 Model Viewer", 1440, 900, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+    }
+    if (win && shot.empty()) { /* back where it was, if that is still on a screen */
+        if (g_cfg.hasPos) {
+            SDL_Point p = {g_cfg.x, g_cfg.y};
+            if (SDL_GetDisplayForPoint(&p)) SDL_SetWindowPosition(win, g_cfg.x, g_cfg.y);
+        }
+        if (g_cfg.max) SDL_MaximizeWindow(win);
     }
     SDL_GLContext ctx = win ? SDL_GL_CreateContext(win) : nullptr;
     if (!ctx || !gl_load()) {

@@ -14,8 +14,9 @@
         "The open model's texture pages, palettes and UVs"};
     auto needs_model = [](int s) { return s == MODEL || s == MOTIONS || s == FIGHTER || s == TEXTURES; };
     int section = FILES;
-    float browserW = 0, inspectorW = 0; /* the first frame makes them a share of the window */
-    bool showBrowser = true, showInspector = true, showHints = true, helpOpen = false, logOpen = false;
+    float browserW = g_cfg.bw * dpi, inspectorW = g_cfg.iw * dpi; /* 0: the first frame makes them a share of the window */
+    bool showBrowser = g_cfg.browser, showInspector = g_cfg.inspector, showHints = g_cfg.hints, helpOpen = false, logOpen = false;
+    int splitDrag = 0; /* the panel edge being dragged: 1 browser's, 2 inspector's */
     int hoverBone = -1;       /* under the mouse, in the view or a list */
     bool scrollToSel = false; /* the selection was made in the view: the lists bring it into sight */
     int ownFrame = -1;        /* the own images' frame picked in their table */

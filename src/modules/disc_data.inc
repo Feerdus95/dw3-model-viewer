@@ -5,6 +5,39 @@ static std::vector<std::string> g_names;    /* the disc's names, by fid */
 static std::string g_exe_dir;
 static GameData g_game;                     /* fighters, stages, names */
 
+/* the window and the panels, kept between runs in settings.ini beside the exe (sizes in points, not pixels) */
+struct Settings {
+    int w = 1440, h = 900, x = 0, y = 0;
+    bool max = false, hasPos = false, browser = true, inspector = true, hints = true;
+    float bw = 0, iw = 0;
+};
+static Settings g_cfg;
+
+static void cfg_load() {
+    std::ifstream f(g_exe_dir + "settings.ini");
+    std::string k;
+    double v;
+    while (f >> k >> v) {
+        if (k == "w") g_cfg.w = std::clamp((int)v, 640, 16384);
+        else if (k == "h") g_cfg.h = std::clamp((int)v, 480, 16384);
+        else if (k == "x") g_cfg.x = (int)v, g_cfg.hasPos = true;
+        else if (k == "y") g_cfg.y = (int)v;
+        else if (k == "max") g_cfg.max = v != 0;
+        else if (k == "browser") g_cfg.browser = v != 0;
+        else if (k == "inspector") g_cfg.inspector = v != 0;
+        else if (k == "hints") g_cfg.hints = v != 0;
+        else if (k == "browserw") g_cfg.bw = (float)v;
+        else if (k == "inspectorw") g_cfg.iw = (float)v;
+    }
+}
+
+static void cfg_save() {
+    std::ofstream f(g_exe_dir + "settings.ini");
+    f << "w " << g_cfg.w << "\nh " << g_cfg.h << "\nx " << g_cfg.x << "\ny " << g_cfg.y << "\nmax " << g_cfg.max
+      << "\nbrowser " << g_cfg.browser << "\ninspector " << g_cfg.inspector << "\nhints " << g_cfg.hints
+      << "\nbrowserw " << g_cfg.bw << "\ninspectorw " << g_cfg.iw << "\n";
+}
+
 static bool read_file(const std::string &path, std::vector<uint8_t> &out) {
     std::ifstream f(path, std::ios::binary);
     if (!f) return false;

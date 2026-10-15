@@ -250,7 +250,28 @@
                          (section == FILES || section == MODEL || section == MOTIONS || section == FIGHTER);
         bool transportOn = (section == EFFECTS && fx.id >= 0) || motionBar;
         float transH = transportOn ? ImGui::GetFrameHeight() + 12 * dpi : 0;
-        if (browserW <= 0) browserW = ds.x * 0.21f, inspectorW = ds.x * 0.25f;
+        if (browserW <= 0) browserW = ds.x * 0.21f;
+        if (inspectorW <= 0) inspectorW = ds.x * 0.25f;
+        /* the panels' inner edges drag like splitters, before the layout reads the widths */
+        bool splitHot = false;
+        {
+            float grab = 4 * dpi;
+            bool inY = io.MousePos.y >= top && io.MousePos.y < bottom;
+            int over = 0;
+            if (inY && showBrowser && fabsf(io.MousePos.x - browserW) <= grab) over = 1;
+            else if (inY && showInspector && fabsf(io.MousePos.x - (ds.x - inspectorW)) <= grab) over = 2;
+            if (!splitDrag && over && !ImGui::IsAnyItemActive() && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId)) {
+                splitHot = true;
+                if (ImGui::IsMouseClicked(0)) splitDrag = over;
+            }
+            if (splitDrag && !ImGui::IsMouseDown(0)) splitDrag = 0;
+            if (splitDrag == 1) browserW = io.MousePos.x;
+            if (splitDrag == 2) inspectorW = ds.x - io.MousePos.x;
+            if (splitDrag || splitHot) {
+                splitHot = true;
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+            }
+        }
         browserW = std::clamp(browserW, 180 * dpi, std::max(180 * dpi, ds.x * 0.45f));
         inspectorW = std::clamp(inspectorW, 180 * dpi, std::max(180 * dpi, ds.x * 0.45f));
         float vx = showBrowser ? browserW : 0, vr = showInspector ? ds.x - inspectorW : ds.x;
@@ -260,7 +281,7 @@
         /* --- the mouse in the view --- */
         ImVec2 mp = io.MousePos, d = io.MouseDelta;
         bool inView = mp.x >= vx && mp.x < vx + vw && mp.y >= vy && mp.y < vy + vh;
-        bool vpHover = inView && !io.WantCaptureMouse;
+        bool vpHover = inView && !io.WantCaptureMouse && !splitHot;
         bool openViewMenu = false;
         float &zoom2 = section == EFFECTS ? fxZoom : view.texZoom;
         float *pan2 = section == EFFECTS ? fxPan : texPan;
@@ -354,10 +375,9 @@
             float h = bottom - top;
             ImGui::SetNextWindowPos(ImVec2(right ? ds.x : 0, top), ImGuiCond_Always, ImVec2(right ? 1.0f : 0.0f, 0));
             ImGui::SetNextWindowSize(ImVec2(w, h), ImGuiCond_Always);
-            ImGui::SetNextWindowSizeConstraints(ImVec2(180 * dpi, h), ImVec2(std::max(180 * dpi, ds.x * 0.45f), h));
             ImGui::Begin(id, nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
-                                          ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus);
-            w = ImGui::GetWindowWidth();
+                                          ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings |
+                                          ImGuiWindowFlags_NoBringToFrontOnFocus);
             draw();
             ImGui::End();
         };
@@ -799,6 +819,17 @@
         GL(glViewport)(0, 0, ww, wh);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         SDL_GL_SwapWindow(win);
+    }
+    if (shot.empty()) {
+        g_cfg.max = (SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED) != 0;
+        if (!g_cfg.max) { /* a maximized window's own size would come back as the restored one */
+            SDL_GetWindowSize(win, &g_cfg.w, &g_cfg.h);
+            SDL_GetWindowPosition(win, &g_cfg.x, &g_cfg.y);
+            g_cfg.hasPos = true;
+        }
+        g_cfg.browser = showBrowser, g_cfg.inspector = showInspector, g_cfg.hints = showHints;
+        g_cfg.bw = browserW / dpi, g_cfg.iw = inspectorW / dpi;
+        cfg_save();
     }
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL3_Shutdown();
