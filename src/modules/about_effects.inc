@@ -99,11 +99,11 @@ static const uint32_t FX_BG = 0xFF302824;
 
 /* An effect's frame F as straight-alpha RGBA (FX_W x FX_H, its point in the
    middle): drawn over black and over white, the difference is each pixel's cover */
-static void fx_alpha(const Effect &fx, int f, std::vector<uint32_t> &px, std::vector<uint32_t> &white) {
+static void alpha_frame(const std::function<void(uint32_t *)> &draw, std::vector<uint32_t> &px, std::vector<uint32_t> &white) {
     px.assign(FX_W * FX_H, 0xFF000000u);
     white.assign(FX_W * FX_H, 0xFFFFFFFFu);
-    fx.draw(f, px.data(), FX_W, FX_H, FX_W / 2, FX_H / 2);
-    fx.draw(f, white.data(), FX_W, FX_H, FX_W / 2, FX_H / 2);
+    draw(px.data());
+    draw(white.data());
     for (int i = 0; i < FX_W * FX_H; i++) {
         int a = 0;
         for (int c = 0; c < 24; c += 8) a = std::max(a, 255 - (int)(white[i] >> c & 255) + (int)(px[i] >> c & 255));
@@ -113,6 +113,10 @@ static void fx_alpha(const Effect &fx, int f, std::vector<uint32_t> &px, std::ve
             if (a) out |= (uint32_t)std::min(255, (int)(px[i] >> c & 255) * 255 / a) << c;
         px[i] = out | (uint32_t)a << 24;
     }
+}
+
+static void fx_alpha(const Effect &fx, int f, std::vector<uint32_t> &px, std::vector<uint32_t> &white) {
+    alpha_frame([&](uint32_t *p) { fx.draw(f, p, FX_W, FX_H, FX_W / 2, FX_H / 2); }, px, white);
 }
 
 static int export_effect(const Effect &fx, std::string &dir) {

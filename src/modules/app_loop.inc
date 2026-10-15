@@ -520,7 +520,11 @@
                              IM_COL32(255, 232, 140, 255), t, bold);
                     continue;
                 }
-                fx_alpha(*e, (int)shots[k].t, shotPx, shotWhite);
+                int tick = (int)shots[k].t;
+                if (CustomEffect *o = shot_own(shots[k].id))
+                    alpha_frame([&](uint32_t *p) { o->draw(tick, p, FX_W, FX_H, FX_W / 2, FX_H / 2); }, shotPx, shotWhite);
+                else
+                    fx_alpha(*e, tick, shotPx, shotWhite);
                 shotTex[k] = rgba_texture(shotTex[k], shotPx, FX_W, FX_H);
                 float px = vh / 240.0f;
                 ImVec2 mid = ImVec2(vx, vy) + c, half(FX_W / 2 * px, FX_H / 2 * px);

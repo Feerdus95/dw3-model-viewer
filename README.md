@@ -61,6 +61,8 @@ trademark of its owners.
     leaves out the jumps and moves, the other side's fighter, the sounds and the
     fades, and shows no effect for a script's "own" one (the technique's) except the
     Fight command's.
+    A checkbox picks what plays for an effect that has own images in the mods
+    folder: those (the mod) or the original sprites.
 
   <img src="docs/img/fighter.png" alt="Kumamon through one of its battle cameras, with its action scripts grouped by what they are" width="720">
 - **Effects** (the battle's 2D effects: hit sparks, techniques' sprites):

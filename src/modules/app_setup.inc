@@ -152,7 +152,7 @@ int main(int argc, char **argv) {
         std::vector<std::string> files;
         std::string folder, data, obj, bin;
     } picked;
-    std::set<int> ownIds; /* the effects with own images in ownRoot */
+    std::set<int> ownIds = own_effects(ownRoot); /* the effects with own images in ownRoot */
 
     /* the Stages tab: a fight stage, edited (stage.h), saved for the native
        port in its data/mods (ownRoot's parent): <fid>.bin and the stages'

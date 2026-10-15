@@ -1058,6 +1058,9 @@
     } run;
     std::vector<FxShot> shots;
     std::map<int, std::unique_ptr<Effect>> shotFx;
+    /* the effect's own images (the mod), when it has them and they are on: they play in the original's place */
+    bool shotMods = true;
+    std::map<int, std::unique_ptr<CustomEffect>> shotOwnFx;
     GLuint shotTex[8] = {};
     std::vector<uint32_t> shotPx, shotWhite;
     auto shot_effect = [&](int id) -> Effect * {
@@ -1069,10 +1072,27 @@
         }
         return it->second.get();
     };
+    auto shot_own = [&](int id) -> CustomEffect * {
+        if (!shotMods) return nullptr;
+        auto it = shotOwnFx.find(id);
+        if (it == shotOwnFx.end()) {
+            auto e = std::make_unique<CustomEffect>();
+            if (!e->load(ownRoot + "/" + std::to_string(id))) e.reset();
+            it = shotOwnFx.emplace(id, std::move(e)).first;
+        }
+        return it->second.get();
+    };
+    /* the length, in ticks, of what plays for effect ID: its own images' or the original's */
+    auto shot_len = [&](int id) {
+        if (CustomEffect *o = shot_own(id)) return o->duration();
+        Effect *e = shot_effect(id);
+        return e ? e->duration : 0;
+    };
     auto run_script = [&](int i) {
         if (!scene.model || i < 0 || i >= (int)scene.model->scripts.size()) return;
         run = ScriptRun{true, i, 0, 0, false};
         shots.clear();
+        shotOwnFx.clear(), ownIds = own_effects(ownRoot); /* the mod's files may have changed since */
         scene.model->setMotion(1);
         view.playing = true;
     };
@@ -1080,10 +1100,7 @@
         float ticks = view.playing ? dt * 60 * view.speed : 0;
         for (FxShot &s : shots) s.t += ticks;
         shots.erase(std::remove_if(shots.begin(), shots.end(),
-                                   [&](const FxShot &s) {
-                                       Effect *e = shot_effect(s.id);
-                                       return !e || s.t >= e->duration;
-                                   }),
+                                   [&](const FxShot &s) { return !shot_effect(s.id) || s.t >= shot_len(s.id); }),
                     shots.end());
         if (!run.on || !scene.model || run.script >= (int)scene.model->scripts.size()) return void(run.on = false);
         Model &m = *scene.model;
@@ -1134,6 +1151,12 @@
         if (scene.fighters.empty()) return hint("No fighter uses this file: it has no action scripts.");
         const Fighter &f = *scene.fighters[scene.fighter];
         hint("Play a script to see it as the battle runs it. Click a line to play its motion, look through its camera or see its effect.");
+        if (!ownIds.empty()) {
+            ImGui::Checkbox("Show the own images (mod)", &shotMods);
+            tip("A script's sprite effects play the effect's own images (%d effects have them in the mods folder) instead of the original's; off, the original's", (int)ownIds.size());
+        } else {
+            hint("No effect has own images in the mods folder, so a script plays the original sprites.");
+        }
         if (run.on && button(IC_PAUSE "  Stop the script")) run.on = false;
         ImGui::BeginChild("scripts");
         for (int g = 0; g < 4; g++) {
