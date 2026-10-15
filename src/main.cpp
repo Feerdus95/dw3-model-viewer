@@ -13,6 +13,7 @@
    The data is what tools/setup_disc.py reads from your disc: the models'
    files (files/<fid>.bin) and the disc's names (names.txt). */
 #define GL_GLEXT_PROTOTYPES
+#define IMGUI_DEFINE_MATH_OPERATORS
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_opengl.h>
 #include <SDL3/SDL_main.h>
@@ -25,10 +26,12 @@
 #include "stage.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -49,7 +52,9 @@
 #include "modules/model_scene.inc"
 #include "modules/about_effects.inc"
 #include "modules/viewer_render.inc"
+#include "modules/ui_kit.inc"
 #include "modules/stage_validation.inc"
 #include "modules/model_camera_tree.inc"
 #include "modules/app_setup.inc"
+#include "modules/app_sections.inc"
 #include "modules/app_loop.inc"

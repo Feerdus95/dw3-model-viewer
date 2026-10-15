@@ -26,6 +26,20 @@ static int check_stages() {
         }
         StageEdit e;
         e.fromModel(m, si);
+        /* the view's preview of an edit puts each part where building it will */
+        for (StagePart p : e.parts) {
+            const float start[5] = {120, -40, 300, 30, 1.5f};
+            memcpy(p.move, start, 12), p.turn = start[3], p.scale = start[4];
+            std::vector<std::array<float, 3>> from = e.placed(p);
+            p.move[0] -= 500, p.move[1] += 80, p.turn = -75, p.scale = 0.6f;
+            std::vector<std::array<float, 3>> to = e.placed(p);
+            float pm[16], err = 0;
+            part_preview(p, start, pm);
+            for (size_t i = 0; i < from.size(); i++)
+                for (int r = 0; r < 3; r++)
+                    err = std::max(err, fabsf(pm[r] * from[i][0] + pm[4 + r] * from[i][1] + pm[8 + r] * from[i][2] + pm[12 + r] - to[i][r]));
+            if (err > 0.5f) printf("stage %2d: %s's preview is off by %.1f  BAD\n", si.id, p.name.c_str(), err), bad++;
+        }
         StageInfo info = si, info2 = si;
         StageBuild made, made2;
         if (!e.build(disc, si.boneEntry, built, info, made) || !m2.load("", built, nullptr, si.boneEntry)) {

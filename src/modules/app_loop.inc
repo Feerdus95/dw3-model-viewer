@@ -1,33 +1,26 @@
+    bool vpDown[3] = {}; /* a mouse button pressed in the view, still held */
+    int ctxBone = -1;    /* what the view's right-click menu is for */
+    int texHover = -1;   /* the bone whose UVs are under the mouse, in Textures */
+    int lastHover = -1;
+    double stillSince = 0; /* the mouse has rested on lastHover since */
+    int vpUses = 0;        /* clicks and drags in the view: after a few, the controls hint gets small */
+
     while (running) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             ImGui_ImplSDL3_ProcessEvent(&e);
-            if (e.type == SDL_EVENT_QUIT) running = false;
-            if (e.type == SDL_EVENT_DROP_FILE) open_entry(e.drop.data, 0);
-            if (!io.WantCaptureMouse && fxActive) { /* the effect: dragged and zoomed */
-                if (e.type == SDL_EVENT_MOUSE_MOTION && e.motion.state)
-                    fxPan[0] -= e.motion.xrel / fxZoom, fxPan[1] -= e.motion.yrel / fxZoom;
-                else if (e.type == SDL_EVENT_MOUSE_WHEEL)
-                    fxZoom = std::clamp(fxZoom * powf(1.15f, e.wheel.y), 0.25f, 16.0f);
-            } else if (!io.WantCaptureMouse) {
-                if (e.type == SDL_EVENT_MOUSE_MOTION && (e.motion.state & SDL_BUTTON_LMASK)) {
-                    view.cam.yaw -= e.motion.xrel * 0.008f;
-                    view.cam.pitch = std::clamp(view.cam.pitch + e.motion.yrel * 0.008f, -1.5f, 1.5f);
-                } else if (e.type == SDL_EVENT_MOUSE_MOTION && (e.motion.state & (SDL_BUTTON_RMASK | SDL_BUTTON_MMASK))) {
-                    /* pan in the view's plane */
-                    float k = view.cam.dist * 0.0015f, cy = cosf(view.cam.yaw), sy = sinf(view.cam.yaw);
-                    view.cam.target[0] -= e.motion.xrel * k * cy;
-                    view.cam.target[2] += e.motion.xrel * k * sy;
-                    view.cam.target[1] += e.motion.yrel * k;
-                } else if (e.type == SDL_EVENT_MOUSE_WHEEL) {
-                    view.cam.dist *= powf(0.88f, e.wheel.y);
-                }
-            }
-            if (e.type == SDL_EVENT_KEY_DOWN && !io.WantCaptureKeyboard && fxActive && e.key.key == SDLK_F) fxFitPending = true;
-            else if (e.type == SDL_EVENT_KEY_DOWN && !io.WantCaptureKeyboard && scene.model) {
-                if (e.key.key == SDLK_SPACE) view.playing = !view.playing;
-                if (e.key.key == SDLK_F) view.stageView ? frame_stage(view) : frame_model(scene, view);
-            }
+            if (e.type == SDL_EVENT_QUIT) quitAsked = true;
+            if (e.type == SDL_EVENT_DROP_BEGIN || e.type == SDL_EVENT_DROP_POSITION) dropping = true, dropSeen = SDL_GetTicks();
+            if (e.type == SDL_EVENT_DROP_COMPLETE) dropping = false;
+            if (e.type == SDL_EVENT_DROP_FILE) dropping = false, open_dropped(e.drop.data);
+        }
+        if (quitAsked) {
+            quitAsked = false;
+            std::string what;
+            if (stageDirty && stageId >= 0) what = "stage " + std::to_string(stageId);
+            if (ownDirty) what += (what.empty() ? "" : " and ") + std::string("effect ") + std::to_string(fx.id) + "'s own images";
+            ask_first(!what.empty(), "Your changes to " + what + " aren't saved. Quit anyway?", [&]() { running = false; });
+            if (!what.empty()) ask.ok = "Quit without saving";
         }
         uint64_t now = SDL_GetTicksNS();
         float dt = (now - last) / 1e9f;
@@ -56,687 +49,720 @@
         {
             std::lock_guard<std::mutex> lock(picked.m);
             if (!picked.files.empty()) {
+                ownHist.push(own_snap());
                 int n = own.import(picked.files);
                 ownIds = own_effects(ownRoot);
-                status = own.error.empty() ? "imported " + std::to_string(n) + " PNGs to " + own.dir : own.error;
+                if (own.error.empty()) note(NOTE_OK, "Imported " + std::to_string(n) + " PNGs to " + own.dir);
+                else note(NOTE_ERROR, own.error);
                 ownShow = ownShow || n > 0, ownDirty = ownDirty || n > 0, fxDrawn = -1;
                 picked.files.clear();
             }
             if (!picked.folder.empty()) {
                 ownRoot = picked.folder;
                 std::ofstream(g_exe_dir + "effects_dir.txt") << ownRoot << "\n";
+                ownHist.clear();
                 own_load();
                 stage_tables();
+                note(NOTE_INFO, "The mods folder is now " + mods_root());
                 picked.folder.clear();
             }
             if (!picked.obj.empty()) {
-                if (stageId >= 0 && stageEdit.importObj(picked.obj)) {
-                    std::string warning = stageEdit.error;
-                    stagePart = -1;
-                    if (stage_rebuild() && !warning.empty()) status = warning;
-                } else if (stageId >= 0) {
-                    status = stageEdit.error;
+                if (stage_on()) {
+                    stage_mark();
+                    if (stageEdit.importObj(picked.obj)) {
+                        std::string warning = stageEdit.error;
+                        stagePart = -1;
+                        if (stage_rebuild()) note(warning.empty() ? NOTE_OK : NOTE_WARN, warning.empty() ? "Imported " + picked.obj : warning);
+                    } else {
+                        stageHist.undo.pop_back();
+                        note(NOTE_ERROR, stageEdit.error);
+                    }
                 }
                 picked.obj.clear();
             }
+            if (!picked.bin.empty()) open_dropped(picked.bin), picked.bin.clear();
             if (!picked.data.empty()) { /* another data folder: everything read again from it */
-                if (std::ifstream(picked.data + "/names.txt")) {
-                    std::ofstream(g_exe_dir + "data_dir.txt") << picked.data << "\n";
-                    find_data(picked.data);
-                    scene.model.reset(), scene.fighters.clear(), scene.fid = -1;
-                    fx = Effect(), listed = false;
-                    stage_tables(), stageId = -1, stageFromId = -1, view.stageView = false;
-                    fxGrouped = false, fxCommon.clear(), fxByDigimon.clear();
-                    status.clear();
-                } else {
-                    status = "no names.txt in " + picked.data + ": pick the data folder tools/setup_disc.py wrote";
-                }
+                std::string dir = picked.data;
                 picked.data.clear();
+                if (std::ifstream(dir + "/names.txt")) {
+                    ask_first((stageDirty && stageId >= 0) || ownDirty, "Changing the data folder drops the changes you haven't saved. Go on?", [&, dir]() {
+                        std::ofstream(g_exe_dir + "data_dir.txt") << dir << "\n";
+                        find_data(dir);
+                        scene.model.reset(), scene.fighters.clear(), scene.fid = -1;
+                        fx = Effect(), listed = false, ownDirty = false;
+                        stage_tables(), stageId = -1, stageFromId = -1, view.stageView = false, stageDirty = false;
+                        fxGrouped = false, fxCommon.clear(), fxByDigimon.clear();
+                        stageHist.clear(), ownHist.clear(), stageHidden.clear();
+                        reset_selection();
+                        section = FILES;
+                        note(NOTE_OK, "Reading the game's data from " + dir);
+                    });
+                } else {
+                    note(NOTE_ERROR, "No names.txt in " + dir + ": pick the data folder tools/setup_disc.py made");
+                }
             }
         }
+        if (!status.empty()) note(NOTE_ERROR, status), status.clear();
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
         int ww, wh;
         SDL_GetWindowSizeInPixels(win, &ww, &wh);
-        float panel = 420 * (dpi > 0 ? dpi : 1);
-        ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x - panel, 0));
-        ImGui::SetNextWindowSize(ImVec2(panel, io.DisplaySize.y));
-        ImGui::Begin("##panel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
-        fxActive = false;
-        if (scene.model && !scene.fighters.empty() && !scene.fighters[scene.fighter]->name.empty())
-            ImGui::Text("%s  (%s)", scene.fighters[scene.fighter]->name.c_str(), scene.model->name.c_str());
-        else if (scene.model)
-            ImGui::Text("%s", scene.model->name.c_str());
-        else
-            ImGui::TextWrapped("Pick a model, or drop a .BIN on the window.");
-        ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - ImGui::CalcTextSize("About").x - ImGui::GetStyle().FramePadding.x * 2);
-        if (ImGui::SmallButton("About")) aboutOpen = true;
-        if (!status.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", status.c_str());
-        /* SameLine only when the next widget, w wide, fits the panel */
-        auto same_line = [](float w) {
-            float x = ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x;
-            if (x + w <= ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x) ImGui::SameLine();
-        };
-        auto bw = [](const char *l) {
-            return ImGui::CalcTextSize(l, nullptr, true).x + ImGui::GetStyle().FramePadding.x * 2;
-        };
-        if (ImGui::BeginTabBar("tabs")) {
-            if (ImGui::BeginTabItem("Files")) {
-                if (!listed) {
-                    list = scan_models();
-                    listed = true;
-                }
-                if (ImGui::Button("Data folder...")) {
-                    SDL_ShowOpenFolderDialog(
-                        [](void *u, const char *const *l, int) {
-                            if (!l || !*l) return;
-                            Picked *p = (Picked *)u;
-                            std::lock_guard<std::mutex> lock(p->m);
-                            p->data = *l;
-                        },
-                        &picked, win, nullptr, false);
-                }
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("The data folder tools/setup_disc.py wrote (with names.txt). Now: %s",
-                                      g_data.substr(0, g_data.size() - 6).c_str());
-                if (list.empty()) ImGui::TextWrapped("No models found in %s: run tools/setup_disc.py with your disc, or pick its data folder.", g_data.c_str());
-                ImGui::InputTextWithHint("##filter", "filter", filter, sizeof filter);
-                ImGui::BeginChild("list");
-                for (const Entry &en : list) {
-                    if (stageFids.count(en.fid)) continue; /* in the Stages tab */
-                    std::string label = (en.label.empty() ? "" : en.label + "  ") + en.name + "  #" + std::to_string(en.fid);
-                    std::string lo = label, f = filter;
-                    std::transform(lo.begin(), lo.end(), lo.begin(), ::tolower);
-                    std::transform(f.begin(), f.end(), f.begin(), ::tolower);
-                    if (!f.empty() && lo.find(f) == std::string::npos) continue;
-                    bool sel = scene.model && !view.stageView && scene.model->name == en.name;
-                    if (ImGui::Selectable(label.c_str(), sel) && open_model(scene, view, en.name, fid_path(en.fid), status, en.fid))
-                        view.stageView = false, stageId = -1;
-                }
-                ImGui::EndChild();
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Stages")) {
-                if (stageId >= 0 && view.stageView) {
-                    const StageInfo &si = stageInfos[stageId];
-                    std::string shared;
-                    for (const StageInfo &o : stageInfos)
-                        if (o.fid == si.fid && o.id != si.id) shared += (shared.empty() ? "" : ", ") + std::to_string(o.id);
-                    ImGui::Text("Stage %d: %s", stageId, stage_look(stageId));
-                    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-                    ImGui::TextWrapped("%s #%d, bone list entry %d%s%s", fid_name(si.fid).c_str(), si.fid, si.boneEntry,
-                                       shared.empty() ? "" : "; its model is stage ", shared.c_str());
-                    ImGui::TextWrapped("%s", stageMods.count(si.fid) ? ("mod: " + mod_path(si.fid)).c_str() : "the disc's (no mod)");
-                    ImGui::PopStyleColor();
-                    float bgc[3] = {stageEdit.bg[0] / 255.0f, stageEdit.bg[1] / 255.0f, stageEdit.bg[2] / 255.0f};
-                    if (ImGui::ColorEdit3("background", bgc)) {
-                        for (int k = 0; k < 3; k++) stageEdit.bg[k] = stageInfo.bg[k] = (uint8_t)lroundf(bgc[k] * 255), view.stageBg[k] = bgc[k];
-                        stageDirty = true;
-                    }
-                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("What shows through the panorama's gaps (the stage's bgColor)");
-                    if (ImGui::Button("Export OBJ")) {
-                        char nm[16];
-                        snprintf(nm, sizeof nm, "stage_%02d", stageId);
-                        stageDir = g_exe_dir + "stages";
-                        SDL_CreateDirectory(stageDir.c_str());
-                        stageDir += std::string("/") + nm;
-                        status = stageEdit.exportObj(stageDir, nm) ? "exported to " + stageDir : "can't write " + stageDir;
-                    }
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("An OBJ with its MTL and PNGs (y up, 1 unit = 100 of the game's), for Blender and the like.\n"
-                                          "Keep the objects' names to keep their parts; a material's _abrN is its semi-transparency.");
-                    if (!stageDir.empty()) {
-                        same_line(bw("Open folder"));
-                        if (ImGui::Button("Open folder##stage")) open_folder(stageDir);
-                    }
-                    same_line(bw("Import OBJ..."));
-                    if (ImGui::Button("Import OBJ...")) {
-                        static const SDL_DialogFileFilter OBJ = {"OBJ models", "obj"};
-                        SDL_ShowOpenFileDialog(
-                            [](void *u, const char *const *l, int) {
-                                if (!l || !*l) return;
-                                Picked *p = (Picked *)u;
-                                std::lock_guard<std::mutex> lock(p->m);
-                                p->obj = *l;
-                            },
-                            &picked, win, &OBJ, 1, stageDir.empty() ? nullptr : stageDir.c_str(), false);
-                    }
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Its objects become the stage's parts: textures repacked into the stage's\n"
-                                          "three pages, 16 colors each piece, shrunk when they don't fit");
-                    if (ImGui::Button(stageDirty ? "Save to game*" : "Save to game")) stage_save();
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Writes %s and the stages' table, 0459.bin,\nwhich the native port reads instead of the disc's",
-                                          mod_path(si.fid).c_str());
-                    if (stageMods.count(si.fid) || stageDirty) {
-                        same_line(bw("Revert to the disc's"));
-                        if (ImGui::Button("Revert to the disc's")) stage_revert();
-                    }
-                    int polys = 0;
-                    for (const StagePart &pt : stageEdit.parts) polys += (int)pt.faces.size();
-                    ImGui::Text("%d parts, %d polygons", (int)stageEdit.parts.size(), polys);
-                    if (stageMade.islands) {
-                        ImGui::SameLine();
-                        ImGui::TextDisabled("textures: %d pieces%s", stageMade.islands, stageMade.shrink < 1 ? ", shrunk to fit" : "");
-                    }
-                    ImGui::SeparatorText("Parts");
-                    ImGui::BeginChild("parts", ImVec2(0, ImGui::GetTextLineHeightWithSpacing() * 8), ImGuiChildFlags_Borders);
-                    int drop = -1;
-                    bool rebuild = false;
-                    for (int k = 0; k < (int)stageEdit.parts.size(); k++) {
-                        StagePart &pt = stageEdit.parts[k];
-                        ImGui::PushID(k);
-                        rebuild |= ImGui::Checkbox("##nb", &pt.noBounds);
-                        if (ImGui::IsItemHovered())
-                            ImGui::SetTooltip("No bounds check: drawn even when its box seems off screen\n(the ground and the panorama; 8 bones at most)");
-                        ImGui::SameLine();
-                        char l[96];
-                        snprintf(l, sizeof l, "%s  (%d polys)", pt.name.c_str(), (int)pt.faces.size());
-                        if (ImGui::Selectable(l, stagePart == k, 0, ImVec2(ImGui::GetContentRegionAvail().x - bw("x") - 8, 0))) {
-                            stagePart = stagePart == k ? -1 : k;
-                            scene.selected = stagePart >= 0 && stagePart < (int)stageMade.firstBone.size() ? stageMade.firstBone[stagePart] : -1;
-                        }
-                        ImGui::SameLine();
-                        if (ImGui::SmallButton("x")) drop = k;
-                        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Remove");
-                        ImGui::PopID();
-                    }
-                    ImGui::EndChild();
-                    if (drop >= 0) {
-                        stageEdit.remove(drop);
-                        stagePart = -1;
-                        rebuild = true;
-                    }
-                    if (stagePart >= 0 && stagePart < (int)stageEdit.parts.size()) {
-                        StagePart &pt = stageEdit.parts[stagePart];
-                        ImGui::DragFloat3("move", pt.move, 10, -40000, 40000, "%.0f");
-                        rebuild |= ImGui::IsItemDeactivatedAfterEdit();
-                        if (ImGui::IsItemHovered()) ImGui::SetTooltip("In the game's units: x, y (down), z");
-                        ImGui::DragFloat("turn", &pt.turn, 0.5f, -180, 180, "%.1f deg");
-                        rebuild |= ImGui::IsItemDeactivatedAfterEdit();
-                        ImGui::DragFloat("scale", &pt.scale, 0.01f, 0.05f, 20, "%.2f");
-                        rebuild |= ImGui::IsItemDeactivatedAfterEdit();
-                    }
-                    if (rebuild) stage_rebuild();
-                    ImGui::SeparatorText("Add from a stage");
-                    std::string from = stageFromId >= 0 ? std::to_string(stageFromId) + "  " + stage_look(stageFromId) : "pick a stage";
-                    if (ImGui::BeginCombo("##from", from.c_str())) {
-                        for (const StageInfo &o : stageInfos) {
-                            std::string l = std::to_string(o.id) + "  " + stage_look(o.id);
-                            StageInfo oi;
-                            std::vector<uint8_t> ob;
-                            if (ImGui::Selectable(l.c_str(), o.id == stageFromId) && stage_load(o.id, stageFrom, oi, ob)) stageFromId = o.id;
-                        }
-                        ImGui::EndCombo();
-                    }
-                    if (stageFromId >= 0) {
-                        ImGui::BeginChild("from", ImVec2(0, ImGui::GetTextLineHeightWithSpacing() * 6), ImGuiChildFlags_Borders);
-                        for (int k = 0; k < (int)stageFrom.parts.size(); k++) {
-                            ImGui::PushID(k);
-                            if (ImGui::SmallButton("add")) {
-                                char pre[8];
-                                snprintf(pre, sizeof pre, "s%02d_", stageFromId);
-                                stageEdit.append(stageFrom, k, pre);
-                                stagePart = (int)stageEdit.parts.size() - 1;
-                                stage_rebuild();
-                            }
-                            ImGui::SameLine();
-                            ImGui::Text("%s  (%d polys)", stageFrom.parts[k].name.c_str(), (int)stageFrom.parts[k].faces.size());
-                            ImGui::PopID();
-                        }
-                        ImGui::EndChild();
-                    }
-                }
-                ImGui::SeparatorText("Stages");
-                ImGui::BeginChild("stagelist");
-                for (const StageInfo &si : stageInfos) {
-                    char l[96];
-                    snprintf(l, sizeof l, "%2d  %s%s", si.id, stage_look(si.id), stageMods.count(si.fid) ? "  (mod)" : "");
-                    if (ImGui::Selectable(l, si.id == stageId && view.stageView)) stage_open(si.id);
-                }
-                ImGui::EndChild();
-                ImGui::EndTabItem();
-            }
-            if (scene.model && ImGui::BeginTabItem("Model")) {
-                Model &m = *scene.model;
-                size_t polys = 0, verts = 0;
-                for (const Mesh &me : m.meshes) polys += me.polys.size(), verts += me.verts.size();
-                ImGui::Text("%d entries, %d bones, %d polygons, %d vertices", m.arc.count(), (int)m.bones.size() - 1,
-                            (int)polys, (int)verts);
-                ImGui::Text("bone list: entry %d, textures: %d, motions: %d", m.boneEntry, m.texEntry, m.motionEntry);
+        ImVec2 ds = io.DisplaySize;
+        const ImGuiStyle &st = ImGui::GetStyle();
+        if (fxSelect) section = EFFECTS, fxSelect = false;
+        if (needs_model(section) && !scene.model) section = FILES;
+        bool mode2d = section == EFFECTS || section == TEXTURES;
+        hoverBone = -1;
+        mark_scene();
+        ImFont *bold = g_fontBold ? g_fontBold : ImGui::GetFont();
+
+        /* --- the menu bar --- */
+        float menuH = 0;
+        if (ImGui::BeginMainMenuBar()) {
+            if (ImGui::BeginMenu("File")) {
+                if (ImGui::MenuItem(IC_OPEN "  Open a model file...", "Ctrl+O")) pick_bin();
+                if (ImGui::MenuItem(IC_SAVE "  Save", "Ctrl+S", false, can_save())) do_save();
+                if (ImGui::MenuItem(IC_RESTART "  Revert the stage to the disc's...", nullptr, false,
+                                    stage_on() && (stageMods.count(stageInfo.fid) || stageDirty)))
+                    ask_revert();
                 ImGui::Separator();
-                ImGui::Text("Textures");
-                ImGui::SameLine();
-                ImGui::RadioButton("off", &view.textures, 0);
-                ImGui::SameLine();
-                ImGui::RadioButton("PSX", &view.textures, 1);
-                ImGui::SameLine();
-                ImGui::RadioButton("bilinear", &view.textures, 2);
-                ImGui::Text("Lights  ");
-                ImGui::SameLine();
-                ImGui::RadioButton("none", &view.lighting, 0);
-                ImGui::SameLine();
-                ImGui::RadioButton("viewer", &view.lighting, 1);
-                ImGui::SameLine();
-                ImGui::RadioButton("stage", &view.lighting, 2);
-                if (view.lighting == 2 && !g_game.stages.empty()) {
-                    ImGui::SliderInt("fight stage", &view.stage, 0, (int)g_game.stages.size() - 1);
-                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("A fight stage's three lights and ambient color (SFSTDATA.PRO)");
-                }
-                ImGui::Checkbox("Face", &view.face);
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("The blinking eyes and the other animated face parts");
-                ImGui::SameLine();
-                ImGui::Checkbox("Wireframe", &view.wireframe);
-                ImGui::SameLine();
-                ImGui::Checkbox("Skeleton", &view.skeleton);
-                ImGui::Checkbox("Back-face culling", &view.cull);
-                ImGui::SameLine();
-                ImGui::Checkbox("Grid", &view.grid);
-                if (ImGui::Button("Show all")) std::fill(scene.hidden.begin(), scene.hidden.end(), false);
-                ImGui::SameLine();
-                if (ImGui::Button("Frame (F)")) frame_model(scene, view);
+                if (ImGui::MenuItem(IC_FOLDER "  Change the data folder...")) pick_data_folder();
+                if (ImGui::MenuItem(IC_FOLDER "  Change the effects' mods folder...")) pick_mods_folder();
                 ImGui::Separator();
-                ImGui::BeginChild("bones");
-                bone_tree(scene, 0);
-                ImGui::EndChild();
-                ImGui::EndTabItem();
+                if (ImGui::MenuItem("Quit", "Alt+F4")) quitAsked = true;
+                ImGui::EndMenu();
             }
-            if (scene.model && ImGui::BeginTabItem("Motions")) {
-                Model &m = *scene.model;
-                if (m.motions.empty()) {
-                    ImGui::TextWrapped("No motions in this file: it shows its first keys.");
-                } else {
-                    if (ImGui::Button(view.playing ? "Pause (space)" : "Play (space)")) view.playing = !view.playing;
-                    ImGui::SameLine();
-                    if (ImGui::Button("Step")) {
-                        view.playing = false;
-                        m.advance(1);
-                        m.evaluate();
-                    }
-                    ImGui::SameLine();
-                    if (ImGui::Button("Restart")) m.setMotion(m.motion);
-                    ImGui::SameLine();
-                    ImGui::Checkbox("Loop", &view.loop);
-                    ImGui::SliderFloat("speed", &view.speed, 0.05f, 4, "%.2fx");
-                    int key = m.keyframe;
-                    if (ImGui::SliderInt("keyframe", &key, 0, std::max(m.keyframeCount - 1, 0))) {
-                        view.playing = false;
-                        m.keyframe = key;
-                        m.motionDone = false;
-                        m.evaluate();
-                    }
-                    ImGui::Text("frame %d%s%s", m.frame, m.blending ? "  (blending)" : "", m.motionDone ? "  done" : "");
-                    ImGui::Separator();
-                    ImGui::BeginChild("motions");
-                    for (int i = 1; i <= (int)m.motions.size(); i++) {
-                        const std::vector<MotionStep> &st = m.motions[i - 1];
-                        int frames = 0;
-                        for (const MotionStep &x : st)
-                            if (x.index != 0x7FFF) frames += std::max<int>(x.count, 0);
-                        char label[64];
-                        snprintf(label, sizeof label, "motion %2d   %d steps, %d frames", i, (int)st.size() - 1, frames);
-                        if (ImGui::Selectable(label, m.motion == i)) {
-                            m.setMotion(i);
-                            view.playing = true;
-                        }
-                    }
-                    ImGui::EndChild();
-                }
-                ImGui::EndTabItem();
+            if (ImGui::BeginMenu("Edit")) {
+                if (ImGui::MenuItem(IC_UNDO "  Undo", "Ctrl+Z", false, can_undo(false))) do_undo(false);
+                if (ImGui::MenuItem(IC_REDO "  Redo", "Ctrl+Y", false, can_undo(true))) do_undo(true);
+                ImGui::Separator();
+                if (ImGui::MenuItem(IC_COPY "  Copy", "Ctrl+C", false, section == EFFECTS ? fx.id >= 0 : scene.model != nullptr)) do_copy();
+                if (ImGui::MenuItem(IC_PASTE "  Paste", "Ctrl+V", false, can_paste())) do_paste();
+                if (ImGui::MenuItem(IC_ADD "  Duplicate", "Ctrl+D", false, can_edit_sel())) do_duplicate();
+                if (ImGui::MenuItem(IC_DELETE "  Delete", "Del", false, can_edit_sel())) do_delete();
+                ImGui::Separator();
+                if (ImGui::MenuItem("Deselect", "Esc")) select_bone(-1), ownFrame = -1;
+                ImGui::EndMenu();
             }
-            if (scene.model && ImGui::BeginTabItem("Fighter")) {
-                Model &m = *scene.model;
-                if (scene.fighters.empty()) {
-                    ImGui::TextWrapped("No fighter uses this file in the fighters' file (SMDLDATA.PRO): it has no "
-                                       "name, face, cameras or action scripts there.");
-                } else {
-                    /* the fighters that use this file: each may name other entries */
-                    if (scene.fighters.size() > 1) {
-                        std::string cur = std::to_string(scene.fighters[scene.fighter]->id) + " " + scene.fighters[scene.fighter]->name;
-                        if (ImGui::BeginCombo("fighter", cur.c_str())) {
-                            for (int i = 0; i < (int)scene.fighters.size(); i++) {
-                                std::string l = std::to_string(scene.fighters[i]->id) + " " + scene.fighters[i]->name +
-                                                (scene.fighters[i]->enemy ? "  (enemy)" : "  (partner)");
-                                if (ImGui::Selectable(l.c_str(), i == scene.fighter)) {
-                                    std::string name = m.name;
-                                    open_model(scene, view, name, scene.path, status, scene.fid, i);
-                                }
-                            }
-                            ImGui::EndCombo();
-                        }
-                    }
-                    const Fighter &f = *scene.fighters[scene.fighter];
-                    Model &mm = *scene.model;
-                    ImGui::Text("fighter %d, %s (kind 0x%X)", f.id, f.enemy ? "an enemy" : "a partner", f.kind);
-                    ImGui::Text("entries: bones %d, motions %d, scripts %d", f.modelEntry, f.motionsEntry, f.effectsEntry);
-                    int parts = 0;
-                    for (bool u : f.faceUsed) parts += u;
-                    ImGui::Text("face: %d parts", parts);
-                    ImGui::SeparatorText("Cameras");
-                    if (ImGui::Button("Free")) frame_model(scene, view);
-                    for (int i = 0; i < (int)f.cameras.size(); i++) {
-                        static const char *HINT[12] = {"", "", "", "", "", "", "portrait", "portrait, 2nd idle",
-                                                       "battle", "battle", "battle", "battle"};
-                        char l[48];
-                        snprintf(l, sizeof l, "%d%s%s", i, !f.enemy && *HINT[i] ? " " : "", !f.enemy ? HINT[i] : "");
-                        if (i % 4) ImGui::SameLine();
-                        if (ImGui::RadioButton(l, view.gameCamera == i)) apply_camera(view, f, i);
-                    }
-                    ImGui::SeparatorText("Action scripts");
-                    ImGui::TextDisabled("Click a motion to play it, a camera to look through it, an effect to see it.");
-                    ImGui::BeginChild("scripts");
-                    for (int i = 0; i < (int)mm.scripts.size(); i++) {
-                        const std::vector<ScriptLine> &sc = mm.scripts[i];
-                        char h[48];
-                        snprintf(h, sizeof h, "script %d  (%d commands)", i, (int)sc.size());
-                        if (!ImGui::CollapsingHeader(h)) continue;
-                        ImGui::PushID(i);
-                        for (int k = 0; k < (int)sc.size(); k++) {
-                            const ScriptLine &ln = sc[k];
-                            ImGui::PushID(k);
-                            bool active = ln.motion > 0 || ln.camera >= 0 || ln.effect >= 0;
-                            if (!active) ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-                            if (ImGui::Selectable(ln.text.c_str(), false) && active) {
-                                if (ln.motion > 0 && ln.motion <= (int)mm.motions.size()) {
-                                    mm.setMotion(ln.motion);
-                                    view.playing = true;
-                                }
-                                if (ln.effect >= 0) open_effect(ln.effect, true);
-                                int c = ln.camera >= 100 ? ln.camera - 100 : ln.camera;
-                                if (c >= 0 && c < (int)f.cameras.size() && (ln.camera >= 100) == f.enemy)
-                                    apply_camera(view, f, c);
-                            }
-                            if (!active) ImGui::PopStyleColor();
-                            ImGui::PopID();
-                        }
-                        ImGui::PopID();
-                    }
-                    ImGui::EndChild();
+            if (ImGui::BeginMenu("View")) {
+                ImGui::MenuItem("Browser panel", "Ctrl+B", &showBrowser);
+                ImGui::MenuItem("Inspector panel", "Ctrl+I", &showInspector);
+                ImGui::MenuItem("Controls hint", nullptr, &showHints);
+                ImGui::Separator();
+                if (ImGui::MenuItem(IC_FIT "  Frame the selection", "F")) frame_sel();
+                if (ImGui::MenuItem("Frame everything")) frame_all();
+                if (ImGui::MenuItem(IC_EYE "  Show all", "Alt+H")) show_all();
+                ImGui::Separator();
+                if (ImGui::BeginMenu("Textures")) {
+                    const char *T[] = {"Off", "PSX", "Bilinear"};
+                    for (int i = 0; i < 3; i++)
+                        if (ImGui::MenuItem(T[i], nullptr, view.textures == i)) view.textures = i;
+                    ImGui::EndMenu();
                 }
-                ImGui::EndTabItem();
+                if (ImGui::BeginMenu("Lights")) {
+                    const char *L[] = {"None", "Viewer", "Stage"};
+                    for (int i = 0; i < 3; i++)
+                        if (ImGui::MenuItem(L[i], nullptr, view.lighting == i)) view.lighting = i;
+                    ImGui::EndMenu();
+                }
+                ImGui::MenuItem("Face animation", nullptr, &view.face);
+                ImGui::MenuItem("Wireframe", nullptr, &view.wireframe);
+                ImGui::MenuItem("Skeleton", nullptr, &view.skeleton);
+                ImGui::MenuItem("Grid", nullptr, &view.grid);
+                ImGui::MenuItem("Back-face culling", nullptr, &view.cull);
+                ImGui::EndMenu();
             }
-            if (ImGui::BeginTabItem("Effects", nullptr, fxSelect ? ImGuiTabItemFlags_SetSelected : 0)) {
-                fxSelect = false;
-                fxActive = true;
-                if (fx.id >= 0) {
-                    if (fxFitPending) fx_fit(io.DisplaySize.x - panel, io.DisplaySize.y), fxFitPending = false;
-                    int t = (int)fxTime;
-                    if (t != fxDrawn) {
-                        fx_render(t, FX_BG);
-                        fxTex = rgba_texture(fxTex, fxPx, FXC_W, FXC_H);
-                        fxDrawn = t;
-                    }
-                    /* in the view, where the model is: the canvas, the 320x240 screen
-                       around the effect's point (what Export PNGs and own images
-                       span) and the point */
-                    ImDrawList *dl = ImGui::GetBackgroundDrawList();
-                    float cx = (io.DisplaySize.x - panel) / 2 - fxPan[0] * fxZoom, cy = io.DisplaySize.y / 2 - fxPan[1] * fxZoom;
-                    dl->AddImage((ImTextureID)(intptr_t)fxTex, ImVec2(cx - FXC_W / 2 * fxZoom, cy - FXC_H / 2 * fxZoom),
-                                 ImVec2(cx + FXC_W / 2 * fxZoom, cy + FXC_H / 2 * fxZoom));
-                    dl->AddRect(ImVec2(cx - FX_W / 2 * fxZoom, cy - FX_H / 2 * fxZoom), ImVec2(cx + FX_W / 2 * fxZoom, cy + FX_H / 2 * fxZoom),
-                                IM_COL32(255, 255, 255, 60));
-                    dl->AddLine(ImVec2(cx - 8, cy), ImVec2(cx + 8, cy), IM_COL32(255, 220, 80, 160));
-                    dl->AddLine(ImVec2(cx, cy - 8), ImVec2(cx, cy + 8), IM_COL32(255, 220, 80, 160));
-                    if (ImGui::Button("Fit (F)")) fxFitPending = true;
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Drag to move, wheel to zoom. The box is the 320x240 screen around the effect's point (the cross).");
-                    ImGui::TextWrapped("effect %d: sheet %d, %d sprite animations, %d fields", fx.id, fx.sheetIndex,
-                                       (int)fx.anims.size(), fx.duration);
-                    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-                    ImGui::TextWrapped("animations %s #%d entry %d, sheet %s #%d entry %d", fid_name(fx.fid).c_str(), fx.fid,
-                                       fx.entry, fid_name(fx.sheetFid).c_str(), fx.sheetFid, fx.sheetEntry);
-                    ImGui::PopStyleColor();
-                    if (ImGui::Button(fxPlaying ? "Pause" : "Play")) fxPlaying = !fxPlaying;
-                    same_line(bw("Restart"));
-                    if (ImGui::Button("Restart")) fxTime = 0;
-                    same_line(bw("Loop") + ImGui::GetFrameHeight());
-                    ImGui::Checkbox("Loop##fx", &fxLoop);
-                    same_line(bw("Export PNGs"));
-                    if (ImGui::Button("Export PNGs")) {
-                        int n = export_effect(fx, fxDir);
-                        status = "saved " + std::to_string(n) + " frames to effects/effect_" + std::to_string(fx.id);
-                    }
-                    if (!fxDir.empty()) {
-                        same_line(bw("Open folder"));
-                        if (ImGui::Button("Open folder")) open_folder(fxDir);
-                        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", fxDir.c_str());
-                    }
-                    ImGui::SliderFloat("speed##fx", &view.speed, 0.05f, 4, "%.2fx");
-                    float ft = fxTime;
-                    if (ImGui::SliderFloat("tick", &ft, 0, (float)std::max(fx_length() - 1, 0), "%.0f")) fxTime = ft, fxPlaying = false;
-                    if (ImGui::IsItemHovered()) ImGui::SetTooltip("1 tick = 1/60 s, as the battle counts time");
-                    if (ImGui::CollapsingHeader("Own images (native port)", ImGuiTreeNodeFlags_DefaultOpen)) {
-                        bool changed = false;
-                        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-                        ImGui::TextWrapped("%s", own.dir.c_str());
-                        ImGui::PopStyleColor();
-                        if (ImGui::Button("Mods folder...")) {
-                            SDL_ShowOpenFolderDialog(
-                                [](void *u, const char *const *list, int) {
-                                    if (!list || !*list) return;
-                                    Picked *p = (Picked *)u;
-                                    std::lock_guard<std::mutex> lock(p->m);
-                                    p->folder = *list;
-                                },
-                                &picked, win, ownRoot.c_str(), false);
-                        }
-                        if (ImGui::IsItemHovered()) ImGui::SetTooltip("The native port's data/mods/effects folder");
-                        same_line(bw("Open"));
-                        if (ImGui::Button("Open##own")) {
-                            SDL_CreateDirectory(own.dir.c_str());
-                            open_folder(own.dir);
-                        }
-                        same_line(bw("Hit") + ImGui::GetFrameHeight());
-                        if (ImGui::RadioButton("Hit", !ownCritical)) ownCritical = false, own_load();
-                        same_line(bw("Critical hit") + ImGui::GetFrameHeight());
-                        if (ImGui::RadioButton("Critical hit", ownCritical)) ownCritical = true, own_load();
-                        if (ImGui::Checkbox("Show them", &ownShow)) fxTime = 0, fxDrawn = -1;
-                        same_line(bw("Import PNGs..."));
-                        if (ImGui::Button("Import PNGs...")) {
-                            static const SDL_DialogFileFilter PNG = {"PNG images", "png"};
-                            SDL_ShowOpenFileDialog(
-                                [](void *u, const char *const *list, int) {
-                                    if (!list) return;
-                                    Picked *p = (Picked *)u;
-                                    std::lock_guard<std::mutex> lock(p->m);
-                                    for (; *list; list++) p->files.push_back(*list);
-                                },
-                                &picked, win, &PNG, 1, nullptr, true);
-                        }
-                        same_line(bw("Save*"));
-                        if (ImGui::Button(ownDirty ? "Save*" : "Save")) {
-                            if (own.save()) ownDirty = false, ownIds = own_effects(ownRoot), status = "saved " + own.dir + "/effect.json";
-                            else status = own.error;
-                        }
-                        same_line(bw("Reload"));
-                        if (ImGui::Button("Reload")) own_load();
-                        ImGui::TextWrapped("%d frames, %d ticks = %.2f s (the original: %d ticks = %.2f s)", (int)own.frames.size(),
-                                    own.duration(), own.duration() / 60.0f, fx.duration, fx.duration / 60.0f);
-                        /* two to a row, each half the panel with its label */
-                        float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2 - bw("scale");
-                        ImGui::PushItemWidth(half);
-                        changed |= ImGui::DragFloat("x", &own.x, 0.5f, -320, 320, "%.1f");
-                        ImGui::SameLine();
-                        changed |= ImGui::DragFloat("y", &own.y, 0.5f, -240, 240, "%.1f");
-                        changed |= ImGui::DragFloat("scale", &own.scale, 0.01f, 0.05f, 8, "%.2f");
-                        ImGui::SameLine();
-                        int blend = own.add;
-                        if (ImGui::Combo("blend", &blend, "alpha\0add\0")) own.add = blend != 0, changed = true;
-                        ImGui::PopItemWidth();
-                        int playing = ownShow ? own.frameAt((int)fxTime) : -1, move = -1, dir = 0, drop = -1, dup = -1;
-                        if (!own.frames.empty() && ImGui::BeginTable("ownframes", 4, ImGuiTableFlags_RowBg)) {
-                            ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed);
-                            ImGui::TableSetupColumn("image", ImGuiTableColumnFlags_WidthStretch);
-                            ImGui::TableSetupColumn("ticks", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 6);
-                            ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed);
-                            ImGui::TableHeadersRow();
-                            for (int i = 0; i < (int)own.frames.size(); i++) {
-                                CustomFrame &fr = own.frames[i];
-                                ImGui::PushID(i);
-                                ImGui::TableNextRow();
-                                if (i == playing) ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, IM_COL32(70, 90, 140, 160));
-                                ImGui::TableNextColumn();
-                                ImGui::Text("%d", i);
-                                ImGui::TableNextColumn();
-                                ImGui::SetNextItemWidth(-FLT_MIN);
-                                if (ImGui::BeginCombo("##file", fr.file.c_str())) {
-                                    for (const auto &it : own.images)
-                                        if (ImGui::Selectable(it.first.c_str(), it.first == fr.file)) fr.file = it.first, changed = true;
-                                    ImGui::EndCombo();
-                                }
-                                ImGui::TableNextColumn();
-                                ImGui::SetNextItemWidth(-FLT_MIN);
-                                if (ImGui::InputInt("##ticks", &fr.ticks)) fr.ticks = std::clamp(fr.ticks, 1, 600), changed = true;
-                                ImGui::TableNextColumn();
-                                if (ImGui::SmallButton("^")) move = i, dir = -1;
-                                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Up");
-                                ImGui::SameLine();
-                                if (ImGui::SmallButton("v")) move = i, dir = 1;
-                                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Down");
-                                ImGui::SameLine();
-                                if (ImGui::SmallButton("+")) dup = i;
-                                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Copy");
-                                ImGui::SameLine();
-                                if (ImGui::SmallButton("x")) drop = i;
-                                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Remove");
-                                ImGui::PopID();
-                            }
-                            ImGui::EndTable();
-                        }
-                        if (move >= 0 && move + dir >= 0 && move + dir < (int)own.frames.size())
-                            std::swap(own.frames[move], own.frames[move + dir]), changed = true;
-                        if (dup >= 0) {
-                            CustomFrame copy = own.frames[dup];
-                            own.frames.insert(own.frames.begin() + dup + 1, copy), changed = true;
-                        }
-                        if (drop >= 0) own.frames.erase(own.frames.begin() + drop), changed = true;
-                        if (changed) ownDirty = true, fxDrawn = -1;
-                        if (!own.error.empty()) ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "%s", own.error.c_str());
-                    }
-                    ImGui::Separator();
-                } else {
-                    ImGui::TextWrapped("Pick an effect: the battle's 2D effects, its sparks, hits and techniques' sprites.");
-                }
-                if (!fxGrouped) group_effects(), ownIds = own_effects(ownRoot);
-                ImGui::SetNextItemWidth(-FLT_MIN);
-                ImGui::InputTextWithHint("##fxfind", "Search: Digimon, id or technique", fxFind, sizeof fxFind);
-                if (ImGui::BeginTabBar("fxlists")) {
-                    if (ImGui::BeginTabItem("Original")) {
-                        ImGui::BeginChild("fxlist");
-                        if (*fxFind) {
-                            for (int id : fxIds)
-                                if (effect_found(id)) effect_item(id);
-                        } else if (ImGui::CollapsingHeader("Common", ImGuiTreeNodeFlags_DefaultOpen)) {
-                            ImGui::TextDisabled("The battle's own (hits, digivolving, items) and those several Digimon start");
-                            for (int id : fxCommon) effect_item(id);
-                        }
-                        if (!*fxFind && ImGui::CollapsingHeader("By Digimon", ImGuiTreeNodeFlags_DefaultOpen)) {
-                            for (const auto &it : fxByDigimon) {
-                                bool open = std::find(it.second.begin(), it.second.end(), fx.id) != it.second.end();
-                                ImGui::SetNextItemOpen(open, ImGuiCond_Once);
-                                if (ImGui::TreeNode(it.first.c_str())) {
-                                    for (int id : it.second) effect_item(id);
-                                    ImGui::TreePop();
-                                }
-                            }
-                        }
-                        ImGui::EndChild();
-                        ImGui::EndTabItem();
-                    }
-                    char modTab[32];
-                    snprintf(modTab, sizeof modTab, "Mod (%d)###mod", (int)ownIds.size());
-                    if (ImGui::BeginTabItem(modTab)) {
-                        ImGui::BeginChild("fxmods");
-                        if (ownIds.empty()) ImGui::TextWrapped("No effect has own images in %s yet.", ownRoot.c_str());
-                        for (int id : std::set<int>(ownIds)) /* a copy: opening one rescans ownIds */
-                            if (effect_found(id)) effect_item(id);
-                        ImGui::EndChild();
-                        ImGui::EndTabItem();
-                    }
-                    ImGui::EndTabBar();
-                }
-                ImGui::EndTabItem();
+            if (ImGui::BeginMenu("Help")) {
+                ImGui::MenuItem(IC_HELP "  Controls", "F1", &helpOpen);
+                ImGui::MenuItem(IC_INFO "  Activity log", nullptr, &logOpen);
+                ImGui::Separator();
+                if (ImGui::MenuItem("About DW3 Model Viewer")) aboutOpen = true;
+                ImGui::EndMenu();
             }
-            if (scene.model && ImGui::BeginTabItem("Textures")) {
-                Model &m = *scene.model;
-                /* the texture page and CLUT pairs its polygons read */
-                std::vector<std::pair<uint16_t, uint16_t>> combos;
-                std::set<std::pair<uint16_t, uint16_t>> seen;
-                for (const Mesh &me : m.meshes)
-                    for (const Poly &p : me.polys)
-                        if (p.textured && seen.insert({(uint16_t)(p.tpage & 0x19F), p.clut}).second)
-                            combos.push_back({(uint16_t)(p.tpage & 0x19F), p.clut});
-                for (const Tim &t : m.tims)
-                    ImGui::Text("TIM %dx%d halfwords at %d,%d%s", t.w, t.h, t.x, t.y, t.rlen ? " (RLEN)" : "");
-                if (combos.empty()) {
-                    ImGui::Text("No textured polygons.");
-                } else {
-                    view.texCombo = std::min(view.texCombo, (int)combos.size() - 1);
-                    for (int i = 0; i < (int)combos.size(); i++) {
-                        char label[64];
-                        static const char *DEPTH[] = {"4-bit", "8-bit", "16-bit", "?"};
-                        snprintf(label, sizeof label, "%s page %d,%d CLUT %d,%d", DEPTH[tpage_depth(combos[i].first)],
-                                 tpage_x(combos[i].first), tpage_y(combos[i].first), clut_x(combos[i].second),
-                                 clut_y(combos[i].second));
-                        ImGui::RadioButton(label, &view.texCombo, i);
-                    }
-                    auto [tp, cl] = combos[view.texCombo];
-                    int w = 256, h = 256;
-                    std::string key = m.name + std::to_string(tp) + "/" + std::to_string(cl);
-                    if (key != texKey) {
-                        texPixels = decode_page(m.vram, tp, cl, w, h);
-                        texView = rgba_texture(texView, texPixels, w, h);
-                        texKey = key, texW = w, texH = h;
-                    }
-                    ImGui::Checkbox("UVs", &view.uvs);
-                    ImGui::SameLine();
-                    ImGui::SliderFloat("zoom", &view.texZoom, 1, 4, "%.1fx");
-                    if (ImGui::Button("Save BMP")) {
-                        char name[96];
-                        snprintf(name, sizeof name, "%s_%04x_%04x.bmp", m.name.substr(0, m.name.find('.')).c_str(), tp, cl);
-                        save_bmp(g_exe_dir + name, texPixels, texW, texH);
-                        status = std::string("saved ") + name;
-                    }
-                    ImGui::BeginChild("tex", ImVec2(0, 0), 0, ImGuiWindowFlags_HorizontalScrollbar);
-                    ImVec2 o = ImGui::GetCursorScreenPos();
-                    float z = view.texZoom;
-                    ImDrawList *dl = ImGui::GetWindowDrawList();
-                    dl->AddRectFilled(o, ImVec2(o.x + texW * z, o.y + texH * z), IM_COL32(40, 40, 48, 255));
-                    ImGui::Image((ImTextureID)(intptr_t)texView, ImVec2(texW * z, texH * z));
-                    if (view.uvs) {
-                        for (size_t b = 1; b < m.bones.size(); b++) {
-                            for (const Poly &p : m.meshes[m.bones[b].mesh].polys) {
-                                if (!p.textured || (p.tpage & 0x19F) != tp || p.clut != cl) continue;
-                                static const int ORDER[2][4] = {{0, 1, 2, -1}, {0, 1, 3, 2}};
-                                const int *ord = ORDER[p.quad];
-                                int n = p.quad ? 4 : 3;
-                                ImU32 c = (int)b == scene.selected ? IM_COL32(255, 220, 60, 255) : IM_COL32(80, 255, 120, 160);
-                                for (int k = 0; k < n; k++) {
-                                    const uint8_t *a = p.uv[ord[k]], *bb = p.uv[ord[(k + 1) % n]];
-                                    dl->AddLine(ImVec2(o.x + (a[0] + 0.5f) * z, o.y + (a[1] + 0.5f) * z),
-                                                ImVec2(o.x + (bb[0] + 0.5f) * z, o.y + (bb[1] + 0.5f) * z), c);
-                                }
-                            }
-                        }
-                    }
-                    ImGui::EndChild();
-                }
-                ImGui::EndTabItem();
+            menuH = ImGui::GetWindowSize().y;
+            ImGui::EndMainMenuBar();
+        }
+        const ImGuiWindowFlags BAR = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                                     ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoScrollbar;
+
+        /* --- the sections, what's open, undo --- */
+        float barH = ImGui::GetFrameHeight() + 14 * dpi;
+        ImGui::SetNextWindowPos(ImVec2(0, menuH));
+        ImGui::SetNextWindowSize(ImVec2(ds.x, barH));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10 * dpi, 7 * dpi));
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::GetStyleColorVec4(ImGuiCol_MenuBarBg));
+        ImGui::Begin("##sections", nullptr, BAR);
+        ImGui::PopStyleColor();
+        ImGui::PopStyleVar();
+        for (int s = 0; s < SECTIONS; s++) {
+            if (s) ImGui::SameLine(0, 3 * dpi);
+            bool off = needs_model(s) && !scene.model, on = section == s;
+            ImGui::BeginDisabled(off);
+            ImGui::PushStyleColor(ImGuiCol_Button, on ? ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive) : ImVec4(0, 0, 0, 0));
+            std::string l = std::string(SECTION_ICON[s]) + "  " + SECTION_NAME[s];
+            if (ImGui::Button(l.c_str())) section = s;
+            ImGui::PopStyleColor();
+            ImGui::EndDisabled();
+            if (off) tip("%s.\nOpen a model first (in Files).", SECTION_TIP[s]);
+            else tip("%s", SECTION_TIP[s]);
+        }
+        {
+            std::string open = "Nothing open";
+            if (stage_on()) open = "Stage " + std::to_string(stageId) + "  " + stage_look(stageId);
+            else if (scene.model && !scene.fighters.empty() && !scene.fighters[scene.fighter]->name.empty())
+                open = scene.fighters[scene.fighter]->name + "  (" + scene.model->name + ")";
+            else if (scene.model) open = scene.model->name;
+            bool dirty = (stageDirty && stageId >= 0) || ownDirty;
+            float ub = ImGui::GetFrameHeight() * 1.3f;
+            float right = ds.x - st.WindowPadding.x - ub * 2 - st.ItemSpacing.x;
+            float tw = ImGui::CalcTextSize(open.c_str()).x + (dirty ? ImGui::CalcTextSize(IC_WARN " unsaved   ").x : 0);
+            ImGui::SameLine(std::max(ImGui::GetCursorPosX() + 20 * dpi, right - tw - st.ItemSpacing.x * 2));
+            ImGui::AlignTextToFramePadding();
+            if (dirty) {
+                ImGui::TextColored(C_WARN, IC_WARN " unsaved");
+                tip("%s%s%s", stageDirty && stageId >= 0 ? "The stage's changes aren't saved to the game. " : "",
+                    ownDirty ? "The own images' changes aren't saved. " : "", "Ctrl+S saves the section's.");
+                ImGui::SameLine();
             }
-            ImGui::EndTabBar();
+            ImGui::TextDisabled("%s", open.c_str());
+            ImGui::SameLine(right);
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+            ImGui::BeginDisabled(!can_undo(false));
+            if (ImGui::Button(IC_UNDO, ImVec2(ub, 0))) do_undo(false);
+            ImGui::EndDisabled();
+            tip("Undo (Ctrl+Z): the %s", undo_own() ? "own images' edits" : "stage's edits");
+            ImGui::SameLine();
+            ImGui::BeginDisabled(!can_undo(true));
+            if (ImGui::Button(IC_REDO, ImVec2(ub, 0))) do_undo(true);
+            ImGui::EndDisabled();
+            tip("Redo (Ctrl+Y)");
+            ImGui::PopStyleColor();
         }
         ImGui::End();
+
+        /* --- the layout: browser | view (and its playback bar) | inspector, the status bar under all --- */
+        float statusH = ImGui::GetFrameHeight() + 6 * dpi;
+        float top = menuH + barH, bottom = ds.y - statusH;
+        bool motionBar = scene.model && !view.stageView && !scene.model->motions.empty() &&
+                         (section == FILES || section == MODEL || section == MOTIONS || section == FIGHTER);
+        bool transportOn = (section == EFFECTS && fx.id >= 0) || motionBar;
+        float transH = transportOn ? ImGui::GetFrameHeight() + 12 * dpi : 0;
+        if (browserW <= 0) browserW = ds.x * 0.21f, inspectorW = ds.x * 0.25f;
+        browserW = std::clamp(browserW, 180 * dpi, std::max(180 * dpi, ds.x * 0.45f));
+        inspectorW = std::clamp(inspectorW, 180 * dpi, std::max(180 * dpi, ds.x * 0.45f));
+        float vx = showBrowser ? browserW : 0, vr = showInspector ? ds.x - inspectorW : ds.x;
+        float vy = top, vw = std::max(vr - vx, 40.0f), vh = std::max(bottom - transH - top, 40.0f);
+        ImVec2 vc(vx + vw / 2, vy + vh / 2);
+
+        /* --- the mouse in the view --- */
+        ImVec2 mp = io.MousePos, d = io.MouseDelta;
+        bool inView = mp.x >= vx && mp.x < vx + vw && mp.y >= vy && mp.y < vy + vh;
+        bool vpHover = inView && !io.WantCaptureMouse;
+        bool openViewMenu = false;
+        float &zoom2 = section == EFFECTS ? fxZoom : view.texZoom;
+        float *pan2 = section == EFFECTS ? fxPan : texPan;
+        for (int b = 0; b < 3; b++) {
+            if (!ImGui::IsMouseClicked(b) || !vpHover) continue;
+            vpDown[b] = true, vpUses++;
+            if (b == 0 && io.KeyCtrl && !mode2d && stage_on()) { /* Ctrl+drag: the part under the mouse (or the selected one) moves */
+                int hit = pick_bone(scene, view, vw, vh, mp.x - vx, mp.y - vy);
+                int k = hit > 0 ? part_of_bone(hit) : stagePart;
+                if (k >= 0) {
+                    float pl[5];
+                    select_part(k);
+                    part_place(k, pl);
+                    part_begin("Moving", pl);
+                    vpMoving = partEditing;
+                }
+            }
+        }
+        bool anyDown = vpDown[0] || vpDown[1] || vpDown[2], moved = d.x != 0 || d.y != 0;
+        if (mode2d) {
+            if (anyDown && moved) pan2[0] -= d.x / zoom2, pan2[1] -= d.y / zoom2;
+            if (vpHover && io.MouseWheel != 0) { /* about the point under the mouse */
+                float cx = vc.x - pan2[0] * zoom2, cy = vc.y - pan2[1] * zoom2;
+                float px = (mp.x - cx) / zoom2, py = (mp.y - cy) / zoom2;
+                zoom2 = std::clamp(zoom2 * powf(1.15f, io.MouseWheel), 0.25f, 16.0f);
+                pan2[0] = (vc.x + px * zoom2 - mp.x) / zoom2, pan2[1] = (vc.y + py * zoom2 - mp.y) / zoom2;
+            }
+        } else if (scene.model) {
+            if (vpDown[0] && vpMoving && moved && stagePart >= 0) {
+                /* on the ground, the way the mouse goes on screen; Shift: up and down */
+                StagePart &p = stageEdit.parts[stagePart];
+                float k = view.cam.dist * 0.0015f, cy = cosf(view.cam.yaw), sy = sinf(view.cam.yaw);
+                if (io.KeyShift) p.move[1] += d.y * k;
+                else p.move[0] += (d.x * cy + d.y * sy) * k, p.move[2] -= (-d.x * sy + d.y * cy) * k;
+            } else if (vpDown[0] && moved) {
+                view.cam.yaw -= d.x * 0.008f;
+                view.cam.pitch = std::clamp(view.cam.pitch + d.y * 0.008f, -1.5f, 1.5f);
+                view.gameCamera = -1;
+            }
+            if ((vpDown[1] || vpDown[2]) && moved) { /* in the view's plane */
+                float k = view.cam.dist * 0.0015f, cy = cosf(view.cam.yaw), sy = sinf(view.cam.yaw);
+                view.cam.target[0] -= d.x * k * cy;
+                view.cam.target[2] += d.x * k * sy;
+                view.cam.target[1] += d.y * k;
+                view.gameCamera = -1;
+            }
+            if (vpHover && io.MouseWheel != 0) view.cam.dist *= powf(0.88f, io.MouseWheel), view.gameCamera = -1;
+            if (vpHover && !anyDown) hoverBone = pick_bone(scene, view, vw, vh, mp.x - vx, mp.y - vy);
+        }
+        for (int b = 0; b < 3; b++) {
+            if (!vpDown[b] || ImGui::IsMouseDown(b)) continue;
+            vpDown[b] = false;
+            if (b == 0 && vpMoving) {
+                float pl[5];
+                part_place(stagePart, pl);
+                part_end(memcmp(pl, partStart, sizeof pl) != 0);
+                continue;
+            }
+            if (io.MouseDragMaxDistanceSqr[b] > 25 * dpi * dpi || !inView) continue; /* a drag, not a click */
+            int hit = section == TEXTURES ? texHover : mode2d || !scene.model ? -1 : pick_bone(scene, view, vw, vh, mp.x - vx, mp.y - vy);
+            if (b == 0 && (section == TEXTURES || !mode2d)) select_bone(hit), scrollToSel = hit > 0;
+            if (b == 1) ctxBone = hit, openViewMenu = true;
+        }
+        if (hoverBone != lastHover || moved) lastHover = hoverBone, stillSince = ImGui::GetTime();
+
+        /* --- the keys (not while typing or in a menu) --- */
+        bool keys = !io.WantTextInput && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId);
+        auto chord = [&](ImGuiKeyChord c) { return keys && ImGui::IsKeyChordPressed(c); };
+        if (chord(ImGuiMod_Ctrl | ImGuiKey_Z)) do_undo(false);
+        if (chord(ImGuiMod_Ctrl | ImGuiKey_Y) || chord(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z)) do_undo(true);
+        if (chord(ImGuiMod_Ctrl | ImGuiKey_C)) do_copy();
+        if (chord(ImGuiMod_Ctrl | ImGuiKey_V)) do_paste();
+        if (chord(ImGuiMod_Ctrl | ImGuiKey_D)) do_duplicate();
+        if (chord(ImGuiMod_Ctrl | ImGuiKey_S)) do_save();
+        if (chord(ImGuiMod_Ctrl | ImGuiKey_O)) pick_bin();
+        if (chord(ImGuiMod_Ctrl | ImGuiKey_B)) showBrowser = !showBrowser;
+        if (chord(ImGuiMod_Ctrl | ImGuiKey_I)) showInspector = !showInspector;
+        if (chord(ImGuiKey_Delete)) do_delete();
+        if (chord(ImGuiKey_H)) hide_selected();
+        if (chord(ImGuiMod_Alt | ImGuiKey_H)) show_all();
+        if (chord(ImGuiKey_F)) frame_sel();
+        if (chord(ImGuiKey_Escape)) select_bone(-1), ownFrame = -1;
+        if (chord(ImGuiKey_F1)) helpOpen = !helpOpen;
+        if (chord(ImGuiKey_Space)) section == EFFECTS ? void(fxPlaying = !fxPlaying) : void(view.playing = !view.playing);
+        if (keys && !io.KeyMods && ImGui::IsKeyPressed(ImGuiKey_RightArrow)) step(1);
+        if (keys && !io.KeyMods && ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) step(-1);
+
+        /* --- the panels, resizable from their inner edges --- */
+        auto panel = [&](const char *id, float &w, bool right, const std::function<void()> &draw) {
+            float h = bottom - top;
+            ImGui::SetNextWindowPos(ImVec2(right ? ds.x : 0, top), ImGuiCond_Always, ImVec2(right ? 1.0f : 0.0f, 0));
+            ImGui::SetNextWindowSize(ImVec2(w, h), ImGuiCond_Always);
+            ImGui::SetNextWindowSizeConstraints(ImVec2(180 * dpi, h), ImVec2(std::max(180 * dpi, ds.x * 0.45f), h));
+            ImGui::Begin(id, nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+                                          ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus);
+            w = ImGui::GetWindowWidth();
+            draw();
+            ImGui::End();
+        };
+        if (showBrowser) panel("##browser", browserW, false, browser);
+        if (showInspector) panel("##inspector", inspectorW, true, inspector);
+        scrollToSel = false;
+
+        if (transportOn) {
+            ImGui::SetNextWindowPos(ImVec2(vx, vy + vh));
+            ImGui::SetNextWindowSize(ImVec2(vw, transH));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10 * dpi, 6 * dpi));
+            ImGui::Begin("##transport", nullptr, BAR);
+            ImGui::PopStyleVar();
+            transport();
+            ImGui::End();
+        }
+
+        /* --- the status bar: the last message; all of them in the log --- */
+        ImGui::SetNextWindowPos(ImVec2(0, bottom));
+        ImGui::SetNextWindowSize(ImVec2(ds.x, statusH));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10 * dpi, 3 * dpi));
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImGui::GetStyleColorVec4(ImGuiCol_MenuBarBg));
+        ImGui::Begin("##status", nullptr, BAR);
+        ImGui::PopStyleColor();
+        ImGui::PopStyleVar();
+        {
+            char logL[32];
+            snprintf(logL, sizeof logL, IC_INFO " Log (%d)", (int)g_notes.size());
+            float lw = ImGui::CalcTextSize(logL).x + st.FramePadding.x * 2;
+            ImVec2 p = ImGui::GetCursorScreenPos();
+            ImGui::PushClipRect(p, ImVec2(ds.x - lw - 24 * dpi, p.y + statusH), true);
+            ImGui::AlignTextToFramePadding();
+            if (!g_notes.empty()) {
+                const Note &n = g_notes.back();
+                ImVec4 c = note_color(n.kind);
+                if (SDL_GetTicks() / 1000.0 - n.time > 8) c.w = 0.6f;
+                ImGui::TextColored(c, "%s  %s", note_icon(n.kind), n.text.c_str());
+            } else {
+                ImGui::TextDisabled("Ready. F1 shows the controls.");
+            }
+            ImGui::PopClipRect();
+            ImGui::SameLine(ds.x - lw - st.WindowPadding.x);
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+            if (ImGui::Button(logL)) logOpen = !logOpen;
+            ImGui::PopStyleColor();
+            tip("Every message of this session");
+        }
+        ImGui::End();
+
+        /* --- the view's overlays: the 2D canvases, the selection's label, help --- */
+        ImGui::SetNextWindowPos(ImVec2(vx, vy));
+        ImGui::SetNextWindowSize(ImVec2(vw, vh));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+        ImGui::Begin("##view", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoBackground |
+                                            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus |
+                                            ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav);
+        ImGui::PopStyleVar(2);
+        ImDrawList *dl = ImGui::GetWindowDrawList();
+        ImVec2 pad(8 * dpi, 5 * dpi);
+        auto box_text = [&](ImVec2 p, ImU32 bg, ImU32 border, ImU32 fg, const std::string &text, ImFont *font = nullptr) {
+            if (!font) font = ImGui::GetFont();
+            ImVec2 ts = font->CalcTextSizeA(font->FontSize, FLT_MAX, 0, text.c_str());
+            dl->AddRectFilled(p, p + ts + pad * 2, bg, 6 * dpi);
+            if (border) dl->AddRect(p, p + ts + pad * 2, border, 6 * dpi, 0, 1.5f * dpi);
+            dl->AddText(font, font->FontSize, p + pad, fg, text.c_str());
+            return ts + pad * 2;
+        };
+        bool quiet = anyDown || ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId);
+        if (section == EFFECTS) {
+            if (fx.id >= 0) {
+                if (fxFitPending) fx_fit(vw, vh), fxFitPending = false;
+                int t = (int)fxTime;
+                if (t != fxDrawn) {
+                    fx_render(t, FX_BG);
+                    fxTex = rgba_texture(fxTex, fxPx, FXC_W, FXC_H);
+                    fxDrawn = t;
+                }
+                /* the canvas, the 320x240 screen around the effect's point (what
+                   Export PNGs and own images span) and the point */
+                float cx = vc.x - fxPan[0] * fxZoom, cy = vc.y - fxPan[1] * fxZoom;
+                dl->AddImage((ImTextureID)(intptr_t)fxTex, ImVec2(cx - FXC_W / 2 * fxZoom, cy - FXC_H / 2 * fxZoom),
+                             ImVec2(cx + FXC_W / 2 * fxZoom, cy + FXC_H / 2 * fxZoom));
+                dl->AddRect(ImVec2(cx - FX_W / 2 * fxZoom, cy - FX_H / 2 * fxZoom), ImVec2(cx + FX_W / 2 * fxZoom, cy + FX_H / 2 * fxZoom),
+                            IM_COL32(255, 255, 255, 60));
+                dl->AddLine(ImVec2(cx - 8, cy), ImVec2(cx + 8, cy), IM_COL32(255, 220, 80, 160));
+                dl->AddLine(ImVec2(cx, cy - 8), ImVec2(cx, cy + 8), IM_COL32(255, 220, 80, 160));
+            } else {
+                const char *t = "Pick an effect in the list on the left";
+                dl->AddText(vc - ImGui::CalcTextSize(t) / 2, ImGui::GetColorU32(ImGuiCol_TextDisabled), t);
+            }
+        } else if (section == TEXTURES && scene.model) {
+            Model &m = *scene.model;
+            std::vector<std::pair<uint16_t, uint16_t>> combos = tex_combos();
+            texHover = -1;
+            if (!combos.empty()) {
+                view.texCombo = std::min(view.texCombo, (int)combos.size() - 1);
+                auto [tp, cl] = combos[view.texCombo];
+                std::string key = m.name + std::to_string(tp) + "/" + std::to_string(cl);
+                if (key != texKey) {
+                    texPixels = decode_page(m.vram, tp, cl, 256, 256);
+                    texView = rgba_texture(texView, texPixels, 256, 256);
+                    texKey = key, texW = 256, texH = 256;
+                }
+                if (texFitPending) {
+                    view.texZoom = std::clamp(0.9f * std::min(vw / texW, vh / texH), 0.5f, 12.0f);
+                    texPan[0] = texPan[1] = 0, texFitPending = false;
+                }
+                float z = view.texZoom;
+                ImVec2 o(vc.x - texPan[0] * z - texW * z / 2, vc.y - texPan[1] * z - texH * z / 2);
+                dl->AddRectFilled(o, o + ImVec2(texW * z, texH * z), IM_COL32(40, 40, 48, 255));
+                dl->AddImage((ImTextureID)(intptr_t)texView, o, o + ImVec2(texW * z, texH * z));
+                dl->AddRect(o - ImVec2(1, 1), o + ImVec2(texW * z + 1, texH * z + 1), IM_COL32(255, 255, 255, 40));
+                if (view.uvs) {
+                    auto at = [&](const uint8_t *uv) { return ImVec2(o.x + (uv[0] + 0.5f) * z, o.y + (uv[1] + 0.5f) * z); };
+                    auto inside = [](ImVec2 p, ImVec2 a, ImVec2 b, ImVec2 c) {
+                        float d1 = (p.x - b.x) * (a.y - b.y) - (a.x - b.x) * (p.y - b.y), d2 = (p.x - c.x) * (b.y - c.y) - (b.x - c.x) * (p.y - c.y),
+                              d3 = (p.x - a.x) * (c.y - a.y) - (c.x - a.x) * (p.y - a.y);
+                        return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+                    };
+                    static const int ORDER[2][4] = {{0, 1, 2, -1}, {0, 1, 3, 2}};
+                    for (int pass = 0; pass < 2; pass++) /* the hovered and selected on top */
+                        for (size_t b = 1; b < m.bones.size(); b++) {
+                            int mark = (int)b == scene.selected ? 2 : (int)b == texHover ? 1 : 0;
+                            if ((pass == 1) != (mark > 0)) continue;
+                            for (const Poly &p : m.meshes[m.bones[b].mesh].polys) {
+                                if (!p.textured || (p.tpage & 0x19F) != tp || p.clut != cl) continue;
+                                if (pass == 0 && vpHover && !quiet &&
+                                    (inside(mp, at(p.uv[0]), at(p.uv[1]), at(p.uv[2])) || (p.quad && inside(mp, at(p.uv[1]), at(p.uv[3]), at(p.uv[2])))))
+                                    texHover = (int)b;
+                                const int *ord = ORDER[p.quad];
+                                int n = p.quad ? 4 : 3;
+                                ImU32 c = mark == 2 ? IM_COL32(255, 220, 60, 255) : mark == 1 ? IM_COL32(140, 205, 255, 255) : IM_COL32(80, 255, 120, 160);
+                                for (int k = 0; k < n; k++) dl->AddLine(at(p.uv[ord[k]]), at(p.uv[ord[(k + 1) % n]]), c, mark ? 1.5f : 1);
+                            }
+                        }
+                }
+                if (texHover > 0 && vpHover && !quiet) {
+                    ImGui::BeginTooltip();
+                    ImGui::PushFont(g_fontBold);
+                    ImGui::TextColored(C_SELECT, "%s", thing_name(texHover).c_str());
+                    ImGui::PopFont();
+                    ImGui::TextDisabled("%d polygons. Click to select it.", thing_polys(texHover));
+                    ImGui::EndTooltip();
+                }
+            }
+        } else if (scene.model) {
+            M4 vp = view_proj(view, (int)vw, (int)vh);
+            /* the selection's label: its name, as the lists have it, over it */
+            std::vector<int> bs = selected_bones();
+            float lo[3], hi[3];
+            if (!bs.empty() && bones_box(scene, bs, lo, hi)) {
+                float tp[3] = {(lo[0] + hi[0]) / 2, hi[1], (lo[2] + hi[2]) / 2}, mid[3] = {tp[0], (lo[1] + hi[1]) / 2, tp[2]};
+                ImVec2 a, c;
+                char extra[64];
+                snprintf(extra, sizeof extra, "   %d polys%s", thing_polys(bs[0]),
+                         (stage_on() ? stageHidden.count(part_name(stagePart)) > 0 : scene.hidden[bs[0]]) ? ", hidden" : "");
+                std::string text = thing_name(bs[0]) + extra;
+                bool seen = to_screen(vp, tp, vw, vh, a) && to_screen(vp, mid, vw, vh, c);
+                if (seen) a = a + ImVec2(vx, vy), c = c + ImVec2(vx, vy);
+                if (!seen || c.x < vx || c.x > vx + vw || c.y < vy || c.y > vy + vh) { /* out of sight: said at the top */
+                    text += "   out of view: F frames it";
+                    ImVec2 ts = bold->CalcTextSizeA(bold->FontSize, FLT_MAX, 0, text.c_str()) + pad * 2;
+                    box_text(ImVec2(vc.x - ts.x / 2, vy + 52 * dpi), IM_COL32(20, 22, 26, 225), IM_COL32(255, 217, 51, 230),
+                             IM_COL32(255, 232, 140, 255), text, bold);
+                } else {
+                    ImVec2 ts = bold->CalcTextSizeA(bold->FontSize, FLT_MAX, 0, text.c_str()) + pad * 2;
+                    ImVec2 p(std::clamp(a.x - ts.x / 2, vx + 6, std::max(vx + 6, vx + vw - ts.x - 6)),
+                             std::clamp(a.y - ts.y - 24 * dpi, vy + 44 * dpi, std::max(vy + 44 * dpi, vy + vh - ts.y - 6)));
+                    if (c.x >= vx && c.x <= vx + vw && c.y >= vy && c.y <= vy + vh) {
+                        dl->AddLine(c, ImVec2(std::clamp(c.x, p.x + 6, p.x + ts.x - 6), p.y + ts.y), IM_COL32(255, 217, 51, 170), 1.5f * dpi);
+                        dl->AddCircleFilled(c, 3.5f * dpi, IM_COL32(255, 217, 51, 255));
+                    }
+                    box_text(p, IM_COL32(20, 22, 26, 225), IM_COL32(255, 217, 51, 230), IM_COL32(255, 232, 140, 255), text, bold);
+                }
+            }
+            /* what's being edited, while it is */
+            if (partEditing && stagePart >= 0 && stagePart < (int)stageEdit.parts.size()) {
+                const StagePart &p = stageEdit.parts[stagePart];
+                char t[160];
+                if (partVerb == "Turning") snprintf(t, sizeof t, "Turning  %s   %.1f deg", p.name.c_str(), p.turn);
+                else if (partVerb == "Scaling") snprintf(t, sizeof t, "Scaling  %s   x%.2f", p.name.c_str(), p.scale);
+                else snprintf(t, sizeof t, "Moving  %s   x %.0f   y %.0f   z %.0f", p.name.c_str(), p.move[0], p.move[1], p.move[2]);
+                ImVec2 ts = bold->CalcTextSizeA(bold->FontSize, FLT_MAX, 0, t) + pad * 2;
+                box_text(ImVec2(vc.x - ts.x / 2, vy + 10 * dpi), IM_COL32(44, 84, 160, 235), 0, IM_COL32(255, 255, 255, 255), t, bold);
+            }
+            /* what's under the mouse, once it rests there */
+            if (vpHover && !quiet && hoverBone > 0 && ImGui::GetTime() - stillSince > 0.3) {
+                ImGui::BeginTooltip();
+                ImGui::PushFont(g_fontBold);
+                ImGui::TextColored(C_SELECT, "%s", thing_name(hoverBone).c_str());
+                ImGui::PopFont();
+                ImGui::TextDisabled("%d polygons", thing_polys(hoverBone));
+                bool sel = stage_on() ? part_of_bone(hoverBone) == stagePart : hoverBone == scene.selected;
+                ImGui::TextDisabled("%s  Right-click: its actions", sel ? "Selected." : "Click: select it.");
+                if (stage_on()) ImGui::TextDisabled("Ctrl+drag: move it");
+                ImGui::EndTooltip();
+            }
+        }
+
+        /* the mode, top left */
+        {
+            char t[160];
+            if (section == EFFECTS)
+                snprintf(t, sizeof t, IC_EFFECT "  2D effect%s   zoom %.1fx%s", fx.id >= 0 ? (" " + std::to_string(fx.id)).c_str() : "", fxZoom,
+                         ownShow && fx.id >= 0 ? "   own images" : "");
+            else if (section == TEXTURES) snprintf(t, sizeof t, IC_TEXTURE "  2D texture page   zoom %.1fx", view.texZoom);
+            else if (stage_on()) snprintf(t, sizeof t, IC_STAGE "  3D stage %d", stageId);
+            else if (scene.model && view.gameCamera >= 0) snprintf(t, sizeof t, IC_MODEL "  3D model   " IC_CAMERA " game camera %d", view.gameCamera);
+            else if (scene.model) snprintf(t, sizeof t, IC_MODEL "  3D model");
+            else t[0] = 0;
+            if (*t) box_text(ImVec2(vx + 10 * dpi, vy + 10 * dpi), IM_COL32(16, 18, 22, 200), 0, IM_COL32(228, 231, 236, 255), t);
+        }
+        /* the controls, bottom left */
+        if (showHints && (scene.model || mode2d)) {
+            std::string h;
+            if (mode2d) h = "Drag: pan    Wheel: zoom    F: fit";
+            if (section == TEXTURES) h += "\nClick a polygon: select its bone";
+            if (!mode2d) {
+                h = "Left-drag: orbit    Right-drag: pan\nWheel: zoom    F: frame    H: hide\nClick: select    Right-click: actions";
+                if (stage_on()) h += "\nCtrl+drag: move a part (Shift: lift it)";
+                else if (!scene.model->motions.empty()) h += "\nSpace: play/pause    Arrows: step";
+            }
+            h += "\nF1: every control";
+            ImVec2 ts = ImGui::CalcTextSize(h.c_str()) + pad * 2;
+            if (vpUses >= 6 || ts.x > vw * 0.8f || ts.y > vh * 0.5f) h = "F1: every control", ts = ImGui::CalcTextSize(h.c_str()) + pad * 2;
+            box_text(ImVec2(vx + 10 * dpi, vy + vh - ts.y - 10 * dpi), IM_COL32(16, 18, 22, 160), 0, IM_COL32(200, 205, 214, 220), h);
+        }
+        /* the last message, for a few seconds, bottom right */
+        if (!g_notes.empty() && SDL_GetTicks() / 1000.0 - g_notes.back().time < 4) {
+            const Note &n = g_notes.back();
+            std::string t = std::string(note_icon(n.kind)) + "  " + n.text;
+            if (t.size() > 120) t = t.substr(0, 117) + "...";
+            ImVec2 ts = ImGui::CalcTextSize(t.c_str()) + pad * 2;
+            ImVec4 c = note_color(n.kind);
+            box_text(ImVec2(std::max(vx + 10 * dpi, vx + vw - ts.x - 10 * dpi), vy + vh - ts.y - 10 * dpi), IM_COL32(16, 18, 22, 235),
+                     ImGui::GetColorU32(ImVec4(c.x, c.y, c.z, 0.7f)), ImGui::GetColorU32(c), t);
+        }
+        if (dropping && SDL_GetTicks() - dropSeen < 500) {
+            dl->AddRectFilled(ImVec2(vx, vy), ImVec2(vx + vw, vy + vh), IM_COL32(76, 141, 255, 40));
+            dl->AddRect(ImVec2(vx + 8, vy + 8), ImVec2(vx + vw - 8, vy + vh - 8), IM_COL32(76, 141, 255, 200), 8 * dpi, 0, 3 * dpi);
+            const char *t = IC_OPEN "  Drop a .BIN model of the game to open it";
+            ImGui::PushFont(g_fontTitle);
+            ImVec2 ts = ImGui::CalcTextSize(t);
+            dl->AddText(vc - ts / 2, IM_COL32(255, 255, 255, 255), t);
+            ImGui::PopFont();
+        }
+        if (openViewMenu) ImGui::OpenPopup("##viewmenu");
+        if (ImGui::BeginPopup("##viewmenu")) {
+            if (ctxBone > 0 && section != EFFECTS) bone_menu(ctxBone);
+            else view_menu();
+            ImGui::EndPopup();
+        }
+        ImGui::End();
+
+        /* --- the first steps, while nothing is open --- */
+        if (!mode2d && !scene.model) {
+            ImGui::SetNextWindowPos(vc, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+            ImGui::SetNextWindowSize(ImVec2(std::min(vw - 40 * dpi, 500 * dpi), 0));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(22 * dpi, 18 * dpi));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 10 * dpi);
+            ImGui::Begin("##welcome", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
+            ImGui::PopStyleVar(2);
+            ImGui::PushFont(g_fontTitle);
+            ImGui::TextUnformatted("DW3 Model Viewer");
+            ImGui::PopFont();
+            ImGui::TextWrapped("Battle models, fight stages and 2D effects of Digimon World 2003, read from your own copy of the game.");
+            ImGui::Spacing();
+            if (g_names.empty()) {
+                ImGui::TextColored(C_WARN, IC_WARN "  No game data found yet");
+                hint("1. Run tools/setup_disc.py with your own disc image (.cue).\n2. Choose the data folder it made.");
+                if (button(IC_FOLDER "  Choose the data folder...", 1)) pick_data_folder();
+            } else {
+                float w = (ImGui::GetContentRegionAvail().x - st.ItemSpacing.x) / 2;
+                if (button(IC_FILES "  Browse the models", section == FILES ? 1 : 0, ImVec2(w, 0))) section = FILES, showBrowser = true;
+                ImGui::SameLine();
+                if (button(IC_STAGE "  Open a fight stage", section == STAGES ? 1 : 0, ImVec2(w, 0))) section = STAGES, showBrowser = true;
+                if (ImGui::Button(IC_EFFECT "  See the 2D effects", ImVec2(w, 0))) section = EFFECTS;
+                ImGui::SameLine();
+                if (ImGui::Button(IC_OPEN "  Open a .BIN file...", ImVec2(w, 0))) pick_bin();
+                hint(section == STAGES ? "Pick a stage in the list on the left." : "Pick a model in the list on the left, or drop a .BIN file of the game here.");
+            }
+            hint("F1 shows every control.");
+            ImGui::End();
+        }
+
+        /* --- asking first --- */
+        if (ask.open) ImGui::OpenPopup("##ask"), ask.open = false;
+        ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowSize(ImVec2(440 * dpi, 0));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(20 * dpi, 16 * dpi));
+        if (ImGui::BeginPopupModal("##ask", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
+            ImGui::PushFont(g_fontTitle);
+            ImGui::TextColored(ask.danger ? C_WARN : C_ACCENT, "%s", ask.danger ? IC_WARN : IC_INFO);
+            ImGui::SameLine();
+            ImGui::TextUnformatted(ask.title.c_str());
+            ImGui::PopFont();
+            ImGui::Spacing();
+            ImGui::TextWrapped("%s", ask.text.c_str());
+            ImGui::Spacing();
+            float bw = ImGui::GetFontSize() * 7;
+            ImGui::SetCursorPosX(ImGui::GetWindowWidth() - st.WindowPadding.x - bw * 2.6f - st.ItemSpacing.x);
+            if (button(ask.ok.c_str(), ask.danger ? 2 : 1, ImVec2(bw * 1.6f, 0))) {
+                std::function<void()> then = std::move(ask.then);
+                ask.then = nullptr;
+                ImGui::CloseCurrentPopup();
+                if (then) then();
+            }
+            ImGui::SameLine();
+            if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+            if (ImGui::Button("Cancel", ImVec2(bw, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ask.then = nullptr, ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+        ImGui::PopStyleVar();
+
+        /* --- help: the controls --- */
+        if (helpOpen) {
+            ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+            ImGui::SetNextWindowSize(ImVec2(std::min(ds.x - 40 * dpi, 600 * dpi), std::min(ds.y - 60 * dpi, 760 * dpi)), ImGuiCond_Appearing);
+            if (ImGui::Begin(IC_HELP "  Controls###help", &helpOpen, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings)) {
+                auto rows = [&](const char *head, std::initializer_list<std::pair<const char *, const char *>> r) {
+                    heading(head);
+                    if (ImGui::BeginTable(head, 2)) {
+                        ImGui::TableSetupColumn("key", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFontSize() * 10);
+                        ImGui::TableSetupColumn("what", ImGuiTableColumnFlags_WidthStretch);
+                        for (const auto &it : r) {
+                            ImGui::TableNextColumn();
+                            ImGui::PushFont(g_fontBold);
+                            ImGui::TextColored(C_ACCENT, "%s", it.first);
+                            ImGui::PopFont();
+                            ImGui::TableNextColumn();
+                            ImGui::TextWrapped("%s", it.second);
+                        }
+                        ImGui::EndTable();
+                    }
+                };
+                rows("The 3D view", {{"Left-drag", "Orbit"},
+                                     {"Right / middle-drag", "Pan"},
+                                     {"Wheel", "Zoom"},
+                                     {"Click", "Select a bone, or a stage's part (its name shows over it)"},
+                                     {"Right-click", "Its actions; on nothing, the view's"},
+                                     {"Ctrl+drag", "Move a stage's part on the ground"},
+                                     {"Shift+Ctrl+drag", "Lift or lower it"},
+                                     {"Drop a .BIN", "Open that model"}});
+                rows("The 2D views (Effects, Textures)", {{"Drag", "Pan"}, {"Wheel", "Zoom about the mouse"}, {"Click", "Select a polygon's bone (Textures)"}});
+                rows("Keys", {{"F", "Frame the selection (or everything)"},
+                              {"H  /  Alt+H", "Hide the selection  /  show everything"},
+                              {"Esc", "Deselect"},
+                              {"Space", "Play or pause"},
+                              {"Left  /  Right", "Step back  /  forth"},
+                              {"Ctrl+O", "Open a model file"},
+                              {"Ctrl+S", "Save the stage, or the own images (Effects)"},
+                              {"Ctrl+Z  /  Ctrl+Y", "Undo  /  redo them"},
+                              {"Ctrl+C  /  Ctrl+V", "Copy  /  paste a stage's part or an own images' frame;\nelsewhere Ctrl+C copies what's selected"},
+                              {"Ctrl+D", "Duplicate it"},
+                              {"Del", "Delete it"},
+                              {"Ctrl+B  /  Ctrl+I", "Hide or show the side panels (or drag their edges)"},
+                              {"F1", "This window"}});
+            }
+            ImGui::End();
+        }
+        /* --- the log --- */
+        if (logOpen) {
+            ImGui::SetNextWindowSize(ImVec2(640 * dpi, 320 * dpi), ImGuiCond_Appearing);
+            ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+            if (ImGui::Begin(IC_INFO "  Activity###log", &logOpen, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings)) {
+                auto stamp = [](double t) {
+                    char s[16];
+                    snprintf(s, sizeof s, "%02d:%02d", (int)t / 60, (int)t % 60);
+                    return std::string(s);
+                };
+                if (ImGui::Button(IC_COPY "  Copy all")) {
+                    std::string all;
+                    for (const Note &n : g_notes) all += stamp(n.time) + "  " + n.text + "\n";
+                    ImGui::SetClipboardText(all.c_str());
+                }
+                ImGui::SameLine();
+                if (ImGui::Button(IC_DELETE "  Clear")) g_notes.clear();
+                ImGui::Separator();
+                ImGui::BeginChild("notes");
+                if (g_notes.empty()) hint("Nothing yet: what you save, export or import, and what goes wrong, shows here.");
+                for (int i = (int)g_notes.size() - 1; i >= 0; i--) {
+                    const Note &n = g_notes[i];
+                    ImGui::TextDisabled("%s", stamp(n.time).c_str());
+                    ImGui::SameLine();
+                    ImGui::TextColored(note_color(n.kind), "%s", note_icon(n.kind));
+                    ImGui::SameLine();
+                    ImGui::TextWrapped("%s", n.text.c_str());
+                }
+                ImGui::EndChild();
+            }
+            ImGui::End();
+        }
         about_window(aboutOpen, aboutIcon);
         ImGui::Render();
 
-        if (fxActive) { /* the effect, drawn by ImGui over the cleared view */
+        mark_scene();
+        if (mode2d) {
             GL(glViewport)(0, 0, ww, wh);
-            GL(glClearColor)((FX_BG & 255) / 255.0f, (FX_BG >> 8 & 255) / 255.0f, (FX_BG >> 16 & 255) / 255.0f, 1);
+            if (section == EFFECTS)
+                GL(glClearColor)((FX_BG & 255) / 255.0f, (FX_BG >> 8 & 255) / 255.0f, (FX_BG >> 16 & 255) / 255.0f, 1);
+            else
+                GL(glClearColor)(0.09f, 0.1f, 0.12f, 1);
             GL(glClear)(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         } else {
-            render(scene, view, ww - (int)(panel * ww / std::max(io.DisplaySize.x, 1.0f)), wh);
+            float sx = ww / std::max(ds.x, 1.0f), sy = wh / std::max(ds.y, 1.0f);
+            render(scene, view, (int)(vx * sx), (int)((ds.y - vy - vh) * sy), (int)(vw * sx), (int)(vh * sy));
         }
         GL(glViewport)(0, 0, ww, wh);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());

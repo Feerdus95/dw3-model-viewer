@@ -35,15 +35,23 @@ static void line(std::vector<float> &v, const float *a, const float *b, float r,
     v.insert(v.end(), &c[0][0], &c[0][0] + 14);
 }
 
-static void render(Scene &s, View &v, int w, int h) {
-    GL(glViewport)(0, 0, w, h);
+/* A bone's place in the model's space: its pose, after the edit previewed on it */
+static M4 bone_pose(const Scene &s, int b) {
+    M4 w = from(s.model->pose[b].world);
+    return b >= s.previewFirst && b < s.previewEnd ? mul(from(s.preview), w) : w;
+}
+/* ... and in the view's world */
+static M4 bone_world(const Scene &s, int b) { return mul(PSX_TO_GL, bone_pose(s, b)); }
+
+/* The scene in the view at X, Y (from the window's bottom left), W x H pixels */
+static void render(Scene &s, View &v, int x, int y, int w, int h) {
     if (v.stageView)
         GL(glClearColor)(v.stageBg[0], v.stageBg[1], v.stageBg[2], 1);
     else
         GL(glClearColor)(0.18f, 0.2f, 0.24f, 1);
     GL(glClear)(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    M4 proj = perspective(v.fov, (float)w / std::max(h, 1), v.cam.dist * 0.01f, v.cam.dist * 50);
-    M4 vp = mul(proj, v.cam.view());
+    GL(glViewport)(x, y, w, h);
+    M4 vp = mul(perspective(v.fov, (float)w / std::max(h, 1), v.cam.dist * 0.01f, v.cam.dist * 50), v.cam.view());
     if (v.grid && !v.stageView) {
         std::vector<float> g;
         float step = 250, n = 8;
@@ -91,11 +99,12 @@ static void render(Scene &s, View &v, int w, int h) {
     auto draw_bones = [&]() {
         for (size_t b = 1; b < m.bones.size(); b++) {
             if (!m.pose[b].visible || s.hidden[b] || !s.count[b]) continue;
-            M4 mvp = mul(vp, mul(PSX_TO_GL, from(m.pose[b].world)));
+            M4 pose = bone_pose(s, (int)b), mvp = mul(vp, mul(PSX_TO_GL, pose));
             GL(glUniformMatrix4fv)(loc_mvp, 1, GL_FALSE, mvp.m);
-            GL(glUniformMatrix4fv)(loc_world, 1, GL_FALSE, m.pose[b].world);
-            float t = (int)b == s.selected ? 0.35f : 0;
-            GL(glUniform4f)(loc_tint, 1, 0.85f, 0.2f, t);
+            GL(glUniformMatrix4fv)(loc_world, 1, GL_FALSE, pose.m);
+            int mark = b < s.mark.size() ? s.mark[b] : 0;
+            if (mark == 2) GL(glUniform4f)(loc_tint, 1, 0.85f, 0.2f, 0.35f);
+            else GL(glUniform4f)(loc_tint, 0.55f, 0.8f, 1, mark == 1 ? 0.22f : 0);
             GL(glDrawArrays)(GL_TRIANGLES, s.first[b], s.count[b]);
         }
     };
@@ -126,7 +135,7 @@ static void render(Scene &s, View &v, int w, int h) {
         for (size_t b = 1; b < m.bones.size(); b++) {
             const float *w = m.pose[b].world, *pw = m.pose[m.bones[b].parent].world;
             float a[3] = {pw[12], -pw[13], -pw[14]}, c[3] = {w[12], -w[13], -w[14]};
-            bool sel = (int)b == s.selected;
+            bool sel = b < s.mark.size() ? s.mark[b] == 2 : (int)b == s.selected;
             line(l, a, c, sel ? 1.0f : 0.2f, sel ? 0.9f : 1.0f, sel ? 0.2f : 0.4f);
         }
         GL(glDisable)(GL_DEPTH_TEST);

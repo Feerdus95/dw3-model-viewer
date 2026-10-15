@@ -64,37 +64,49 @@ static bool open_model(Scene &s, View &v, const std::string &name, const std::st
     return true;
 }
 
-static void bone_tree(Scene &s, int b) {
+/* The bones as a tree: an eye to show or hide each, a click to select it,
+   HOVER the one under the mouse, MENU its right-click menu's items; SCROLL
+   brings the selected one into sight */
+static void bone_tree(Scene &s, int b, int &hover, bool scroll, const std::function<void(int)> &menu) {
     Model &m = *s.model;
     std::vector<int> kids;
     for (size_t c = 1; c < m.bones.size(); c++)
         if (m.bones[c].parent == b && (int)c != b) kids.push_back((int)c);
-    char label[64];
     const Mesh *mesh = b ? &m.meshes[m.bones[b].mesh] : nullptr;
-    if (b == 0)
-        snprintf(label, sizeof label, "root");
-    else
-        snprintf(label, sizeof label, "bone %d  (%d polys)", b, (int)mesh->polys.size());
     ImGuiTreeNodeFlags fl = ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
     if (kids.empty()) fl |= ImGuiTreeNodeFlags_Leaf;
-    if (b == s.selected) fl |= ImGuiTreeNodeFlags_Selected;
+    if (b && b == s.selected) fl |= ImGuiTreeNodeFlags_Selected;
     ImGui::PushID(b);
     if (b) {
         bool shown = !s.hidden[b];
-        if (ImGui::Checkbox("##v", &shown)) s.hidden[b] = !shown;
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(shown ? ImGuiCol_Text : ImGuiCol_TextDisabled));
+        if (ImGui::SmallButton(shown ? IC_EYE : IC_HIDE)) s.hidden[b] = shown;
+        ImGui::PopStyleColor(2);
+        tip(shown ? "Shown: click to hide it (H)" : "Hidden: click to show it");
         ImGui::SameLine();
     }
-    bool open = ImGui::TreeNodeEx(label, fl);
-    if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) s.selected = s.selected == b ? -1 : b;
+    bool open = ImGui::TreeNodeEx(b ? "##bone" : "root", fl, b ? "bone %d" : "root", b);
+    if (b && b == s.selected && scroll) ImGui::SetScrollHereY();
+    if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen() && b) s.selected = s.selected == b ? -1 : b;
     if (b && ImGui::IsItemHovered()) {
+        hover = b;
         const Bone &bone = m.bones[b];
         const Pose &p = m.pose[b];
-        ImGui::SetTooltip("mesh entry %d, keys entry %d\n%d vertices, %d normals\npos %d %d %d\nrot %d %d %d\nscale %d %d %d",
-                          mesh->entry, bone.keyEntry, (int)mesh->verts.size(), (int)mesh->normals.size(), p.pos.x, p.pos.y,
-                          p.pos.z, p.rot.x, p.rot.y, p.rot.z, p.scale.x, p.scale.y, p.scale.z);
+        ImGui::SetItemTooltip("bone %d\nmesh entry %d, keys entry %d\n%d vertices, %d normals\npos %d %d %d\nrot %d %d %d\nscale %d %d %d",
+                              b, mesh->entry, bone.keyEntry, (int)mesh->verts.size(), (int)mesh->normals.size(), p.pos.x,
+                              p.pos.y, p.pos.z, p.rot.x, p.rot.y, p.rot.z, p.scale.x, p.scale.y, p.scale.z);
+    }
+    if (b && ImGui::BeginPopupContextItem("##menu")) {
+        menu(b);
+        ImGui::EndPopup();
+    }
+    if (b) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("%d polys", (int)mesh->polys.size());
     }
     if (open) {
-        for (int c : kids) bone_tree(s, c);
+        for (int c : kids) bone_tree(s, c, hover, scroll, menu);
         ImGui::TreePop();
     }
     ImGui::PopID();

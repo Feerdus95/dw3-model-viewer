@@ -125,7 +125,6 @@ int main(int argc, char **argv) {
     std::vector<int> fxIds = effect_ids();
     std::vector<uint32_t> fxPx(FXC_W * FXC_H);
     bool fxFitPending = false; /* fit the view to the effect when next drawn */
-    bool fxActive = false; /* the Effects tab is open: the view shows the effect, not the model */
     float fxZoom = 2, fxPan[2] = {0, 0}; /* screen pixels per effect pixel; the view's middle from the point */
     GLuint fxTex = 0;
     float fxTime = 0;
@@ -151,7 +150,7 @@ int main(int argc, char **argv) {
     struct Picked { /* what the file dialogs gave, maybe from another thread */
         std::mutex m;
         std::vector<std::string> files;
-        std::string folder, data, obj;
+        std::string folder, data, obj, bin;
     } picked;
     std::set<int> ownIds; /* the effects with own images in ownRoot */
 
@@ -248,17 +247,6 @@ int main(int argc, char **argv) {
         for (const std::string &n : s) all += (all.empty() ? "" : ", ") + n;
         return all;
     };
-    auto effect_item = [&](int id) {
-        const std::set<std::string> &u = fxUsers[id], &t = fxTechs[id];
-        std::string l = "effect " + std::to_string(id);
-        if (!t.empty()) l += "  " + joined(t);
-        else if (u.size() > 1) l += "  (" + std::to_string(u.size()) + " Digimon)";
-        else if (u.empty()) l += "  (the battle's own)";
-        if (ImGui::Selectable(l.c_str(), fx.id == id)) open_effect(id, false);
-        if (u.size() > 1 || (!t.empty() && !u.empty())) {
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", joined(u).c_str());
-        }
-    };
     /* the search: an id, or part of a Digimon's or technique's name */
     auto effect_found = [&](int id) {
         std::string f = fxFind;
@@ -327,7 +315,7 @@ int main(int argc, char **argv) {
             return false;
         }
         stageDirty = true;
-        status = stageMade.warning;
+        note(NOTE_WARN, stageMade.warning);
         stage_show(std::move(bytes), false);
         if (stagePart >= 0 && stagePart < (int)stageMade.firstBone.size()) scene.selected = stageMade.firstBone[stagePart];
         return true;
@@ -354,7 +342,7 @@ int main(int argc, char **argv) {
         std::ofstream(mod_path(459), std::ios::binary).write((const char *)table.data(), (std::streamsize)table.size());
         stageDirty = false;
         stageMods.insert(stageInfo.fid);
-        status = "saved " + mod_path(stageInfo.fid) + ": the game reads it when it starts";
+        note(NOTE_OK, "Saved stage " + std::to_string(stageId) + " to " + mod_path(stageInfo.fid) + ": the game reads it when it starts");
     };
     /* back to the disc's: the mod's model gone, its table entries the disc's */
     auto stage_revert = [&]() {
@@ -398,7 +386,7 @@ int main(int argc, char **argv) {
         view.stage = shot_stage;
         if (shot_cam >= 0 && !scene.fighters.empty() && shot_cam < (int)scene.fighters[scene.fighter]->cameras.size())
             apply_camera(view, *scene.fighters[scene.fighter], shot_cam);
-        render(scene, view, W, H);
+        render(scene, view, 0, 0, W, H);
         std::vector<uint32_t> px(W * H), flipped(W * H);
         GL(glReadPixels)(0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
         for (int y = 0; y < H; y++) memcpy(&flipped[y * W], &px[(H - 1 - y) * W], W * 4);
@@ -411,12 +399,10 @@ int main(int argc, char **argv) {
     ImGui::CreateContext();
     ImGuiIO &io = ImGui::GetIO();
     io.IniFilename = nullptr;
-    ImGui::StyleColorsDark();
     float dpi = SDL_GetWindowDisplayScale(win);
-    if (dpi > 0) {
-        ImGui::GetStyle().ScaleAllSizes(dpi);
-        io.FontGlobalScale = dpi;
-    }
+    if (dpi <= 0) dpi = 1;
+    ui_theme(dpi);
+    ui_fonts(dpi);
     ImGui_ImplSDL3_InitForOpenGL(win, ctx);
     ImGui_ImplOpenGL3_Init("#version 330");
 

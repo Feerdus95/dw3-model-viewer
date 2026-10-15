@@ -51,17 +51,20 @@ trademark of its owners.
     their folder;
   - the list in two tabs: Original, grouped into Common (the battle's own, and those
     several Digimon start) and By Digimon (each one's own, from the action scripts),
-    and Mod, the effects with own images;
+    and With own images;
   - click an action script's "sprite effect" line to see it;
   - **own images for the native port**: import PNGs into the port's
     `data/mods/effects/<id>/` (or its `critical/`, for a critical hit; pick the
-    folder with "Mods folder..."), see them play in the effect's place, and set each
-    frame's PNG and ticks (reorder, copy, remove), the offset, scale and blend (alpha
-    or add); Save writes the folder's `effect.json`, which the port plays as shown.
-- **Stages** (the 57 fight stages, in a tab of their own):
+    folder with "Change the mods folder..."), see them play in the effect's place, and
+    set each frame's PNG and ticks (reorder, duplicate, copy and paste, remove, undo),
+    the offset, scale and blend (alpha or add); Save writes the folder's `effect.json`,
+    which the port plays as shown.
+- **Stages** (the 57 fight stages, in a section of their own):
   - each one inside, as a battle sees it, with its background color;
-  - its parts (ground, props, panorama): pick one to move, turn or scale it, remove it,
-    or tick it to skip the bounds check (the ground's and the panorama's);
+  - its parts (ground, props, panorama): click one in the view or the list to move
+    (also Ctrl+drag in the view), turn or scale it, duplicate, copy, paste or remove
+    it, hide it in the view, or mark it Always drawn to skip the bounds check (the
+    ground's and the panorama's); Ctrl+Z undoes;
   - add parts from any other stage (a forest's trees in another stage), fixed where
     they stood;
   - export it as an OBJ with its MTL and PNGs (y up, 1 unit = 100 of the game's) to
@@ -170,38 +173,57 @@ here, so that the prompt waits for it.)
 - **"This needs a graphics card with OpenGL 3.3"**: update the graphics driver. On a
   remote desktop or a virtual machine there may be no OpenGL 3.3.
 - **The list of models is empty**: `data/` is missing; run `setup_disc.py` again, or
-  pick it with **Data folder...** in the Files tab (it's remembered in `data_dir.txt`).
+  pick it with **File > Change the data folder...** (it's remembered in `data_dir.txt`).
   Otherwise the viewer looks for it next to the exe, or next to its `build` folder.
 - **"python" isn't recognized**: install Python from python.org with **Add python.exe
   to PATH** ticked, then open a new terminal.
 
 ## Use
 
-The window is the 3D view, with a panel on the right:
+The sections are along the top. Each has a browser on the left (what to open) and an
+inspector on the right (what's open or selected); the view is in between, with a
+playback bar under it for motions and effects. Drag a panel's inner edge to resize it;
+**Ctrl+B** and **Ctrl+I** hide them. The status bar shows the last message, and
+**Log** shows them all.
 
 - **Files**: the disc's models by name, file name and file number (the stages' are
-  in Stages). The filter takes part of any of them (`Monmon`, `M384`, `KOET`). You can
-  also drop a model's `.BIN` on the window.
-- **Stages**: the fight stages, and the one open's editor (see above). **F** looks from
-  the arena's middle again.
-- **Model**: what the file holds, the display options (textures, lights and their
-  stage, face, wireframe), and the bone tree. Click a bone to highlight it, untick it
-  to hide it.
-- **Motions**: the motion list and the playback controls. Motions play at 60 keyframes
-  a second at 1x, the rate the game steps them.
-- **Fighter**: the fighter (pick one when several use the model), its cameras (**Free**
-  goes back to orbiting) and its action scripts.
-- **Textures**: the texture pages, with the UVs over them. **Save BMP** writes the page
-  shown next to `dw3mv.exe`, named after the model, the page and the palette.
-- **About** (the panel's top right): the version, license and credits.
+  in Stages). The search takes part of any of them (`Monmon`, `M384`, `KOET`). You can
+  also drop a model's `.BIN` on the window, or open one with **Ctrl+O**.
+- **Stages**: the fight stages, their parts, and the open stage's editor (see above).
+  **F** frames the selected part, or looks from the arena's middle again.
+- **Model**: the bone tree (the eye shows or hides a bone), the selected bone's data and
+  the display options (textures, lights and their stage, face, wireframe).
+- **Motions**: the motion list. Motions play at 60 keyframes a second at 1x, the rate
+  the game steps them.
+- **Fighter**: the action scripts, the fighter (pick one when several use the model) and
+  its cameras (**Free camera**, or any drag in the view, goes back to orbiting).
+- **Effects**: the 2D effects and their own images for the native port.
+- **Textures**: the texture pages in the view, with the UVs over them; click a polygon
+  to select its bone. **Save BMP** writes the page shown next to `dw3mv.exe`, named
+  after the model, the page and the palette.
+- **Help > About**: the version, license and credits.
+
+Click a bone or a stage's part in the view to select it: it turns yellow, its name
+shows over it (the name the lists use) and the lists show it too. Hovering shows what's
+under the mouse. Right-click anything, in the view or a list, for its actions.
 
 | Control | Action |
 |---|---|
 | Left drag | orbit |
 | Right or middle drag | pan |
-| Wheel | zoom |
-| F | frame the model |
-| Space | play / pause the motion |
+| Wheel | zoom (in the 2D views, about the mouse) |
+| Click / right-click | select / its actions |
+| Ctrl+drag, Shift+Ctrl+drag | move a stage's part on the ground / up and down |
+| F | frame the selection (or everything) |
+| H, Alt+H | hide the selection, show everything |
+| Space, Left / Right | play / pause, step |
+| Ctrl+C, Ctrl+V, Ctrl+D, Del | copy, paste, duplicate, delete a stage's part or an own images' frame |
+| Ctrl+Z, Ctrl+Y | undo, redo the stage's or the own images' edits |
+| Ctrl+S | save the stage, or the own images |
+| F1 | every control |
+
+A part copied with Ctrl+C pastes into another stage too. Leaving a stage or an effect
+with changes you haven't saved, quitting, or reverting a stage asks first.
 
 ### Command line
 
