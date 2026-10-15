@@ -26,7 +26,8 @@ trademark of its owners.
   - wireframe, back-face culling and a floor grid.
 - **Skeleton**:
   - the bone tree, with each part's mesh;
-  - show or hide any part, and highlight one;
+  - show or hide any part, and select one (click it in the view or the tree): it turns
+    yellow and its name shows over it;
   - hover a bone for its entries in the file and its current position, rotation and
     scale.
 - **Motions**:
@@ -241,7 +242,7 @@ with changes you haven't saved, quitting, or reverting a stage asks first.
                                           motion's keyframe, through a fighter's
                                           camera, with a stage's lights
 
-By default `data/` is the one picked with **Data folder...** (kept in `data_dir.txt`), or next to the exe, or next to its `build` folder.
+By default `data/` is the one picked with **File > Change the data folder...** (kept in `data_dir.txt`), or next to the exe, or next to its `build` folder.
 
 ## How it reads a model
 
