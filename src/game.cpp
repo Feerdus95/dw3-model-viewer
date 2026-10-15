@@ -86,6 +86,7 @@ void GameData::load(const std::string &files) {
                 memcpy(&f.face[i], &d[face + i * 10], sizeof(FaceRect));
                 f.faceUsed[i] = f.face[i].w != 0;
             }
+            if (f.enemy) f.cameraCount = rd16(&d[o + 0x44]);
             int cams = f.enemy ? std::min<int>(rd16(&d[o + 0x44]), 3) : 12;
             size_t pos = o + 0x1A, ref = pos + (f.enemy ? 3 : 12) * 6, proj = ref + (f.enemy ? 3 : 12) * 6;
             for (int i = 0; i < cams; i++) {
@@ -184,7 +185,7 @@ static std::vector<ScriptLine> read_script(const uint8_t *p, const uint8_t *end)
             const char *m = who(type);
             switch (cmd) {
             case 0:
-                if (arg == 0) l.text = fmt("model %s: wait for its motion", m);
+                if (arg == 0) l.text = fmt("model %s: wait for its motion", m), l.waitMotion = type == 0;
                 else if (arg == 1) l.text = fmt("model %s: back to idle", m), l.motion = type == 0 ? 1 : 0;
                 else l.text = fmt("model %s: motion %d", m, arg + 1), l.motion = type == 0 ? arg + 1 : 0;
                 break;
@@ -222,6 +223,7 @@ static std::vector<ScriptLine> read_script(const uint8_t *p, const uint8_t *end)
             } else {
                 int x = next(), y = next(), z = next();
                 l.text = fmt("sprite effect %s at %d, %d, %d", name.c_str(), x, y, z);
+                l.fxStart = true, l.fxOwn = e == 9999, l.pos[0] = x, l.pos[1] = y, l.pos[2] = z;
                 if (e != 9999) l.effect = e;
             }
             break;
@@ -246,8 +248,8 @@ static std::vector<ScriptLine> read_script(const uint8_t *p, const uint8_t *end)
                 l.text = fmt("camera: at %d, %d, %d looking at %d, %d, %d, projection %d", v[0], v[1], v[2], v[3], v[4], v[5], v[13]) + when;
             } else {
                 int id = next();
-                if (id >= 1 && id <= 4) l.text = fmt("camera: partner's %d", id + 7), l.camera = id + 7;
-                else if (id >= 5 && id <= 7) l.text = fmt("camera: enemy's %d", id - 5), l.camera = 100 + id - 5;
+                if (id >= 1 && id <= 4) l.text = fmt("camera: partner's shot %d", id), l.camera = id + 7;
+                else if (id >= 5 && id <= 7) l.text = fmt("camera: enemy's shot %d", id - 4), l.camera = 100 + id - 5;
                 else l.text = "camera: the enemy's view";
                 l.text += when;
             }
@@ -275,7 +277,7 @@ static std::vector<ScriptLine> read_script(const uint8_t *p, const uint8_t *end)
             l.text = s == 0x62 || s == 0x63 ? fmt("hit sound for %d", t) : fmt("sound %d for %d", s, t);
             break;
         }
-        case 11: l.text = fmt("wait %d", next()); break;
+        case 11: l.waitTicks = next(), l.text = fmt("wait %d", l.waitTicks); break;
         default:
             l.text = fmt("unknown command %d: the game would stop here", op);
             out.push_back(l);

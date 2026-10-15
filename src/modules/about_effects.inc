@@ -97,27 +97,33 @@ static const int FX_W = 320, FX_H = 240;
 static const int FXC_W = 960, FXC_H = 720;
 static const uint32_t FX_BG = 0xFF302824;
 
+/* An effect's frame F as straight-alpha RGBA (FX_W x FX_H, its point in the
+   middle): drawn over black and over white, the difference is each pixel's cover */
+static void fx_alpha(const Effect &fx, int f, std::vector<uint32_t> &px, std::vector<uint32_t> &white) {
+    px.assign(FX_W * FX_H, 0xFF000000u);
+    white.assign(FX_W * FX_H, 0xFFFFFFFFu);
+    fx.draw(f, px.data(), FX_W, FX_H, FX_W / 2, FX_H / 2);
+    fx.draw(f, white.data(), FX_W, FX_H, FX_W / 2, FX_H / 2);
+    for (int i = 0; i < FX_W * FX_H; i++) {
+        int a = 0;
+        for (int c = 0; c < 24; c += 8) a = std::max(a, 255 - (int)(white[i] >> c & 255) + (int)(px[i] >> c & 255));
+        a = std::clamp(a, 0, 255);
+        uint32_t out = 0;
+        for (int c = 0; c < 24; c += 8)
+            if (a) out |= (uint32_t)std::min(255, (int)(px[i] >> c & 255) * 255 / a) << c;
+        px[i] = out | (uint32_t)a << 24;
+    }
+}
+
 static int export_effect(const Effect &fx, std::string &dir) {
-    std::vector<uint32_t> px(FX_W * FX_H), white(FX_W * FX_H);
+    std::vector<uint32_t> px, white;
     dir = g_exe_dir + "effects";
     SDL_CreateDirectory(dir.c_str());
     dir += "/effect_" + std::to_string(fx.id);
     SDL_CreateDirectory(dir.c_str());
     int n = 0;
     for (int f = 0; f < fx.duration; f += 2, n++) {
-        std::fill(px.begin(), px.end(), 0xFF000000u);
-        std::fill(white.begin(), white.end(), 0xFFFFFFFFu);
-        fx.draw(f, px.data(), FX_W, FX_H, FX_W / 2, FX_H / 2);
-        fx.draw(f, white.data(), FX_W, FX_H, FX_W / 2, FX_H / 2);
-        for (int i = 0; i < FX_W * FX_H; i++) {
-            int a = 0;
-            for (int c = 0; c < 24; c += 8) a = std::max(a, 255 - (int)(white[i] >> c & 255) + (int)(px[i] >> c & 255));
-            a = std::clamp(a, 0, 255);
-            uint32_t out = 0;
-            for (int c = 0; c < 24; c += 8)
-                if (a) out |= (uint32_t)std::min(255, (int)(px[i] >> c & 255) * 255 / a) << c;
-            px[i] = out | (uint32_t)a << 24;
-        }
+        fx_alpha(fx, f, px, white);
         char name[32];
         snprintf(name, sizeof name, "/frame_%03d.png", n);
         SDL_Surface *s = SDL_CreateSurfaceFrom(FX_W, FX_H, SDL_PIXELFORMAT_ABGR8888, px.data(), FX_W * 4);

@@ -41,13 +41,28 @@ trademark of its owners.
   - the blends between motions play as the game plays them.
 - **Fighter** (from the battle's fighters' file, SMDLDATA.PRO):
   - each fighter that uses the model, partner or enemy;
-  - its cameras: a partner's 12 (the portraits, the battle shots), an enemy's 3, seen
-    as the game frames them;
+  - its cameras, seen as the game frames them and named by what the game uses each
+    for: a partner's six battle views (the default view the battle returns to between
+    actions; the game picks one by the enemy's number of cameras), its two portraits
+    (the battle menu's, and the one for low HP) and its four battle shots (the
+    second is the Digimon change's, the third the entrance's); an enemy's three
+    shots (the third is its entrance's);
   - its action scripts, decoded: the motions, cameras, effects, sounds and waits of
-    each technique and reaction. Click a motion to play it, a camera to look through
-    it.
+    each technique and reaction, grouped by what they are: the reactions to a hit, a
+    knockout and an evade; the basic attack; the physical, magic, signature and DNA
+    techniques; support and field ones. The scripts that no technique's number names
+    stay as "Script N" (hover one for what uses it). Click a motion to play it, a
+    camera to look through it;
+  - **Play the script** runs it as the battle does (the motions and their waits, the
+    cameras, the sprite effects), and each sprite effect draws over the view where the
+    battle puts it, at its point in the world (an attack's is at the enemy's side,
+    out of sight of the partner's own cameras: the view says so) and the screen's
+    320x240 scale. It
+    leaves out the jumps and moves, the other side's fighter, the sounds and the
+    fades, and shows no effect for a script's "own" one (the technique's) except the
+    Fight command's.
 
-  <img src="docs/img/fighter.png" alt="Kumamon seen through one of its battle cameras, with an action script decoded on the left" width="720">
+  <img src="docs/img/fighter.png" alt="Kumamon through one of its battle cameras, with its action scripts grouped by what they are" width="720">
 - **Effects** (the battle's 2D effects: hit sparks, techniques' sprites):
   - every sprite effect, played as the battle plays it: each of its sprite
     animations' frames, palettes, offsets, scales and rotations, blended as the PSX

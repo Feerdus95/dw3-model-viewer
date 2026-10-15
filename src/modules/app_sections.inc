@@ -1014,39 +1014,170 @@
         display_options();
     };
 
+    /* ===== Fighter: what a script is, and playing it ===== */
+    /* What each script's number is: its technique's script (TechData.script)
+       or the reaction the other side runs for a hit's result. The ones with no
+       name are listed by the techniques that use them, or not known */
+    struct ScriptRole {
+        const char *name, *examples;
+        int group;
+    };
+    static const char *SCRIPT_GROUPS[4] = {"Reactions", "Attacks and techniques", "Support and field", "Other"};
+    auto script_role = [](int i) -> ScriptRole {
+        switch (i) {
+        case 2: return {"Hit reaction", "Runs when the other side's attack hits", 0};
+        case 3: return {"KO reaction", "Runs when the other side's attack knocks it out", 0};
+        case 4: return {"Evade reaction", "Runs when the other side's attack misses", 0};
+        case 5: return {"Basic attack (Fight)", "The Fight command, and many enemy attacks", 1};
+        case 6: return {"Physical technique", "Heat Cutter, Whirlwind, Spinal Tap...", 1};
+        case 8: return {"", "Used by Hammer Rush, Impact Rush", 1};
+        case 9: return {"Magic technique", "Flame Ball, Divine Rain, Ice Blow...", 1};
+        case 11: return {"Signature technique", "Hot Head, Pepper Breath, Nova Blast...", 1};
+        case 12: return {"DNA technique", "Omnimon, Beelzemon, BladeGarurumon...", 1};
+        case 13: return {"", "Used by Triple Fire, Giga Fire, Black Thorn...", 1};
+        case 10: return {"Support technique", "Small Heal, Antidote, Erase Poison...", 2};
+        case 15: return {"Field technique", "Fire Field, Water Field, Dark Field...", 2};
+        case 16: return {"", "Used by Armor Break, Slow Down, Mega Break", 2};
+        default: return {"", "", 3};
+        }
+    };
+
+    /* A script played as the battle runs it: motions, waits, cameras and the
+       sprite effects it starts, which draw over the view where the game
+       would put them. It leaves out what the viewer has no model for: the
+       jumps and moves, the other side, the sounds, fades and added models */
+    struct FxShot {
+        int id;
+        float t, pos[3];
+    };
+    struct ScriptRun {
+        bool on = false;
+        int script = 0, pc = 0;
+        float wait = 0;
+        bool waitMotion = false;
+    } run;
+    std::vector<FxShot> shots;
+    std::map<int, std::unique_ptr<Effect>> shotFx;
+    GLuint shotTex[8] = {};
+    std::vector<uint32_t> shotPx, shotWhite;
+    auto shot_effect = [&](int id) -> Effect * {
+        auto it = shotFx.find(id);
+        if (it == shotFx.end()) {
+            auto e = std::make_unique<Effect>();
+            if (!e->load(id, g_data)) e.reset();
+            it = shotFx.emplace(id, std::move(e)).first;
+        }
+        return it->second.get();
+    };
+    auto run_script = [&](int i) {
+        if (!scene.model || i < 0 || i >= (int)scene.model->scripts.size()) return;
+        run = ScriptRun{true, i, 0, 0, false};
+        shots.clear();
+        scene.model->setMotion(1);
+        view.playing = true;
+    };
+    auto run_step = [&](float dt) {
+        float ticks = view.playing ? dt * 60 * view.speed : 0;
+        for (FxShot &s : shots) s.t += ticks;
+        shots.erase(std::remove_if(shots.begin(), shots.end(),
+                                   [&](const FxShot &s) {
+                                       Effect *e = shot_effect(s.id);
+                                       return !e || s.t >= e->duration;
+                                   }),
+                    shots.end());
+        if (!run.on || !scene.model || run.script >= (int)scene.model->scripts.size()) return void(run.on = false);
+        Model &m = *scene.model;
+        const std::vector<ScriptLine> &sc = m.scripts[run.script];
+        const Fighter *f = scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter];
+        float budget = ticks;
+        for (int guard = 0; guard < 200; guard++) {
+            if (run.wait > 0) {
+                float use = std::min(run.wait, budget);
+                run.wait -= use, budget -= use;
+                if (run.wait > 0) return;
+            }
+            if (run.waitMotion) {
+                if (!m.motionDone) return;
+                run.waitMotion = false;
+            }
+            if (run.pc >= (int)sc.size()) return void(run.on = false);
+            const ScriptLine &ln = sc[run.pc++];
+            if (ln.text == "end") {
+                run.on = false;
+                m.setMotion(1);
+                return;
+            }
+            if (ln.motion > 0 && ln.motion <= (int)m.motions.size()) m.setMotion(ln.motion);
+            if (ln.camera >= 0 && f) {
+                int c = ln.camera >= 100 ? ln.camera - 100 : ln.camera;
+                if (c < (int)f->cameras.size() && (ln.camera >= 100) == f->enemy) apply_camera(view, *f, c);
+            }
+            if (ln.fxStart) {
+                /* 9999 is the technique's own: the Fight command's, 2, is the only one every script of its number shares */
+                int id = ln.fxOwn ? (run.script == 5 ? 2 : -1) : ln.effect;
+                if (id < 0) note(NOTE_INFO, "This script's own sprite effect is its technique's; it isn't shown here.");
+                else if (shots.size() < 8 && shot_effect(id)) {
+                    /* the point is in the PSX's space; the view's is the battle's (y and z negated) about the fighter */
+                    float b[3] = {(float)ln.pos[0], -(float)ln.pos[1], -(float)ln.pos[2]}, p[3] = {b[0], b[1], b[2]};
+                    if (f) battle_to_view(*f, b, p);
+                    shots.push_back({id, 0, {p[0], p[1], p[2]}});
+                }
+            }
+            if (ln.waitTicks >= 0) run.wait = (float)ln.waitTicks;
+            if (ln.waitMotion) run.waitMotion = true;
+        }
+    };
+
     /* ===== Fighter ===== */
     auto fighter_browser = [&]() {
         Model &mm = *scene.model;
         if (scene.fighters.empty()) return hint("No fighter uses this file: it has no action scripts.");
         const Fighter &f = *scene.fighters[scene.fighter];
-        hint("Click a motion to play it, a camera to look through it, an effect to see it.");
+        hint("Play a script to see it as the battle runs it. Click a line to play its motion, look through its camera or see its effect.");
+        if (run.on && button(IC_PAUSE "  Stop the script")) run.on = false;
         ImGui::BeginChild("scripts");
-        for (int i = 0; i < (int)mm.scripts.size(); i++) {
-            const std::vector<ScriptLine> &sc = mm.scripts[i];
-            char h[48];
-            snprintf(h, sizeof h, "script %d  (%d commands)", i, (int)sc.size());
-            if (!ImGui::CollapsingHeader(h)) continue;
-            ImGui::PushID(i);
-            for (int k = 0; k < (int)sc.size(); k++) {
-                const ScriptLine &ln = sc[k];
-                ImGui::PushID(k);
-                bool active = ln.motion > 0 || ln.camera >= 0 || ln.effect >= 0;
-                if (!active) ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-                if (ImGui::Selectable(ln.text.c_str(), false) && active) {
-                    if (ln.motion > 0 && ln.motion <= (int)mm.motions.size()) mm.setMotion(ln.motion), view.playing = true;
-                    if (ln.effect >= 0) pick_effect(ln.effect, true);
-                    int c = ln.camera >= 100 ? ln.camera - 100 : ln.camera;
-                    if (c >= 0 && c < (int)f.cameras.size() && (ln.camera >= 100) == f.enemy) apply_camera(view, f, c);
-                }
-                if (!active) ImGui::PopStyleColor();
-                if (active) tip("%s", ln.motion > 0 ? "Plays this motion" : ln.effect >= 0 ? "Shows this effect (in Effects)" : "Looks through this camera");
+        for (int g = 0; g < 4; g++) {
+            bool titled = false;
+            for (int i = 0; i < (int)mm.scripts.size(); i++) {
+                const std::vector<ScriptLine> &sc = mm.scripts[i];
+                ScriptRole role = script_role(i);
+                if (role.group != g) continue;
+                if (!titled) heading(SCRIPT_GROUPS[g]), titled = true;
+                char h[96];
+                if (*role.name) snprintf(h, sizeof h, "%s  #%d###script%d", role.name, i, i);
+                else snprintf(h, sizeof h, "Script %d###script%d", i, i);
+                bool open = ImGui::CollapsingHeader(h);
+                tip("%s%s%d commands", role.examples, *role.examples ? ".  " : "", (int)sc.size());
                 if (ImGui::BeginPopupContextItem()) {
-                    if (ImGui::MenuItem(IC_COPY "  Copy the command")) ImGui::SetClipboardText(ln.text.c_str());
+                    if (ImGui::MenuItem(IC_PLAY "  Play the script")) run_script(i);
                     ImGui::EndPopup();
+                }
+                if (!open) continue;
+                ImGui::PushID(i);
+                if (button(run.on && run.script == i ? IC_RESTART "  Play again" : IC_PLAY "  Play the script")) run_script(i);
+                tip("Runs its commands in order: motions, waits, cameras and sprite effects");
+                for (int k = 0; k < (int)sc.size(); k++) {
+                    const ScriptLine &ln = sc[k];
+                    ImGui::PushID(k);
+                    bool active = ln.motion > 0 || ln.camera >= 0 || ln.effect >= 0;
+                    bool now = run.on && run.script == i && k == run.pc - 1;
+                    if (!active) ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                    if (ImGui::Selectable(ln.text.c_str(), now) && active) {
+                        if (ln.motion > 0 && ln.motion <= (int)mm.motions.size()) mm.setMotion(ln.motion), view.playing = true;
+                        if (ln.effect >= 0) pick_effect(ln.effect, true);
+                        int c = ln.camera >= 100 ? ln.camera - 100 : ln.camera;
+                        if (c >= 0 && c < (int)f.cameras.size() && (ln.camera >= 100) == f.enemy) apply_camera(view, f, c);
+                    }
+                    if (!active) ImGui::PopStyleColor();
+                    if (active) tip("%s", ln.motion > 0 ? "Plays this motion" : ln.effect >= 0 ? "Shows this effect (in Effects)" : "Looks through this camera");
+                    if (ImGui::BeginPopupContextItem()) {
+                        if (ImGui::MenuItem(IC_COPY "  Copy the command")) ImGui::SetClipboardText(ln.text.c_str());
+                        ImGui::EndPopup();
+                    }
+                    ImGui::PopID();
                 }
                 ImGui::PopID();
             }
-            ImGui::PopID();
         }
         ImGui::EndChild();
     };
@@ -1080,18 +1211,24 @@
         for (bool u : cf.faceUsed) parts += u;
         field("Fighter", "%d (kind 0x%X)", cf.id, cf.kind);
         field("Face", "%d parts", parts);
+        if (cf.enemy && cf.cameraCount > 0) field("Battle view", "its partner's %d", cf.cameraCount);
         heading("Cameras");
         if (button(IC_CAMERA "  Free camera", view.gameCamera < 0 ? 1 : 0)) frame_model(scene, view);
         tip("Orbit freely: dragging in the view leaves the game's camera too");
-        static const char *HINT[12] = {"", "", "", "", "", "", "portrait", "portrait, 2nd idle", "battle", "battle", "battle", "battle"};
-        if (ImGui::BeginTable("cams", 2)) {
+        static const char *CAMERA_GROUPS[3] = {"Battle views (the default view)", "Portraits", "Battle shots"};
+        for (int g = 0; g < 3; g++) {
+            bool any = false;
+            for (int i = 0; i < (int)cf.cameras.size(); i++) any |= camera_role(cf.enemy, i).group == g;
+            if (!any) continue;
+            hint("%s", CAMERA_GROUPS[g]);
             for (int i = 0; i < (int)cf.cameras.size(); i++) {
-                ImGui::TableNextColumn();
-                char l[48];
-                snprintf(l, sizeof l, "%s %d  %s", IC_CAMERA, i, !cf.enemy && i < 12 ? HINT[i] : "");
+                CameraRole r = camera_role(cf.enemy, i);
+                if (r.group != g) continue;
+                char l[80];
+                snprintf(l, sizeof l, "%s  %s###cam%d", IC_CAMERA, r.name, i);
                 if (ImGui::Selectable(l, view.gameCamera == i)) apply_camera(view, cf, i);
+                tip("Camera %d: %s", i, r.what);
             }
-            ImGui::EndTable();
         }
         if (ImGui::CollapsingHeader("Technical details"))
             field("Entries", "bones %d, motions %d, scripts %d", cf.modelEntry, cf.motionsEntry, cf.effectsEntry);

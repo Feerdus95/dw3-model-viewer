@@ -29,6 +29,7 @@ struct Fighter {
     int modelFid, modelEntry, motionsFid, motionsEntry, effectsFid, effectsEntry;
     std::string name;
     int distance, height; /* where it stands in battle (FighterInfo) */
+    int cameraCount = 0;  /* an enemy's own: the battle's default view is its partner's camera of this number - 1 */
     bool faceUsed[16];
     FaceRect face[16];
     std::vector<GameCamera> cameras; /* 12 for a partner, an enemy's own count */
@@ -49,6 +50,10 @@ struct ScriptLine {
     int motion = 0;  /* a motion it plays on its own side's model, 1-based */
     int camera = -1; /* a fighter camera: 0-11 the partner's, 100-102 the enemy's */
     int effect = -1; /* a sprite effect it starts */
+    bool fxStart = false, fxOwn = false; /* it starts one, at POS; its id 9999: the technique's own */
+    int pos[3] = {0, 0, 0};
+    int waitTicks = -1;       /* a wait, in ticks */
+    bool waitMotion = false;  /* waits for its own model's motion to end */
 };
 
 struct GameData {

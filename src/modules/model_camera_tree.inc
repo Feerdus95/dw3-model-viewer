@@ -12,12 +12,58 @@ static void frame_model(Scene &s, View &v) {
    viewer's +z, turned round to face the enemy, an enemy as far the other way;
    both raised by height. The viewer's model stands at the origin, so the
    camera comes into its space. Its projection is on a 240-line screen. */
+static void battle_to_view(const Fighter &f, const float b[3], float out[3]) {
+    float home = (float)(0x1400 + f.distance) * (f.enemy ? -1 : 1);
+    float x = b[0], y = b[1] - (float)f.height, z = b[2] - home;
+    out[0] = f.enemy ? x : -x, out[1] = y, out[2] = f.enemy ? z : -z; /* a partner's turn: 0x800 about y */
+}
+
+/* What a fighter's camera is for, by where the game looks through it: the
+   battle's own view (FIGHTSTG_getEnemyView, which the scripts' camera 0, the
+   idle between actions and the ends of the entrances and Digimon changes go
+   back to) is the PARTNER's camera numbered the enemy's camera count - 1, so
+   its first six are that view for enemies of 1 to 6 cameras; then the
+   scripts' camera command (a partner's shots 1-4 are its cameras 8-11, an
+   enemy's 1-3 its cameras 0-2), the portrait (6, or 7 while it is weak), a
+   Digimon change (9) and an entrance (a partner's 10, an enemy's 2) */
+struct CameraRole {
+    const char *name, *what;
+    int group; /* 0 battle views, 1 portraits, 2 battle shots */
+};
+static CameraRole camera_role(bool enemy, int i) {
+    if (enemy) {
+        switch (i) {
+        case 0: return {"Shot 1", "Script camera 5, and a view the battle's own shots use", 2};
+        case 1: return {"Shot 2", "Script camera 6", 2};
+        case 2: return {"Shot 3, entrance", "Script camera 7; also the camera on it as it enters", 2};
+        default: return {"Unused", "Nothing in the game looks through it", 2};
+        }
+    }
+    static const char *VIEW_NAME[6] = {"Battle view 1", "Battle view 2", "Battle view 3", "Battle view 4", "Battle view 5", "Battle view 6"};
+    static const char *VIEW_WHAT[6] = {
+        "The battle's default view when the enemy has 1 camera: what the game looks through while it waits for the next action",
+        "The battle's default view when the enemy has 2 cameras (the most common)",
+        "The battle's default view when the enemy has 3 cameras",
+        "The battle's default view when the enemy has 4 cameras",
+        "The battle's default view when the enemy has 5 cameras",
+        "The battle's default view when the enemy has 6 cameras"};
+    switch (i) {
+    case 0: case 1: case 2: case 3: case 4: case 5: return {VIEW_NAME[i], VIEW_WHAT[i], 0};
+    case 6: return {"Portrait", "The 3D portrait in the battle menu", 1};
+    case 7: return {"Portrait, low HP", "The portrait while it is in its weak idle (a quarter of its HP or less)", 1};
+    case 8: return {"Shot 1", "Script camera 1; also a view the battle's own shots use", 2};
+    case 9: return {"Shot 2, Digimon change", "Script camera 2; also the camera of a Digimon change", 2};
+    case 10: return {"Shot 3, entrance", "Script camera 3; also the camera on it as it enters", 2};
+    case 11: return {"Shot 4", "Script camera 4", 2};
+    default: return {"Unused", "Nothing in the game looks through it", 0};
+    }
+}
+
 static void apply_camera(View &v, const Fighter &f, int index) {
     const GameCamera &c = f.cameras[index];
-    float home = (float)(0x1400 + f.distance) * (f.enemy ? -1 : 1);
     auto local = [&](const int16_t *p, float *out) {
-        float x = p[0], y = p[1] - (float)f.height, z = p[2] - home;
-        out[0] = f.enemy ? x : -x, out[1] = y, out[2] = f.enemy ? z : -z; /* a partner's turn: 0x800 about y */
+        float b[3] = {(float)p[0], (float)p[1], (float)p[2]};
+        battle_to_view(f, b, out);
     };
     float eye[3], ref[3];
     local(c.pos, eye);

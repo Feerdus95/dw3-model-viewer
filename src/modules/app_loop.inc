@@ -35,13 +35,14 @@
             bool faced = false;
             for (int i = 0; i < std::min(n, 8); i++) {
                 m.advance(1);
-                if (m.motionDone && view.loop) m.setMotion(m.motion);
+                if (m.motionDone && view.loop && !run.on) m.setMotion(m.motion);
                 m.evaluate();
                 if (view.face) faced |= m.stepFace();
             }
             if (faced) upload_vram(scene);
         }
 
+        run_step(dt);
         if (fx.id >= 0 && fxPlaying) { /* in ticks, 60 a second, as FIGHTSTG_battle.frames counts */
             fxTime += dt * 60 * view.speed;
             if (fxTime >= fx_length()) fxTime = fxLoop ? 0 : (float)fx_length();
@@ -504,6 +505,27 @@
             }
         } else if (scene.model) {
             M4 vp = view_proj(view, (int)vw, (int)vh);
+            /* the sprite effects a script is running, where the battle puts them: at their point in the world,
+               one PSX pixel (the screen is 320x240) the view's height over 240 */
+            for (size_t k = 0; k < shots.size() && k < 8; k++) {
+                Effect *e = shot_effect(shots[k].id);
+                const float *gp = shots[k].pos;
+                ImVec2 c;
+                if (!e) continue;
+                if (!to_screen(vp, gp, vw, vh, c) || c.x < -FX_W || c.x > vw + FX_W || c.y < -FX_H || c.y > vh + FX_H) {
+                    char t[96];
+                    snprintf(t, sizeof t, "Sprite effect %d plays out of view: it is at the enemy's side", shots[k].id);
+                    ImVec2 ts = bold->CalcTextSizeA(bold->FontSize, FLT_MAX, 0, t) + pad * 2;
+                    box_text(ImVec2(vc.x - ts.x / 2, vy + 52 * dpi), IM_COL32(20, 22, 26, 225), IM_COL32(255, 217, 51, 230),
+                             IM_COL32(255, 232, 140, 255), t, bold);
+                    continue;
+                }
+                fx_alpha(*e, (int)shots[k].t, shotPx, shotWhite);
+                shotTex[k] = rgba_texture(shotTex[k], shotPx, FX_W, FX_H);
+                float px = vh / 240.0f;
+                ImVec2 mid = ImVec2(vx, vy) + c, half(FX_W / 2 * px, FX_H / 2 * px);
+                dl->AddImage((ImTextureID)(intptr_t)shotTex[k], mid - half, mid + half);
+            }
             /* the selection's label: its name, as the lists have it, over it */
             std::vector<int> bs = selected_bones();
             float lo[3], hi[3];
@@ -564,6 +586,8 @@
                          ownShow && fx.id >= 0 ? "   own images" : "");
             else if (section == TEXTURES) snprintf(t, sizeof t, IC_TEXTURE "  2D texture page   zoom %.1fx", view.texZoom);
             else if (stage_on()) snprintf(t, sizeof t, IC_STAGE "  3D stage %d", stageId);
+            else if (scene.model && view.gameCamera >= 0 && !scene.fighters.empty())
+                snprintf(t, sizeof t, IC_MODEL "  3D model   " IC_CAMERA " %s", camera_role(scene.fighters[scene.fighter]->enemy, view.gameCamera).name);
             else if (scene.model && view.gameCamera >= 0) snprintf(t, sizeof t, IC_MODEL "  3D model   " IC_CAMERA " game camera %d", view.gameCamera);
             else if (scene.model) snprintf(t, sizeof t, IC_MODEL "  3D model");
             else t[0] = 0;
