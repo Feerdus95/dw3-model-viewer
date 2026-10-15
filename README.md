@@ -8,6 +8,8 @@ It never changes the game's own files: what you edit with it (effects' images, f
 stages) goes to the native port's mods folder. **No game data is included**; it reads
 the models from your own disc image.
 
+<p align="center"><img src="docs/img/overview.png" alt="Kumamon playing one of its motions: the motion list on the left, the playback controls on the right" width="860"></p>
+
 This is a fan project, not affiliated with or endorsed by Bandai Namco. Digimon is a
 trademark of its owners.
 
@@ -30,6 +32,8 @@ trademark of its owners.
     yellow and its name shows over it;
   - hover a bone for its entries in the file and its current position, rotation and
     scale.
+
+  <img src="docs/img/skeleton.png" alt="Hovering a bone shows what it is; the selected one is labeled in the view and highlighted in the tree" width="720">
 - **Motions**:
   - each of a fighter's motions (62 for the Digimon);
   - play, pause, step one keyframe, restart, loop, speed from 0.05x to 4x, and a
@@ -42,6 +46,8 @@ trademark of its owners.
   - its action scripts, decoded: the motions, cameras, effects, sounds and waits of
     each technique and reaction. Click a motion to play it, a camera to look through
     it.
+
+  <img src="docs/img/fighter.png" alt="Kumamon seen through one of its battle cameras, with an action script decoded on the left" width="720">
 - **Effects** (the battle's 2D effects: hit sparks, techniques' sprites):
   - every sprite effect, played as the battle plays it: each of its sprite
     animations' frames, palettes, offsets, scales and rotations, blended as the PSX
@@ -60,6 +66,8 @@ trademark of its owners.
     set each frame's PNG and ticks (reorder, duplicate, copy and paste, remove, undo),
     the offset, scale and blend (alpha or add); Save writes the folder's `effect.json`,
     which the port plays as shown.
+
+  <img src="docs/img/effects.png" alt="The fight hit effect playing, with the own-images panel open" width="720">
 - **Stages** (the 57 fight stages, in a section of their own):
   - each one inside, as a battle sees it, with its background color;
   - its parts (ground, props, panorama): click one in the view or the list to move
@@ -76,10 +84,14 @@ trademark of its owners.
     `data/mods/<file>.bin` (with the stages' table, `0459.bin`), which the port reads
     instead of the disc's when it starts; **Revert to the disc's** takes it back.
     Stages 0 and 1, and 34 and 56, share their model.
+
+  <img src="docs/img/stages.png" alt="A stage's part selected, with its right-click menu open" width="720">
 - **Textures**:
   - every texture page and palette pair the polygons use, decoded;
   - the UVs drawn over it (the selected part's in yellow);
   - save one as a BMP: the starting point for redrawing a texture.
+
+  <img src="docs/img/textures.png" alt="A texture page with the selected bone's UVs in yellow" width="720">
 
 ## Requirements
 
