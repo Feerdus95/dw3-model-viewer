@@ -28,6 +28,18 @@
     bool gzAngSet = false;
     float partStart[5] = {};                    /* its move, turn and scale when that began */
     std::string partVerb;
+    /* a model's pieces (bones) adjusted: each bone's mesh moved, turned or scaled about its middle, in the bone's own axes */
+    struct PieceEdit {
+        float move[3] = {0, 0, 0}, turn = 0, scale = 1;
+        bool gone = false; /* collapsed to a point: not drawn in the game */
+        bool any() const { return move[0] || move[1] || move[2] || turn || scale != 1 || gone; }
+    };
+    std::map<int, PieceEdit> charEdits;
+    std::vector<std::vector<Vec3s>> charV0, charN0; /* each bone's vertices and normals as the file has them */
+    std::vector<std::map<int, PieceEdit>> charUndo, charRedo;
+    const Model *charOf = nullptr;
+    std::string charPath;
+    bool charDirty = false, charEditing = false, charMoved = false;
     float texPan[2] = {0, 0};
     bool texFitPending = true;
     double ownPushTime = -10, bgPushTime = -10; /* a drag's changes make one step of undo */
@@ -50,9 +62,25 @@
         if (!dirty) return then();
         ask.title = "Unsaved changes", ask.text = text, ask.ok = "Discard them", ask.then = std::move(then), ask.open = true, ask.danger = true;
     };
+    auto char_on = [&]() { return scene.model && !stage_on() && scene.fid > 0; };
+    /* a model that isn't the one the edits are of: they're forgotten */
+    auto char_sync = [&]() {
+        const Model *m = scene.model.get();
+        if (m == charOf && scene.path == charPath) return;
+        charOf = m, charPath = scene.path, charDirty = charEditing = false;
+        charEdits.clear(), charUndo.clear(), charRedo.clear(), charV0.clear(), charN0.clear();
+        if (!m) return;
+        for (const Bone &b : m->bones) {
+            charV0.push_back(b.mesh >= 0 ? m->meshes[b.mesh].verts : std::vector<Vec3s>());
+            charN0.push_back(b.mesh >= 0 ? m->meshes[b.mesh].normals : std::vector<Vec3s>());
+        }
+    };
     auto leave_stage = [&](std::function<void()> then) {
-        ask_first(stageDirty && stageId >= 0,
-                  "Stage " + std::to_string(stageId) + " has changes you haven't saved to the game. Leave it and lose them?", std::move(then));
+        bool cd = charDirty && !stage_on();
+        ask_first((stageDirty && stageId >= 0) || cd,
+                  cd ? "This model has piece changes you haven't saved to the game. Leave it and lose them?"
+                     : "Stage " + std::to_string(stageId) + " has changes you haven't saved to the game. Leave it and lose them?",
+                  std::move(then));
     };
     auto leave_own = [&](std::function<void()> then) {
         ask_first(ownDirty, "Effect " + std::to_string(fx.id) + "'s own images have changes you haven't saved. Leave them and lose them?",
@@ -120,6 +148,7 @@
     };
     /* each frame: the highlights, the hidden parts and the edit's preview, for the view */
     auto mark_scene = [&]() {
+        char_sync();
         if (!scene.model) return;
         int n = (int)scene.model->bones.size();
         scene.mark.assign(n, 0);
@@ -233,6 +262,85 @@
             &picked, win, &BIN, 1, g_data.c_str(), false);
     };
 
+    /* --- a model's pieces: the edits applied to the meshes in the view, and written into the model's file in place
+       (it keeps its size, so the animations and scripts still fit) as the port's mod file --- */
+    auto char_apply = [&]() {
+        Model &m = *scene.model;
+        for (size_t b = 1; b < m.bones.size() && b < charV0.size(); b++) {
+            Mesh &me = m.meshes[m.bones[b].mesh];
+            me.verts = charV0[b], me.normals = charN0[b];
+            auto it = charEdits.find((int)b);
+            if (it == charEdits.end() || charV0[b].empty()) continue;
+            const PieceEdit &e = it->second;
+            float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
+            for (const Vec3s &v : charV0[b]) {
+                float p[3] = {(float)v.x, (float)v.y, (float)v.z};
+                for (int i = 0; i < 3; i++) lo[i] = std::min(lo[i], p[i]), hi[i] = std::max(hi[i], p[i]);
+            }
+            float c[3] = {(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2};
+            float s = e.gone ? 0.0f : e.scale, cs = cosf(e.turn * 0.017453293f), sn = sinf(e.turn * 0.017453293f);
+            auto fit = [](float x) { return (int16_t)std::clamp((int)lroundf(x), -32768, 32767); };
+            for (Vec3s &v : me.verts) {
+                float dx = (v.x - c[0]) * s, dy = (v.y - c[1]) * s, dz = (v.z - c[2]) * s;
+                v = {fit(c[0] + e.move[0] + dx * cs + dz * sn), fit(c[1] + e.move[1] + dy), fit(c[2] + e.move[2] - dx * sn + dz * cs)};
+            }
+            for (Vec3s &n : me.normals) {
+                float x = n.x, z = n.z;
+                n.x = fit(x * cs + z * sn), n.z = fit(-x * sn + z * cs);
+            }
+        }
+        /* the view keeps its camera and what's hidden */
+        std::vector<bool> hidden = scene.hidden;
+        float center[3] = {scene.center[0], scene.center[1], scene.center[2]}, radius = scene.radius;
+        upload(scene);
+        scene.hidden = hidden;
+        memcpy(scene.center, center, sizeof center);
+        scene.radius = radius;
+    };
+    auto char_mark = [&]() { /* before an edit */
+        charUndo.push_back(charEdits);
+        if (charUndo.size() > 40) charUndo.erase(charUndo.begin());
+        charRedo.clear();
+    };
+    /* a change of the view's world, in the model's space, to the bone's own axes */
+    auto char_local = [&](int b, const float dw[3], float out[3]) {
+        const float *w = scene.model->pose[b].world;
+        float d[3] = {dw[0], -dw[1], -dw[2]};
+        float a = w[0], bb = w[4], c = w[8], dd = w[1], e = w[5], f = w[9], g = w[2], h = w[6], i = w[10];
+        float det = a * (e * i - f * h) - bb * (dd * i - f * g) + c * (dd * h - e * g);
+        out[0] = out[1] = out[2] = 0;
+        if (fabsf(det) < 1e-6f) return;
+        float inv[9] = {(e * i - f * h), -(bb * i - c * h), (bb * f - c * e), -(dd * i - f * g), (a * i - c * g),
+                        -(a * f - c * dd), (dd * h - e * g), -(a * h - bb * g), (a * e - bb * dd)};
+        for (int r = 0; r < 3; r++) out[r] = (inv[r * 3] * d[0] + inv[r * 3 + 1] * d[1] + inv[r * 3 + 2] * d[2]) / det;
+    };
+    auto char_save = [&]() {
+        std::vector<uint8_t> bytes = scene.model->file;
+        for (const auto &kv : charEdits) {
+            const Mesh &me = scene.model->meshes[scene.model->bones[kv.first].mesh];
+            patch_vecs(bytes, me.entry, 0, me.verts);
+            patch_vecs(bytes, me.entry, 1, me.normals);
+        }
+        SDL_CreateDirectory(mods_root().c_str());
+        std::ofstream(mod_path(scene.fid), std::ios::binary).write((const char *)bytes.data(), (std::streamsize)bytes.size());
+        charDirty = false;
+        note(NOTE_OK, "Saved " + scene.model->name + " to " + mod_path(scene.fid) + ": the game reads it when it starts");
+    };
+    auto char_mod = [&]() { return char_on() && SDL_GetPathInfo(mod_path(scene.fid).c_str(), nullptr); };
+    auto ask_revert_char = [&]() {
+        ask.title = "Revert to the disc's";
+        ask.text = scene.model->name + " goes back to the disc's: this deletes " + mod_path(scene.fid) + ". It can't be undone.";
+        ask.ok = "Revert", ask.danger = true, ask.open = true;
+        ask.then = [&]() {
+            int fid = scene.fid, fighter = scene.fighter;
+            std::string name = scene.model->name, path = scene.path;
+            SDL_RemovePath(mod_path(fid).c_str());
+            charOf = nullptr;
+            if (open_model(scene, view, name, path, status, fid, fighter)) after_open();
+            note(NOTE_OK, name + " is the disc's again");
+        };
+    };
+
     /* --- undo: the stage's edits, the own images' edits --- */
     std::shared_ptr<const std::vector<StageImage>> stageImages;
     auto same_images = [](const std::vector<StageImage> &a, const std::vector<StageImage> &b) {
@@ -271,6 +379,7 @@
     auto undo_own = [&]() { return section == EFFECTS; };
     auto can_undo = [&](bool redo) {
         if (undo_own()) return fx.id >= 0 && !(redo ? ownHist.redo : ownHist.undo).empty();
+        if (section == MODEL && char_on()) return !(redo ? charRedo : charUndo).empty();
         return stage_on() && !(redo ? stageHist.redo : stageHist.undo).empty();
     };
     auto do_undo = [&](bool redo) {
@@ -281,6 +390,13 @@
             OwnSnap s = std::move(from.back());
             from.pop_back();
             own_restore(s);
+        } else if (section == MODEL && char_on()) {
+            auto &from = redo ? charRedo : charUndo, &to = redo ? charUndo : charRedo;
+            to.push_back(charEdits);
+            charEdits = std::move(from.back());
+            from.pop_back();
+            char_apply();
+            charDirty = true;
         } else {
             std::vector<StageSnap> &from = redo ? stageHist.redo : stageHist.undo, &to = redo ? stageHist.undo : stageHist.redo;
             to.push_back(stage_snap());
@@ -499,9 +615,10 @@
         if (own.save()) ownDirty = false, ownIds = own_effects(ownRoot), note(NOTE_OK, "Saved " + own.dir + "/effect.json");
         else note(NOTE_ERROR, own.error);
     };
-    auto can_save = [&]() { return section == EFFECTS ? fx.id >= 0 && !own.frames.empty() : stage_on(); };
+    auto can_save = [&]() { return section == EFFECTS ? fx.id >= 0 && !own.frames.empty() : stage_on() || (char_on() && charDirty); };
     auto do_save = [&]() {
         if (!can_save()) return;
+        if (char_on() && section != EFFECTS) return char_save();
         section == EFFECTS ? own_save() : stage_save();
     };
     auto ask_revert = [&]() {
@@ -1206,8 +1323,98 @@
             tip("H");
             same_line_if_fits("Show only this");
             if (ImGui::Button("Show only this")) show_only(b);
+            if (char_on()) {
+                heading("Adjust this piece");
+                hint("Moves, turns or scales its mesh in the file, in the bone's own axes: the animations still move it. "
+                     "Drag the arrows or the box in the view.");
+                PieceEdit pe = charEdits.count(b) ? charEdits[b] : PieceEdit();
+                bool changed = false;
+                auto field_done = [&]() {
+                    if (ImGui::IsItemActivated()) char_mark(), charEditing = true;
+                    if (ImGui::IsItemDeactivated() && charEditing && !vpMoving) {
+                        if (!ImGui::IsItemDeactivatedAfterEdit() && !charUndo.empty()) charUndo.pop_back();
+                        charEditing = false;
+                    }
+                };
+                const ImGuiStyle &sty = ImGui::GetStyle();
+                float bw = ImGui::GetFrameHeight();
+                static const ImU32 AXC[3] = {IM_COL32(236, 84, 84, 255), IM_COL32(118, 208, 96, 255), IM_COL32(84, 142, 245, 255)};
+                static const char *AXN[3] = {"X", "Y", "Z"};
+                if (ImGui::BeginTable("##piece", 3, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings)) {
+                    ImGui::TableSetupColumn("##l", ImGuiTableColumnFlags_WidthFixed, std::max(bw, ImGui::CalcTextSize("Scale").x));
+                    ImGui::TableSetupColumn("##f", ImGuiTableColumnFlags_WidthStretch);
+                    ImGui::TableSetupColumn("##r", ImGuiTableColumnFlags_WidthFixed, bw);
+                    auto row = [&](const char *id, const std::function<void()> &label, const std::function<void()> &field,
+                                   const std::function<void()> &reset) {
+                        ImGui::PushID(id);
+                        ImGui::TableNextRow();
+                        ImGui::TableNextColumn();
+                        label();
+                        ImGui::TableNextColumn();
+                        ImGui::SetNextItemWidth(-FLT_MIN);
+                        field();
+                        field_done();
+                        ImGui::TableNextColumn();
+                        if (ImGui::Button(IC_UNDO, ImVec2(bw, bw))) char_mark(), reset(), changed = true;
+                        tip("Back to the start");
+                        ImGui::PopID();
+                    };
+                    for (int a = 0; a < 3; a++)
+                        row(AXN[a],
+                            [&]() {
+                                ImVec2 p0 = ImGui::GetCursorScreenPos();
+                                ImDrawList *adl = ImGui::GetWindowDrawList();
+                                adl->AddRectFilled(p0, p0 + ImVec2(bw, bw), AXC[a], sty.FrameRounding);
+                                adl->AddText(p0 + (ImVec2(bw, bw) - ImGui::CalcTextSize(AXN[a])) * 0.5f, IM_COL32(20, 22, 26, 255), AXN[a]);
+                                ImGui::Dummy(ImVec2(bw, bw));
+                                tip("In the bone's own axes, in the game's units%s.", a == 1 ? " (up is positive)" : "");
+                            },
+                            [&]() {
+                                float v = a == 1 ? 0.0f - pe.move[1] : pe.move[a];
+                                if (ImGui::DragFloat("##v", &v, 2, -4000, 4000, "%.0f")) pe.move[a] = a == 1 ? -v : v, changed = true;
+                            },
+                            [&]() { pe.move[a] = 0; });
+                    row("turn",
+                        [&]() {
+                            ImGui::AlignTextToFramePadding();
+                            ImGui::TextUnformatted("Turn");
+                            tip("About the bone's vertical axis.");
+                        },
+                        [&]() { changed |= ImGui::DragFloat("##v", &pe.turn, 0.5f, -180, 180, "%.1f deg"); }, [&]() { pe.turn = 0; });
+                    row("scale",
+                        [&]() {
+                            ImGui::AlignTextToFramePadding();
+                            ImGui::TextUnformatted("Scale");
+                            tip("In the view: drag the box.");
+                        },
+                        [&]() { changed |= ImGui::DragFloat("##v", &pe.scale, 0.01f, 0.05f, 20, "%.2f"); }, [&]() { pe.scale = 1; });
+                    ImGui::EndTable();
+                }
+                bool gone = pe.gone;
+                if (ImGui::Checkbox("Not drawn in the game", &gone)) char_mark(), pe.gone = gone, changed = true;
+                tip("Collapses the piece to a point, the way to remove it without touching the animations");
+                if (changed) {
+                    if (pe.any()) charEdits[b] = pe;
+                    else charEdits.erase(b);
+                    char_apply();
+                    charDirty = true;
+                }
+            }
         } else {
             hint("Click the model in the view, or a bone on the left, to see it here.");
+        }
+        if (char_on()) {
+            heading("In the game");
+            ImGui::BeginDisabled(!charDirty);
+            if (ImGui::Button(IC_SAVE "  Save to game")) char_save();
+            ImGui::EndDisabled();
+            tip("Writes %s to the port's mods folder (Ctrl+S): it reads it instead of the disc's when it starts", m.name.c_str());
+            same_line_if_fits(IC_RESTART "  Revert to the disc's");
+            ImGui::BeginDisabled(!char_mod() && !charDirty);
+            if (ImGui::Button(IC_RESTART "  Revert to the disc's")) ask_revert_char();
+            ImGui::EndDisabled();
+            if (charDirty) ImGui::TextColored(C_SELECT, "Unsaved changes");
+            else if (char_mod()) ImGui::TextDisabled("This is the mod's file.");
         }
         heading("Display");
         display_options();

@@ -320,6 +320,8 @@ static bool to_screen(const M4 &vp, const float p[3], float w, float h, ImVec2 &
 struct Gizmo {
     bool on = false;
     float o[3] = {}, len = 0; /* its centre in the world, and an arrow's length there */
+    float up = -1;            /* the y arrow's direction: -1 in a stage (y down), 1 in a model's view */
+    bool rings = true;
     ImVec2 c, tip[3], ring[48];
 };
 static const float GZ_DIR[3][3] = {{1, 0, 0}, {0, -1, 0}, {0, 0, 1}}; /* the game's y goes down: the arrow up is -y */
@@ -332,7 +334,7 @@ static bool gizmo_make(Gizmo &g, const M4 &vp, const float o[3], float w, float 
     memcpy(g.o, o, sizeof g.o);
     g.len = 90 * dpi * 2 * depth * tanf(fov / 2) / std::max(h, 1.0f);
     for (int a = 0; a < 3; a++) {
-        float p[3] = {o[0] + GZ_DIR[a][0] * g.len, o[1] + GZ_DIR[a][1] * g.len, o[2] + GZ_DIR[a][2] * g.len};
+        float p[3] = {o[0] + GZ_DIR[a][0] * g.len, o[1] + (a == 1 ? g.up : GZ_DIR[a][1]) * g.len, o[2] + GZ_DIR[a][2] * g.len};
         if (!to_screen(vp, p, w, h, g.tip[a])) return false;
     }
     for (int i = 0; i < 48; i++) {
@@ -359,7 +361,7 @@ static int gizmo_hit(const Gizmo &g, ImVec2 p, float dpi) {
         float d = seg_dist(p, g.c, g.tip[a]);
         if (d < best) best = d, hit = a;
     }
-    if (hit >= 0) return hit;
+    if (hit >= 0 || !g.rings) return hit;
     for (int i = 0; i < 48; i++) {
         float d = seg_dist(p, g.ring[i], g.ring[(i + 1) % 48]);
         if (d < best) best = d, hit = 3;
@@ -371,7 +373,7 @@ static void gizmo_draw(ImDrawList *dl, const Gizmo &g, ImVec2 at, int hot, float
     static const ImU32 COL[3] = {IM_COL32(236, 84, 84, 255), IM_COL32(118, 208, 96, 255), IM_COL32(84, 142, 245, 255)};
     static const char *NAME[3] = {"X", "Y", "Z"};
     const ImU32 yel = IM_COL32(255, 217, 51, 255), shade = IM_COL32(0, 0, 0, 120);
-    for (int i = 0; i < 48; i++) {
+    for (int i = 0; g.rings && i < 48; i++) {
         ImVec2 a = at + g.ring[i], b = at + g.ring[(i + 1) % 48];
         dl->AddLine(a, b, shade, 4.5f * dpi);
         dl->AddLine(a, b, hot == 3 ? yel : IM_COL32(255, 170, 60, 235), (hot == 3 ? 3.0f : 2.0f) * dpi);

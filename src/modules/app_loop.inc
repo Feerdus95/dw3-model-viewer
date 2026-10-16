@@ -18,6 +18,7 @@
             quitAsked = false;
             std::string what;
             if (stageDirty && stageId >= 0) what = "stage " + std::to_string(stageId);
+            if (charDirty && !stage_on()) what += (what.empty() ? "" : " and ") + std::string("the model's pieces");
             if (ownDirty) what += (what.empty() ? "" : " and ") + std::string("effect ") + std::to_string(fx.id) + "'s own images";
             ask_first(!what.empty(), "Your changes to " + what + " aren't saved. Quit anyway?", [&]() { running = false; });
             if (!what.empty()) ask.ok = "Quit without saving";
@@ -60,6 +61,7 @@
             }
             if (!picked.folder.empty()) {
                 ownRoot = picked.folder;
+                g_mods = ownRoot.substr(0, std::max<size_t>(ownRoot.find_last_of("/\\"), 0));
                 std::ofstream(g_exe_dir + "effects_dir.txt") << ownRoot << "\n";
                 ownHist.clear();
                 own_load();
@@ -128,6 +130,8 @@
                 if (ImGui::MenuItem(IC_RESTART "  Revert the stage to the disc's...", nullptr, false,
                                     stage_on() && (stageMods.count(stageInfo.fid) || stageDirty)))
                     ask_revert();
+                if (ImGui::MenuItem(IC_RESTART "  Revert the model to the disc's...", nullptr, false, char_on() && (char_mod() || charDirty)))
+                    ask_revert_char();
                 ImGui::Separator();
                 if (ImGui::MenuItem(IC_FOLDER "  Change the data folder...")) pick_data_folder();
                 if (ImGui::MenuItem(IC_FOLDER "  Change the effects' mods folder...")) pick_mods_folder();
@@ -298,6 +302,18 @@
                 gizmo_make(gz, view_proj(view, (int)vw, (int)vh), o, vw, vh, view.fov, dpi);
             }
         }
+        bool charGz = false;
+        if (section == MODEL && char_on() && !mode2d && scene.selected > 0) {
+            std::vector<int> gb = {scene.selected};
+            float lo[3], hi[3];
+            if (bones_box(scene, gb, lo, hi)) {
+                float o[3] = {(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2};
+                gz.up = 1, gz.rings = false;
+                gizmo_make(gz, view_proj(view, (int)vw, (int)vh), o, vw, vh, view.fov, dpi);
+                charGz = gz.on;
+            }
+        }
+        if (!charGz) gz.up = -1, gz.rings = true;
         if (gz.on) {
             gzHot = gzDrag >= 0 ? gzDrag : vpHover ? gizmo_hit(gz, ImVec2(mp.x - vx, mp.y - vy), dpi) : -1;
             if (gzHot >= 0) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
@@ -305,7 +321,11 @@
         for (int b = 0; b < 3; b++) {
             if (!ImGui::IsMouseClicked(b) || !vpHover) continue;
             vpDown[b] = true, vpUses++;
-            if (b == 0 && gzHot >= 0 && gz.on) {
+            if (b == 0 && gzHot >= 0 && gz.on && charGz) {
+                char_mark();
+                vpMoving = charEditing = true, charMoved = false;
+                gzDrag = gzHot;
+            } else if (b == 0 && gzHot >= 0 && gz.on) {
                 float pl[5];
                 part_place(stagePart, pl);
                 part_begin(gzHot == 3 ? "Turning" : gzHot == 4 ? "Scaling" : "Moving", pl);
@@ -334,7 +354,31 @@
                 pan2[0] = (vc.x + px * zoom2 - mp.x) / zoom2, pan2[1] = (vc.y + py * zoom2 - mp.y) / zoom2;
             }
         } else if (scene.model) {
-            if (vpDown[0] && vpMoving && gzDrag >= 0 && stagePart >= 0) {
+            if (vpDown[0] && vpMoving && charEditing && gzDrag >= 0 && charGz) {
+                /* a model's piece: an arrow moves it along that axis of the view, the box scales it */
+                int sb = scene.selected;
+                PieceEdit pe = charEdits.count(sb) ? charEdits[sb] : PieceEdit();
+                bool did = false;
+                if (gzDrag < 3) {
+                    ImVec2 s = gz.tip[gzDrag] - gz.c;
+                    float sl = s.x * s.x + s.y * s.y;
+                    if (sl > 1 && moved) {
+                        float k = (d.x * s.x + d.y * s.y) / sl * gz.len, dw[3] = {0, 0, 0}, loc[3];
+                        dw[gzDrag] = k;
+                        char_local(sb, dw, loc);
+                        for (int i = 0; i < 3; i++) pe.move[i] += loc[i];
+                        did = true;
+                    }
+                } else if (gzDrag == 4 && moved) {
+                    pe.scale = std::clamp(pe.scale * powf(1.01f, d.x - d.y), 0.05f, 20.0f);
+                    did = true;
+                }
+                if (did) {
+                    charEdits[sb] = pe;
+                    char_apply();
+                    charDirty = charMoved = true;
+                }
+            } else if (vpDown[0] && vpMoving && gzDrag >= 0 && stagePart >= 0) {
                 /* the gizmo: an arrow moves along its axis, the ring turns, the box scales */
                 StagePart &p = stageEdit.parts[stagePart];
                 if (gzDrag < 3) {
@@ -387,6 +431,11 @@
         for (int b = 0; b < 3; b++) {
             if (!vpDown[b] || ImGui::IsMouseDown(b)) continue;
             vpDown[b] = false;
+            if (b == 0 && vpMoving && charEditing) {
+                gzDrag = -1, vpMoving = charEditing = false;
+                if (!charMoved && !charUndo.empty()) charUndo.pop_back();
+                continue;
+            }
             if (b == 0 && vpMoving) {
                 gzDrag = -1;
                 float pl[5];

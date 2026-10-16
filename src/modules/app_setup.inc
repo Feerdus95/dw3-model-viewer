@@ -179,6 +179,10 @@ int main(int argc, char **argv) {
                     break;
                 }
     }
+    {
+        size_t e = ownRoot.find_last_of("/\\");
+        g_mods = e == std::string::npos ? ownRoot : ownRoot.substr(0, e);
+    }
     struct Picked { /* what the file dialogs gave, maybe from another thread */
         std::mutex m;
         std::vector<std::string> files;

@@ -79,10 +79,18 @@ static void apply_camera(View &v, const Fighter &f, int index) {
     v.gameCamera = index;
 }
 
+static std::string g_mods; /* the port's mods folder: a model saved there is the one opened */
+
 static bool open_model(Scene &s, View &v, const std::string &name, const std::string &path, std::string &status,
                        int fid = -1, int fighter = 0) {
     std::vector<uint8_t> bytes;
-    if (!read_file(path, bytes)) {
+    std::string use = path;
+    if (fid > 0 && !g_mods.empty()) {
+        char b[16];
+        snprintf(b, sizeof b, "/%04d.bin", fid);
+        if (SDL_GetPathInfo((g_mods + b).c_str(), nullptr)) use = g_mods + b;
+    }
+    if (!read_file(use, bytes)) {
         status = "can't read " + path;
         return false;
     }

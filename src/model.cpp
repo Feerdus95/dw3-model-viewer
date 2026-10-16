@@ -530,3 +530,15 @@ std::vector<uint32_t> decode_page(const std::vector<uint16_t> &vram, uint16_t tp
         }
     return out;
 }
+
+void patch_vecs(std::vector<uint8_t> &file, int meshEntry, int which, const std::vector<Vec3s> &vecs) {
+    Archive a;
+    a.data = file.data(), a.size = file.size();
+    Archive ma;
+    ma.data = a.entry(meshEntry);
+    if (!ma.data) return;
+    ma.size = a.entry_size(meshEntry);
+    uint8_t *p = const_cast<uint8_t *>(ma.entry(which));
+    if (!p || (size_t)rd16(p) != vecs.size()) return;
+    for (size_t k = 0; k < vecs.size(); k++) memcpy(p + 6 + k * 6, &vecs[k], 6);
+}

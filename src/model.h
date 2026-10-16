@@ -129,6 +129,9 @@ inline int clut_y(uint16_t c) { return c >> 6 & 511; }
 std::vector<uint32_t> decode_page(const std::vector<uint16_t> &vram, uint16_t tpage, uint16_t clut, int w, int h,
                                   bool stp = false);
 
+/* Writes VECS over entry WHICH (0 vertices, 1 normals) of the mesh archive at MESHENTRY, in place: the count stays */
+void patch_vecs(std::vector<uint8_t> &file, int meshEntry, int which, const std::vector<Vec3s> &vecs);
+
 /* A bone's matrix (column-major) from its position, rotation and scale: Rz *
    Ry * Rx (RotMatrixZYX), its columns scaled, at its position */
 void bone_matrix(const Vec3s &pos, const Vec3s &rot, const Vec3s &scale, float out[16]);
