@@ -1022,28 +1022,63 @@ bool StageEdit::boneMesh(int p, std::vector<uint8_t> &m) {
         if (im.tpage < 0 && !im.flat)
             return error = part.name + ": a face's texture isn't one of the model's pages (changing the pages isn't supported yet)", false;
     }
-    /* a normal for each vertex: its faces' (the PSX's winding), smoothed */
+    /* the normals: each corner takes its vertex's faces' that bend less than the crease from its own (the PSX's
+       winding), so smooth surfaces stay smooth and edges stay hard; one a vertex when there'd be too many */
     static const int PSX[2][4] = {{0, 2, 1, 0}, {0, 3, 1, 2}};
-    std::vector<std::array<float, 3>> acc(used.size(), {0, 0, 0});
-    for (const StageFace &f : part.faces) {
+    size_t nf = part.faces.size();
+    std::vector<std::array<float, 3>> area(nf, {0, 0, 0}), unit(nf, {0, -1, 0});
+    std::vector<std::vector<int>> at(used.size());
+    for (size_t g = 0; g < nf; g++) {
+        const StageFace &f = part.faces[g];
         const int *ord = PSX[f.n == 4];
-        int tri[2][3] = {{0, 1, 2}, {1, 3, 2}};
-        for (int t = 0; t < (f.n == 4 ? 2 : 1); t++) {
-            int i[3];
-            for (int k = 0; k < 3; k++) i[k] = vmap[f.v[ord[tri[t][k]]]];
-            const auto &a = loc[used[i[0]]], &b = loc[used[i[1]]], &c = loc[used[i[2]]];
+        static const int tri[2][3] = {{0, 1, 2}, {1, 3, 2}};
+        for (int c = 0; c < f.n; c++) at[vmap[f.v[c]]].push_back((int)g);
+        for (int t2 = 0; t2 < (f.n == 4 ? 2 : 1); t2++) {
+            const auto &a0 = loc[f.v[ord[tri[t2][0]]]], &b0 = loc[f.v[ord[tri[t2][1]]]], &c0 = loc[f.v[ord[tri[t2][2]]]];
             float u[3], w[3];
-            for (int k = 0; k < 3; k++) u[k] = (float)(b[k] - a[k]), w[k] = (float)(c[k] - a[k]);
-            float n[3] = {-(u[1] * w[2] - u[2] * w[1]), -(u[2] * w[0] - u[0] * w[2]), -(u[0] * w[1] - u[1] * w[0])};
-            for (int k = 0; k < 3; k++)
-                for (int q : i) acc[q][k] += n[k];
+            for (int k = 0; k < 3; k++) u[k] = (float)(b0[k] - a0[k]), w[k] = (float)(c0[k] - a0[k]);
+            area[g][0] -= u[1] * w[2] - u[2] * w[1], area[g][1] -= u[2] * w[0] - u[0] * w[2], area[g][2] -= u[0] * w[1] - u[1] * w[0];
         }
+        float l = sqrtf(area[g][0] * area[g][0] + area[g][1] * area[g][1] + area[g][2] * area[g][2]);
+        if (l > 1e-6f)
+            for (int k = 0; k < 3; k++) unit[g][k] = area[g][k] / l;
     }
-    std::vector<Vec3s> normals;
-    for (const auto &n : acc) {
+    auto quantize = [](std::array<float, 3> n) {
         float l = sqrtf(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-        if (l < 1e-6f) normals.push_back({0, -4096, 0});
-        else normals.push_back({(int16_t)lroundf(n[0] / l * 4096), (int16_t)lroundf(n[1] / l * 4096), (int16_t)lroundf(n[2] / l * 4096)});
+        if (l < 1e-6f) return Vec3s{0, -4096, 0};
+        return Vec3s{(int16_t)lroundf(n[0] / l * 4096), (int16_t)lroundf(n[1] / l * 4096), (int16_t)lroundf(n[2] / l * 4096)};
+    };
+    const float CREASE = 0.7f; /* cos 45 degrees */
+    std::vector<Vec3s> normals;
+    std::map<std::tuple<int, int, int>, int> normalAt;
+    std::vector<std::array<int, 4>> cornerNormal(nf, {0, 0, 0, 0});
+    auto index_of = [&](const Vec3s &n) {
+        auto key = std::make_tuple((int)n.x, (int)n.y, (int)n.z);
+        auto it = normalAt.find(key);
+        if (it == normalAt.end()) it = normalAt.emplace(key, (int)normals.size()).first, normals.push_back(n);
+        return it->second;
+    };
+    for (size_t g = 0; g < nf; g++)
+        for (int c = 0; c < part.faces[g].n; c++) {
+            int v = vmap[part.faces[g].v[c]];
+            std::array<float, 3> s = {0, 0, 0};
+            for (int o : at[v]) {
+                float d = unit[o][0] * unit[g][0] + unit[o][1] * unit[g][1] + unit[o][2] * unit[g][2];
+                if (d >= CREASE)
+                    for (int k = 0; k < 3; k++) s[k] += area[o][k];
+            }
+            cornerNormal[g][c] = index_of(quantize(s));
+        }
+    if (normals.size() > 256) { /* one a vertex */
+        normals.clear();
+        for (size_t v = 0; v < used.size(); v++) {
+            std::array<float, 3> s = {0, 0, 0};
+            for (int o : at[v])
+                for (int k = 0; k < 3; k++) s[k] += area[o][k];
+            normals.push_back(quantize(s));
+        }
+        for (size_t g = 0; g < nf; g++)
+            for (int c = 0; c < part.faces[g].n; c++) cornerNormal[g][c] = vmap[part.faces[g].v[c]];
     }
     /* the commands (FIGHTSTG_drawMesh): lit, gouraud; a run of each image, semi-transparency and kind */
     std::vector<int> faces(part.faces.size());
@@ -1077,7 +1112,7 @@ bool StageEdit::boneMesh(int p, std::vector<uint8_t> &m) {
         const int *ord = PSX[f.n == 4];
         cmd.push_back(0x00);
         for (int c = 0; c < f.n; c++) cmd.push_back((uint8_t)vmap[f.v[ord[c]]]);
-        for (int c = 0; c < f.n; c++) cmd.push_back((uint8_t)vmap[f.v[ord[c]]]); /* its normals: the vertices' */
+        for (int c = 0; c < f.n; c++) cmd.push_back((uint8_t)cornerNormal[fi][ord[c]]);
         if (!im.flat)
             for (int c = 0; c < f.n; c++) {
                 const float *uv = f.uv[ord[c]];
