@@ -408,8 +408,10 @@ bool StageEdit::importObj(const std::string &path) {
         int n = -1;
         char tail[8] = "";
         if (sscanf(file.c_str() + s, "tex%d.%4s", &n, tail) == 2 && n >= 0 && n < (int)images.size() && images[n].w == img.w &&
-            images[n].h == img.h && images[n].px == img.px)
-            img = images[n];
+            images[n].h == img.h) {
+            if (images[n].px == img.px) img = images[n];
+            else img.from = n;
+        }
     };
     auto image_of = [&](const std::string &m) {
         auto it = byMat.find(m);

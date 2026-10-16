@@ -136,9 +136,14 @@ std::vector<uint32_t> decode_page(const std::vector<uint16_t> &vram, uint16_t tp
 /* Writes VECS over entry WHICH (0 vertices, 1 normals) of the mesh archive at MESHENTRY, in place: the count stays */
 void patch_vecs(std::vector<uint8_t> &file, int meshEntry, int which, const std::vector<Vec3s> &vecs);
 
-/* Writes the TIM T (its pixels changed) over its entry of the textures' archive at TEXENTRY, in place: an RLEN one
-   is packed again and has to fit where it was; false and ERR when it doesn't */
-bool patch_tim(std::vector<uint8_t> &file, int texEntry, const Tim &t, std::string &err);
+/* Writes the TIMS (their pixels changed) over their entries of the textures' archive at TEXENTRY: an RLEN one is
+   packed again, and the archive and file grow as they need (replace_entries) */
+bool patch_tims(std::vector<uint8_t> &file, int texEntry, const std::vector<Tim> &tims, std::string &err);
+
+/* The texels of a 256x256 page (as decode_page gives them, WAS) that NOW has otherwise, written into CHANGES (VRAM
+   halfword -> value, over VRAM) as the nearest color of the page's CLUT; 4 and 8-bit pages only */
+bool texture_edits(const std::vector<uint16_t> &vram, uint16_t tpage, uint16_t clut, const std::vector<uint32_t> &was,
+                   const std::vector<uint32_t> &now, std::map<int, uint16_t> &changes, std::string &err);
 
 /* FILE with its entries REPL (index -> bytes) replaced, as a disc's file again (whole sectors) */
 std::vector<uint8_t> replace_entries(const std::vector<uint8_t> &file, const std::map<int, std::vector<uint8_t>> &repl);

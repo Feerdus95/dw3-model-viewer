@@ -35,10 +35,12 @@ trademark of its owners.
   - **Export OBJ / Import OBJ** (Model): one object per bone (`part_N`, at rest), the model's
     texture pages as PNGs. Move vertices, add or remove faces, change UVs in Blender; a bone
     whose faces changed gets a new mesh (up to 256 vertices, the model's own pages, a smooth
-    normal each) and the others stay. The file may grow by sectors. Keep the names, materials
-    and PNGs: new textures and new bones aren't supported yet. `--import-obj FILE` imports at start.
-  - limits: bones that share a mesh change together; a recolored texture has to pack
-    into the room its file has (it tells you when it doesn't).
+    normal each, hard edges kept) and the others stay. The file may grow by sectors. Keep the names,
+    materials and PNGs' sizes: new bones aren't supported yet. `--import-obj FILE` imports at start.
+  - a texture's PNG (texN.png of the export) can be painted too: its changed texels take the nearest
+    color of that page's own palette (the palette itself changes in Textures); 4 and 8-bit pages.
+    The file grows by sectors when its textures pack bigger.
+  - limit: bones that share a mesh change together.
 - **Skeleton**:
   - the bone tree, with each part's mesh;
   - show or hide any part, and select one (click it in the view or the tree): it turns

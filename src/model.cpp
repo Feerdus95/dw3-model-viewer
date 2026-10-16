@@ -545,24 +545,12 @@ void patch_vecs(std::vector<uint8_t> &file, int meshEntry, int which, const std:
     for (size_t k = 0; k < vecs.size(); k++) memcpy(p + 6 + k * 6, &vecs[k], 6);
 }
 
-bool patch_tim(std::vector<uint8_t> &file, int texEntry, const Tim &t, std::string &err) {
-    Archive a;
-    a.data = file.data(), a.size = file.size();
-    Archive ta;
-    ta.data = a.entry(texEntry);
-    if (!ta.data) return err = "no textures", false;
-    ta.size = a.entry_size(texEntry);
-    uint8_t *dst = const_cast<uint8_t *>(ta.entry(t.entry));
-    size_t room = ta.entry_size(t.entry);
-    if (!dst) return err = "no texture entry", false;
+/* A TIM as its entry holds it: RLEN packed again when it was packed */
+static std::vector<uint8_t> encode_tim(const Tim &t, const uint8_t *orig) {
     std::vector<uint8_t> buf = t.buf;
     memcpy(buf.data() + t.pxOff, t.pixels.data(), t.pixels.size() * 2);
-    if (!t.rlen) {
-        if (buf.size() > room) return err = "the texture doesn't fit", false;
-        memcpy(dst, buf.data(), buf.size());
-        return true;
-    }
-    std::vector<uint8_t> out(dst, dst + 8); /* "RLEN" and its size */
+    if (!t.rlen) return buf;
+    std::vector<uint8_t> out(orig, orig + 8); /* "RLEN" and its size */
     for (size_t i = 0; i < buf.size();) {
         size_t r = 1;
         while (i + r < buf.size() && buf[i + r] == buf[i] && r < 127) r++;
@@ -580,10 +568,37 @@ bool patch_tim(std::vector<uint8_t> &file, int texEntry, const Tim &t, std::stri
         out.insert(out.end(), buf.begin() + s, buf.begin() + s + n);
     }
     out.push_back(0);
-    if (out.size() > room)
-        return err = "the recolored texture packs " + std::to_string(out.size() - room) + " bytes bigger than the file has room for", false;
-    memcpy(dst, out.data(), out.size());
-    memset(dst + out.size(), 0, room - out.size());
+    return out;
+}
+
+bool patch_tims(std::vector<uint8_t> &file, int texEntry, const std::vector<Tim> &tims, std::string &err) {
+    Archive a;
+    a.data = file.data(), a.size = file.size();
+    Archive ta;
+    ta.data = a.entry(texEntry);
+    if (!ta.data) return err = "no textures", false;
+    ta.size = a.entry_size(texEntry);
+    int n = ta.count();
+    if (n <= 0) return err = "no textures", false;
+    std::vector<std::vector<uint8_t>> entries(n);
+    for (int i = 0; i < n; i++) {
+        if (!rd32(ta.data + i * 4)) continue;
+        const uint8_t *e = ta.entry(i);
+        if (e) entries[i].assign(e, e + ta.entry_size(i));
+    }
+    for (const Tim &t : tims) {
+        if (t.entry < 0 || t.entry >= n || entries[t.entry].size() < 8) return err = "a texture entry isn't there", false;
+        entries[t.entry] = encode_tim(t, entries[t.entry].data());
+    }
+    std::vector<uint8_t> sub(n * 4, 0);
+    for (int i = 0; i < n; i++) {
+        if (!rd32(ta.data + i * 4)) continue;
+        uint32_t at = (uint32_t)sub.size();
+        memcpy(&sub[i * 4], &at, 4);
+        sub.insert(sub.end(), entries[i].begin(), entries[i].end());
+        while (sub.size() & 3) sub.push_back(0);
+    }
+    file = replace_entries(file, {{texEntry, sub}});
     return true;
 }
 
@@ -608,4 +623,34 @@ std::vector<uint8_t> replace_entries(const std::vector<uint8_t> &file, const std
     }
     while (out.size() % 2048) out.push_back(0);
     return out;
+}
+
+bool texture_edits(const std::vector<uint16_t> &vram, uint16_t tpage, uint16_t clut, const std::vector<uint32_t> &was,
+                   const std::vector<uint32_t> &now, std::map<int, uint16_t> &changes, std::string &err) {
+    int px = tpage_x(tpage), py = tpage_y(tpage), cx = clut_x(clut), cy = clut_y(clut), depth = tpage_depth(tpage);
+    if (depth > 1) return err = "a 16-bit page can't be edited (only 4 and 8-bit ones)", false;
+    if (was.size() != 256 * 256 || now.size() != was.size()) return err = "a page's PNG must keep its 256x256 size", false;
+    int n = depth == 0 ? 16 : 256;
+    std::vector<uint16_t> pal(n);
+    for (int i = 0; i < n; i++) pal[i] = vram[(cy & 511) * 1024 + ((cx + i) & 1023)];
+    for (int v = 0; v < 256; v++)
+        for (int u = 0; u < 256; u++) {
+            uint32_t c = now[v * 256 + u];
+            if (c == was[v * 256 + u]) continue;
+            int best = -1;
+            long long bd = 1LL << 60;
+            for (int i = 0; i < n; i++) {
+                if ((c >> 24) < 64 ? pal[i] != 0 : pal[i] == 0) continue; /* a clear texel takes a clear color */
+                uint32_t q = rgba(pal[i], false);
+                long long d = 0;
+                for (int k = 0; k < 3; k++) d += (long long)((int)(q >> k * 8 & 255) - (int)(c >> k * 8 & 255)) * ((int)(q >> k * 8 & 255) - (int)(c >> k * 8 & 255));
+                if (d < bd) bd = d, best = i;
+            }
+            if (best < 0) continue;
+            int at = ((py + v) & 511) * 1024 + ((px + (depth == 0 ? u / 4 : u / 2)) & 1023), shift = depth == 0 ? (u & 3) * 4 : (u & 1) * 8;
+            int mask = depth == 0 ? 15 : 255;
+            uint16_t old = changes.count(at) ? changes[at] : vram[at];
+            changes[at] = (uint16_t)((old & ~(mask << shift)) | (best << shift));
+        }
+    return true;
 }

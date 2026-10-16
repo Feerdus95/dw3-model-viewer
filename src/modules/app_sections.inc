@@ -353,9 +353,11 @@
                 Tim &c = tims.emplace(t.entry, t).first->second;
                 c.pixels[(y - t.y) * t.w + x - t.x] = kv.second;
             }
-        for (const auto &kv : tims) {
+        if (!tims.empty()) {
+            std::vector<Tim> list;
+            for (const auto &kv : tims) list.push_back(kv.second);
             std::string err;
-            if (!patch_tim(bytes, scene.model->texEntry, kv.second, err)) {
+            if (!patch_tims(bytes, scene.model->texEntry, list, err)) {
                 note(NOTE_ERROR, err);
                 return false;
             }
@@ -405,13 +407,25 @@
     };
     /* an OBJ back: the bones whose faces changed get new meshes (the others stay), the file's size may change */
     auto char_import = [&](const std::string &path) {
+        char_sync();
         StageEdit cur, imp;
         char_parts(cur);
         imp = cur;
         if (!imp.importObj(path)) return note(NOTE_ERROR, imp.error);
         std::string warning = imp.error;
         std::vector<uint8_t> bytes;
-        if (!char_bytes(bytes)) return;
+        /* the pages the PNGs changed: their texels through the page's own palette */
+        std::map<int, uint16_t> texChanges = charPal;
+        bool texEdited = false;
+        for (StageImage &im : imp.images) {
+            if (im.from < 0 || im.from >= (int)cur.images.size()) continue;
+            const StageImage &was = cur.images[im.from];
+            if (was.tpage < 0) return note(NOTE_ERROR, "tex" + std::to_string(im.from) + ".png: the polygons with no texture have none to edit");
+            std::string err;
+            if (!texture_edits(scene.model->vram, (uint16_t)was.tpage, (uint16_t)was.pageClut, was.px, im.px, texChanges, err))
+                return note(NOTE_ERROR, "tex" + std::to_string(im.from) + ".png: " + err);
+            im.tpage = was.tpage, im.pageClut = was.pageClut, texEdited = true;
+        }
         std::map<int, std::vector<uint8_t>> repl;
         std::set<int> seen;
         int changed = 0, skipped = 0;
@@ -428,8 +442,20 @@
             repl[scene.model->meshes[scene.model->bones[b].mesh].entry] = std::move(mesh);
             changed++;
         }
-        if (!changed) return note(NOTE_INFO, "No bone's faces changed in " + path);
-        if (!char_reload(replace_entries(bytes, repl))) return;
+        if (!changed && !texEdited) return note(NOTE_INFO, "No bone's faces or pages changed in " + path);
+        if (!changed) { /* only pages: the palette's colors and texels, as edits */
+            char_mark();
+            charPal = texChanges;
+            char_pal_apply();
+            charDirty = true;
+            return note(NOTE_OK, "Imported the pages' changes from " + path + " (Ctrl+Z undoes; the texels take the page's palette colors)");
+        }
+        std::map<int, uint16_t> palWas = charPal;
+        charPal = texChanges;
+        if (!char_bytes(bytes) || !char_reload(replace_entries(bytes, repl))) {
+            charPal = palWas;
+            return;
+        }
         char_sync();
         charDirty = true;
         std::string extra;

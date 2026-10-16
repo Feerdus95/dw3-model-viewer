@@ -38,6 +38,7 @@ struct StageImage {
     /* a battle model's page as its polygons read it (tpage & 0x19F, CLUT); -1: not one of its pages */
     int tpage = -1, pageClut = 0;
     bool flat = false; /* the polygons with no texture */
+    int from = -1;     /* read from a PNG named texN of an export: N (its pixels may be edited) */
 };
 
 /* A polygon: its corners counter-clockwise seen from the front (OBJ's), its
