@@ -854,6 +854,9 @@
             ImGui::Checkbox("Skeleton", &view.skeleton);
             ImGui::TableNextColumn();
             ImGui::Checkbox("Grid", &view.grid);
+            ImGui::TableNextColumn();
+            ImGui::Checkbox("Effect points", &view.marks);
+            tip("A cross where each effect of a script is (pink: a sprite, blue: an effect model), to see where they land on the model");
             ImGui::EndTable();
         }
         ImGui::Checkbox("Back-face culling", &view.cull);
@@ -2033,6 +2036,8 @@
         field("Fighter", "%d (kind 0x%X)", cf.id, cf.kind);
         field("Face", "%d parts", parts);
         if (cf.enemy && cf.cameraCount > 0) field("Battle view", "its partner's %d", cf.cameraCount);
+        ImGui::Checkbox("Effect points", &view.marks);
+        tip("A cross where each effect of a played script is (pink: a sprite, blue: an effect model), to see where they land on the model");
         heading("Cameras");
         if (button(IC_CAMERA "  Free camera", view.gameCamera < 0 ? 1 : 0)) frame_model(scene, view);
         tip("Orbit freely: dragging in the view leaves the game's camera too");

@@ -9,6 +9,7 @@ struct View {
     int gameCamera = -1;
     bool face = true;
     bool wireframe = false, skeleton = false, cull = false, grid = true;
+    bool marks = false; /* a cross where each effect of a script is */
     bool playing = true, loop = true;
     float speed = 1, ticks = 0;
     int texCombo = 0;
@@ -213,6 +214,25 @@ static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vec
             float a[3] = {pw[12], -pw[13], -pw[14]}, c[3] = {w[12], -w[13], -w[14]};
             bool sel = b < s.mark.size() ? s.mark[b] == 2 : (int)b == s.selected;
             line(l, a, c, sel ? 1.0f : 0.2f, sel ? 0.9f : 1.0f, sel ? 0.2f : 0.4f);
+        }
+        GL(glDisable)(GL_DEPTH_TEST);
+        draw_lines(l, vp);
+    }
+    if (v.marks) { /* where the effects are, against the model: a cross each */
+        std::vector<float> l;
+        float k = v.cam.dist * 0.03f;
+        auto cross = [&](const float p[3], float r, float g, float b) {
+            for (int a = 0; a < 3; a++) {
+                float lo[3] = {p[0], p[1], p[2]}, hi[3] = {p[0], p[1], p[2]};
+                lo[a] -= k, hi[a] += k;
+                line(l, lo, hi, r, g, b);
+            }
+        };
+        for (const SpriteDraw &sp : sprites)
+            if (!sp.screen) cross(sp.pos, 1, 0.3f, 0.9f);
+        for (const ExtraModel &e : extras) {
+            float p[3] = {e.pre.m[12], -e.pre.m[13], -e.pre.m[14]};
+            cross(p, 0.3f, 0.9f, 1);
         }
         GL(glDisable)(GL_DEPTH_TEST);
         draw_lines(l, vp);

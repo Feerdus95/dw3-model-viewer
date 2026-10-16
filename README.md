@@ -70,6 +70,8 @@ trademark of its owners.
     techniques; support and field ones. The scripts that no technique's number names
     stay as "Script N" (hover one for what uses it). Click a motion to play it, a
     camera to look through it;
+  - **Effect points** (Fighter, or Model's display options) draws a cross where each effect of a played
+    script is (pink: a sprite, blue: an effect model), to see where they land on a modified model;
   - **Play the script** runs it as the battle does: the motions and their waits, the
     cameras (the view stays where the battle puts it, the default view first, unless
     you uncheck "Keep the game's camera"), the sprite effects and the effect models.
