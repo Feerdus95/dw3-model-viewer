@@ -1151,3 +1151,12 @@ bool StageEdit::boneMesh(int p, std::vector<uint8_t> &m) {
     pad4(m);
     return true;
 }
+
+bool StageEdit::newBone(int p, const StagePart *parent, std::vector<uint8_t> &mesh, std::vector<uint8_t> &keys) {
+    StagePart &part = parts[p];
+    if (parent) memcpy(part.bind, parent->bind, sizeof part.bind);
+    else identity(part.bind);
+    if (!boneMesh(p, mesh)) return false;
+    keys = static_keys();
+    return true;
+}

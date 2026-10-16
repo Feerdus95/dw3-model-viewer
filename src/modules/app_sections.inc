@@ -428,10 +428,27 @@
         }
         std::map<int, std::vector<uint8_t>> repl;
         std::set<int> seen;
-        int changed = 0, skipped = 0;
+        int changed = 0, skipped = 0, nbones = (int)scene.model->bones.size() - 1;
+        struct NewBone {
+            int parent;
+            std::vector<uint8_t> mesh, keys;
+        };
+        std::vector<NewBone> fresh; /* the objects named new_P_...: bones after the model's, on bone P (0 the root) */
         for (int k = 0; k < (int)imp.parts.size(); k++) {
             int b = 0;
-            if (sscanf(imp.parts[k].name.c_str(), "part_%d", &b) != 1 || b < 1 || b >= (int)scene.model->bones.size()) {
+            const std::string &nm = imp.parts[k].name;
+            if (nm.rfind("new", 0) == 0) {
+                int pp = 0;
+                if (nm.size() > 3 && nm[3] == '_' && isdigit((unsigned char)nm[4])) pp = atoi(nm.c_str() + 4);
+                if (pp > nbones) return note(NOTE_ERROR, nm + ": there is no bone " + std::to_string(pp) + " to hang it on");
+                if (nbones + (int)fresh.size() + 1 > 255) return note(NOTE_ERROR, "A model holds 255 bones at most");
+                NewBone nb;
+                nb.parent = pp;
+                if (!imp.newBone(k, pp ? &cur.parts[pp - 1] : nullptr, nb.mesh, nb.keys)) return note(NOTE_ERROR, imp.error);
+                fresh.push_back(std::move(nb));
+                continue;
+            }
+            if (sscanf(nm.c_str(), "part_%d", &b) != 1 || b < 1 || b >= (int)scene.model->bones.size()) {
                 skipped++;
                 continue;
             }
@@ -441,6 +458,24 @@
             if (!imp.boneMesh(k, mesh)) return note(NOTE_ERROR, imp.error);
             repl[scene.model->meshes[scene.model->bones[b].mesh].entry] = std::move(mesh);
             changed++;
+        }
+        if (!fresh.empty()) { /* the bone list and the new entries (a mesh and its keys each) */
+            Archive ar;
+            ar.data = scene.model->file.data(), ar.size = scene.model->file.size();
+            int at = ar.count();
+            const uint8_t *le = ar.entry(scene.model->boneEntry);
+            std::vector<uint8_t> list(le, le + ar.entry_size(scene.model->boneEntry));
+            list.resize(8 + 12 * nbones); /* the entry may be padded */
+            uint32_t total = (uint32_t)(nbones + fresh.size());
+            memcpy(&list[4], &total, 4);
+            for (const NewBone &nb : fresh) {
+                uint32_t trip[3] = {(uint32_t)nb.parent, (uint32_t)at, (uint32_t)at + 1};
+                list.insert(list.end(), (const uint8_t *)trip, (const uint8_t *)trip + 12);
+                repl[at++] = nb.mesh;
+                repl[at++] = nb.keys;
+            }
+            repl[scene.model->boneEntry] = list;
+            changed += (int)fresh.size();
         }
         if (!changed && !texEdited) return note(NOTE_INFO, "No bone's faces or pages changed in " + path);
         if (!changed) { /* only pages: the palette's colors and texels, as edits */

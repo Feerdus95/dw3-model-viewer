@@ -36,7 +36,9 @@ trademark of its owners.
     texture pages as PNGs. Move vertices, add or remove faces, change UVs in Blender; a bone
     whose faces changed gets a new mesh (up to 256 vertices, the model's own pages, a smooth
     normal each, hard edges kept) and the others stay. The file may grow by sectors. Keep the names,
-    materials and PNGs' sizes: new bones aren't supported yet. `--import-obj FILE` imports at start.
+    materials and PNGs' sizes. A new object named `new_P_anything` becomes a new bone after the model's
+    on bone P (`new_0_...` on the root): its keys don't move it from where its parent is, so it follows
+    that bone's animation. Up to 255 bones; the game's scripts and effects don't know the new ones. `--import-obj FILE` imports at start.
   - a texture's PNG (texN.png of the export) can be painted too: its changed texels take the nearest
     color of that page's own palette (the palette itself changes in Textures); 4 and 8-bit pages.
     The file grows by sectors when its textures pack bigger.

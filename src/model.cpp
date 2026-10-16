@@ -611,11 +611,14 @@ std::vector<uint8_t> replace_entries(const std::vector<uint8_t> &file, const std
         const uint8_t *e = base.entry(i);
         if (e && rd32(file.data() + i * 4)) entries[i].assign(e, e + base.entry_size(i));
     }
-    for (const auto &kv : repl)
-        if (kv.first >= 0 && kv.first < count) entries[kv.first] = kv.second;
-    std::vector<uint8_t> out(count * 4, 0);
-    for (int i = 0; i < count; i++) {
-        if (!rd32(file.data() + i * 4)) continue; /* the disc's 0: kept */
+    for (const auto &kv : repl) { /* past the last entry: new ones */
+        if (kv.first >= (int)entries.size()) entries.resize(kv.first + 1);
+        if (kv.first >= 0) entries[kv.first] = kv.second;
+    }
+    int total = (int)entries.size();
+    std::vector<uint8_t> out(total * 4, 0);
+    for (int i = 0; i < total; i++) {
+        if (i < count && !rd32(file.data() + i * 4)) continue; /* the disc's 0: kept */
         uint32_t at = (uint32_t)out.size();
         memcpy(&out[i * 4], &at, 4);
         out.insert(out.end(), entries[i].begin(), entries[i].end());

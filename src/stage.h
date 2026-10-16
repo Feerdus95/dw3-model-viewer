@@ -92,4 +92,6 @@ struct StageEdit {
        commands), the pages and CLUTs the faces' images say; false and ERROR when it can't be */
     std::string signature(int part) const;
     bool boneMesh(int part, std::vector<uint8_t> &mesh);
+    /* ... for a new bone on PARENT (null: the root): its keys don't move it from where its parent is */
+    bool newBone(int part, const StagePart *parent, std::vector<uint8_t> &mesh, std::vector<uint8_t> &keys);
 };
