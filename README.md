@@ -93,10 +93,12 @@ trademark of its owners.
   - each one inside, as a battle sees it, with its background color;
   - its parts (ground, props, panorama): click one in the view or the list to move
     (also Ctrl+drag in the view), turn or scale it, duplicate, copy, paste or remove
-    it, hide it in the view, or mark it Always drawn to skip the bounds check (the
+    it; a selected part has a gizmo in the view (arrows move it, the ring turns it, the
+    box scales it) and X / Y / Z fields (up is positive); hide it in the view, or mark it Always drawn to skip the bounds check (the
     ground's and the panorama's); Ctrl+Z undoes;
-  - add parts from any other stage (a forest's trees in another stage), fixed where
-    they stood;
+  - add parts from any other stage with the catalog: a window with a picture of every
+    part of the 57 stages, a search and a stage filter (a forest's trees in another
+    stage), fixed where they stood;
   - export it as an OBJ with its MTL and PNGs (y up, 1 unit = 100 of the game's) to
     edit in Blender, and import it back: each object is a part (keep their names to
     keep their keys), its textures repacked into the stage's three texture pages, 16
@@ -255,6 +257,8 @@ under the mouse. Right-click anything, in the view or a list, for its actions.
 | Ctrl+Z, Ctrl+Y | undo, redo the stage's or the own images' edits |
 | Ctrl+S | save the stage, or the own images |
 | F1 | every control |
+
+The window's size, position and panel widths are remembered (`settings.ini`, next to the exe).
 
 A part copied with Ctrl+C pastes into another stage too. Leaving a stage or an effect
 with changes you haven't saved, quitting, or reverting a stage asks first.
