@@ -18,7 +18,7 @@ struct SeamJoint {
     const char *cls = "";
     int pairs = 0, verts = 0;
     float cover = 0, minGap = 0, drift = 0, normalDeg = 0, maxSep = 0;
-    int poses = 0, apart = 0; /* poses seen, and those where the two pieces' boxes are 1% of the model apart */
+    int poses = 0, apart = 0, sepMotion = 0, sepKey = 0; /* poses seen, and those where the two pieces' boxes are 1% of the model apart */
     std::vector<std::pair<int, int>> pv; /* child vertex, parent vertex */
 };
 
@@ -132,7 +132,8 @@ static int check_seams() {
                             s2 += g * g;
                         }
                         float s = sqrtf(s2) / D;
-                        j.poses++, j.apart += s > 0.01f, j.maxSep = std::max(j.maxSep, s);
+                        j.poses++, j.apart += s > 0.01f;
+                        if (s > j.maxSep) j.maxSep = s, j.sepMotion = (int)mo, j.sepKey = k;
                     }
                     if (!m.pose[j.bone].visible || !m.pose[j.parent].visible) continue;
                     const Mesh &cm = m.meshes[m.bones[j.bone].mesh], &pm = m.meshes[m.bones[j.parent].mesh];
@@ -146,9 +147,9 @@ static int check_seams() {
         for (SeamJoint &j : js) all.push_back(std::move(j));
     }
     for (const SeamJoint &j : all)
-        printf("%04d %-13s b%-3d <- b%-3d %-4s pairs %3d/%-3d cover %3.0f%% gap %5.2f%% drift %6.2f%% normals %5.1f deg  apart %3d%% of poses, up to %5.1f%%\n", j.fid,
+        printf("%04d %-13s b%-3d <- b%-3d %-4s pairs %3d/%-3d cover %3.0f%% gap %5.2f%% drift %6.2f%% normals %5.1f deg  apart %3d%% of poses, up to %5.1f%% (motion %d key %d)\n", j.fid,
                j.model.c_str(), j.bone, j.parent, j.cls, j.pairs, j.verts, j.cover * 100, j.minGap * 100, j.drift * 100, j.normalDeg,
-               j.poses ? j.apart * 100 / j.poses : 0, j.maxSep * 100);
+               j.poses ? j.apart * 100 / j.poses : 0, j.maxSep * 100, j.sepMotion, j.sepKey);
     /* the summary */
     const char *names[] = {"COIN", "OVER", "GAP", "FAR"};
     printf("\n%d models (%d skipped), %d joints\n", models, skipped, (int)all.size());
