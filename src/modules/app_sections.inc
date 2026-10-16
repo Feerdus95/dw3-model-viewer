@@ -36,11 +36,16 @@
     };
     std::map<int, PieceEdit> charEdits;
     std::vector<std::vector<Vec3s>> charV0, charN0; /* each bone's vertices and normals as the file has them */
+    /* a step of undo: the edits and palette, and (an OBJ import's) the model's file as it was, with its number */
     struct CharSnap {
         std::map<int, PieceEdit> e;
         std::map<int, uint16_t> pal;
+        std::shared_ptr<const std::vector<uint8_t>> file;
+        int gen = 0;
     };
     std::vector<CharSnap> charUndo, charRedo;
+    CharSnap charClean; /* the edits as they were when the file was last saved (or opened) ... */
+    int charGen = 0, charCleanGen = 0, charGenSeq = 0; /* ... and the file's number then and now */
     std::map<int, uint16_t> charPal; /* palette colors changed, by VRAM halfword */
     std::set<int> charPalShown;      /* ... and which of them the view's VRAM has */
     bool palSession = false, palEdited = false;
@@ -77,6 +82,7 @@
         if (m == charOf && scene.path == charPath) return;
         charOf = m, charPath = scene.path, charDirty = charEditing = false;
         charEdits.clear(), charUndo.clear(), charRedo.clear(), charV0.clear(), charN0.clear(), charPal.clear(), charPalShown.clear();
+        charClean = CharSnap(), charGen = charCleanGen = 0;
         palSession = false;
         if (!m) return;
         for (const Bone &b : m->bones) {
@@ -370,6 +376,7 @@
         SDL_CreateDirectory(mods_root().c_str());
         std::ofstream(mod_path(scene.fid), std::ios::binary).write((const char *)bytes.data(), (std::streamsize)bytes.size());
         charDirty = false;
+        charClean = {charEdits, charPal}, charCleanGen = charGen;
         note(NOTE_OK, "Saved " + scene.model->name + " to " + mod_path(scene.fid) + ": the game reads it when it starts");
     };
     /* the model's bones as parts: the OBJ's objects */
@@ -405,6 +412,29 @@
         if (motion > 0) scene.model->setMotion(motion);
         return true;
     };
+    /* a different file for the same model (an import, or undoing one): the undo steps and what's saved stay */
+    auto char_swap_file = [&](std::vector<uint8_t> bytes) {
+        auto undo = charUndo, redo = charRedo;
+        CharSnap clean = charClean;
+        int cleanGen = charCleanGen;
+        if (!char_reload(std::move(bytes))) return false;
+        char_sync();
+        charUndo = std::move(undo), charRedo = std::move(redo), charClean = std::move(clean), charCleanGen = cleanGen;
+        return true;
+    };
+    /* the edits changed or went back: unsaved only if they differ from what was saved */
+    auto char_same_edits = [&](const std::map<int, PieceEdit> &a, const std::map<int, PieceEdit> &b) {
+        auto v = [](const std::map<int, PieceEdit> &m) {
+            std::vector<std::array<float, 7>> out;
+            for (const auto &kv : m)
+                if (kv.second.any())
+                    out.push_back({(float)kv.first, kv.second.move[0], kv.second.move[1], kv.second.move[2], kv.second.turn, kv.second.scale,
+                                   (float)kv.second.gone});
+            return out;
+        };
+        return v(a) == v(b);
+    };
+    auto char_unsaved = [&]() { return charGen != charCleanGen || !char_same_edits(charEdits, charClean.e) || charPal != charClean.pal; };
     /* an OBJ back: the bones whose faces changed get new meshes (the others stay), the file's size may change */
     auto char_import = [&](const std::string &path) {
         char_sync();
@@ -487,17 +517,20 @@
         }
         std::map<int, uint16_t> palWas = charPal;
         charPal = texChanges;
-        if (!char_bytes(bytes) || !char_reload(replace_entries(bytes, repl))) {
+        CharSnap pre{charEdits, palWas, std::make_shared<const std::vector<uint8_t>>(scene.model->file), charGen};
+        if (!char_bytes(bytes) || !char_swap_file(replace_entries(bytes, repl))) {
             charPal = palWas;
             return;
         }
-        char_sync();
+        charUndo.push_back(std::move(pre)), charRedo.clear();
+        if (charUndo.size() > 40) charUndo.erase(charUndo.begin());
+        charGen = ++charGenSeq;
         charDirty = true;
         std::string extra;
         if (skipped) extra += "; " + std::to_string(skipped) + " objects not named part_N skipped";
         if (seen.size() + 1 < scene.model->bones.size()) extra += "; bones with no object kept";
         note(warning.empty() ? NOTE_OK : NOTE_WARN,
-             "Imported " + std::to_string(changed) + " bones from " + path + extra + " (Revert goes back; Ctrl+Z can't undo it)");
+             "Imported " + std::to_string(changed) + " bones from " + path + extra + " (Ctrl+Z undoes it)");
     };
     auto char_mod = [&]() { return char_on() && SDL_GetPathInfo(mod_path(scene.fid).c_str(), nullptr); };
     auto ask_revert_char = [&]() {
@@ -565,13 +598,24 @@
             own_restore(s);
         } else if (section == MODEL && char_on()) {
             auto &from = redo ? charRedo : charUndo, &to = redo ? charUndo : charRedo;
-            to.push_back({charEdits, charPal});
+            CharSnap now{charEdits, charPal};
             CharSnap s = std::move(from.back());
             from.pop_back();
+            if (s.file) { /* across an OBJ import: the file goes back (or on) too */
+                now.file = std::make_shared<const std::vector<uint8_t>>(scene.model->file), now.gen = charGen;
+                to.push_back(std::move(now));
+                if (!char_swap_file(*s.file)) {
+                    to.pop_back(), from.push_back(std::move(s));
+                    return;
+                }
+                charGen = s.gen;
+            } else {
+                to.push_back(std::move(now));
+            }
             charEdits = std::move(s.e), charPal = std::move(s.pal);
             char_apply();
             char_pal_apply();
-            charDirty = true;
+            charDirty = char_unsaved();
         } else {
             std::vector<StageSnap> &from = redo ? stageHist.redo : stageHist.undo, &to = redo ? stageHist.undo : stageHist.redo;
             to.push_back(stage_snap());
@@ -1204,6 +1248,8 @@
         ImGui::BeginChild("##catgrid", ImVec2(0, -foot), ImGuiChildFlags_Borders);
         int cols = std::max(1, (int)(ImGui::GetContentRegionAvail().x / (cell.x + sty.ItemSpacing.x)));
         int rows = ((int)shown.size() + cols - 1) / cols, want = -1, addNow = -1;
+        /* the free width is split to both sides, so the grid sits in the middle */
+        float rowOff = std::max(0.0f, (ImGui::GetContentRegionAvail().x - (cols * (cell.x + sty.ItemSpacing.x) - sty.ItemSpacing.x)) / 2);
         ImGuiListClipper clip;
         clip.Begin(rows, cell.y + sty.ItemSpacing.y);
         while (clip.Step()) {
@@ -1215,6 +1261,7 @@
                     const CatPart &cp = cat[i];
                     ImGui::PushID(i);
                     if (c) ImGui::SameLine();
+                    else ImGui::SetCursorPosX(ImGui::GetCursorPosX() + rowOff);
                     ImVec2 p = ImGui::GetCursorScreenPos();
                     if (ImGui::Selectable("##c", catPick == i, 0, cell)) catPick = i;
                     if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) addNow = i;

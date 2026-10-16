@@ -273,7 +273,7 @@ under the mouse. Right-click anything, in the view or a list, for its actions.
 | H, Alt+H | hide the selection, show everything |
 | Space, Left / Right | play / pause, step |
 | Ctrl+C, Ctrl+V, Ctrl+D, Del | copy, paste, duplicate, delete a stage's part or an own images' frame |
-| Ctrl+Z, Ctrl+Y | undo, redo the stage's or the own images' edits |
+| Ctrl+Z, Ctrl+Y | undo, redo the stage's, the model's or the own images' edits |
 | Ctrl+S | save the stage, or the own images |
 | F1 | every control |
 
