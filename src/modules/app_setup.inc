@@ -2,7 +2,7 @@ int main(int argc, char **argv) {
     std::string shot, open_path, data;
     std::string start_obj; /* an OBJ to import once the model is open */
     int shot_motion = 1, shot_key = 0, shot_cam = -1, shot_stage = 0, shot_fighter = 0;
-    bool check = false, users = false, stages = false;
+    bool check = false, users = false, stages = false, seams = false;
     int effect = -1;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -16,6 +16,7 @@ int main(int argc, char **argv) {
         else if (a == "--data" && i + 1 < argc) data = argv[++i];
         else if (a == "--check") check = true;
         else if (a == "--stages") stages = true;
+        else if (a == "--seams") seams = true;
         else if (a == "--effect" && i + 1 < argc) effect = atoi(argv[++i]);
         else if (a == "--effect-users") users = true;
         else open_path = a;
@@ -24,8 +25,9 @@ int main(int argc, char **argv) {
     g_exe_dir = base ? base : "";
     find_data(data);
 
-    if (check || users || stages || !shot.empty() || effect >= 0) attach_console();
+    if (check || users || stages || seams || !shot.empty() || effect >= 0) attach_console();
     if (stages) return check_stages();
+    if (seams) return check_seams();
     if (users) {
         std::map<int, std::set<std::string>> by = effect_users();
         for (int id : effect_ids()) {

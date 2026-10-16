@@ -5,6 +5,7 @@
    dw3mv --shot out.bmp [--motion N] [--key K] file.bin
                                draws one frame of the model to a BMP and exits
    dw3mv --check               reads every model of the disc and prints what it found
+   dw3mv --seams               reports how each bone's mesh meets its parent's, at rest and over every motion (a dev diagnostic)
    dw3mv --effect ID           saves 2D effect ID's frames as PNGs and exits
    dw3mv --effect-users        prints which Digimon's action scripts start each 2D effect
 
@@ -55,6 +56,7 @@
 #include "modules/viewer_render.inc"
 #include "modules/ui_kit.inc"
 #include "modules/stage_validation.inc"
+#include "modules/seam_report.inc"
 #include "modules/model_camera_tree.inc"
 #include "modules/app_setup.inc"
 #include "modules/app_sections.inc"
