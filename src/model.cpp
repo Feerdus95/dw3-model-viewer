@@ -174,13 +174,15 @@ void read_tims(const Archive &a, int texX, int texY, std::vector<Tim> &out) {
         if (at + 12 > buf.size()) continue;
         Tim t;
         t.x = texX + i * 0x40, t.y = texY, t.rlen = rlen;
+        t.entry = i, t.pxOff = at + 12;
         t.w = (uint16_t)rd16(buf.data() + at + 8);
         t.h = (uint16_t)rd16(buf.data() + at + 10);
         size_t px = (size_t)t.w * t.h;
         if (at + 12 + px * 2 > buf.size()) continue;
         t.pixels.resize(px);
         memcpy(t.pixels.data(), buf.data() + at + 12, px * 2);
-        out.push_back(t);
+        t.buf = std::move(buf);
+        out.push_back(std::move(t));
     }
 }
 
@@ -541,4 +543,46 @@ void patch_vecs(std::vector<uint8_t> &file, int meshEntry, int which, const std:
     uint8_t *p = const_cast<uint8_t *>(ma.entry(which));
     if (!p || (size_t)rd16(p) != vecs.size()) return;
     for (size_t k = 0; k < vecs.size(); k++) memcpy(p + 6 + k * 6, &vecs[k], 6);
+}
+
+bool patch_tim(std::vector<uint8_t> &file, int texEntry, const Tim &t, std::string &err) {
+    Archive a;
+    a.data = file.data(), a.size = file.size();
+    Archive ta;
+    ta.data = a.entry(texEntry);
+    if (!ta.data) return err = "no textures", false;
+    ta.size = a.entry_size(texEntry);
+    uint8_t *dst = const_cast<uint8_t *>(ta.entry(t.entry));
+    size_t room = ta.entry_size(t.entry);
+    if (!dst) return err = "no texture entry", false;
+    std::vector<uint8_t> buf = t.buf;
+    memcpy(buf.data() + t.pxOff, t.pixels.data(), t.pixels.size() * 2);
+    if (!t.rlen) {
+        if (buf.size() > room) return err = "the texture doesn't fit", false;
+        memcpy(dst, buf.data(), buf.size());
+        return true;
+    }
+    std::vector<uint8_t> out(dst, dst + 8); /* "RLEN" and its size */
+    for (size_t i = 0; i < buf.size();) {
+        size_t r = 1;
+        while (i + r < buf.size() && buf[i + r] == buf[i] && r < 127) r++;
+        if (r >= 3) {
+            out.push_back((uint8_t)(0x80 | r)), out.push_back(buf[i]);
+            i += r;
+            continue;
+        }
+        size_t s = i, n = 0;
+        while (i < buf.size() && n < 127) { /* a literal up to the next run of 3 */
+            if (i + 2 < buf.size() && buf[i] == buf[i + 1] && buf[i] == buf[i + 2]) break;
+            i++, n++;
+        }
+        out.push_back((uint8_t)n);
+        out.insert(out.end(), buf.begin() + s, buf.begin() + s + n);
+    }
+    out.push_back(0);
+    if (out.size() > room)
+        return err = "the recolored texture packs " + std::to_string(out.size() - room) + " bytes bigger than the file has room for", false;
+    memcpy(dst, out.data(), out.size());
+    memset(dst + out.size(), 0, room - out.size());
+    return true;
 }

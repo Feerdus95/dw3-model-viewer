@@ -60,6 +60,9 @@ struct Tim {
     int x, y, w, h; /* where FIGHTSTG puts it in VRAM, in halfwords */
     bool rlen;
     std::vector<uint16_t> pixels;
+    int entry = 0;               /* in the textures' archive */
+    std::vector<uint8_t> buf;    /* the TIM as the file has it (RLEN unpacked) */
+    size_t pxOff = 0;            /* where its pixels start in BUF */
 };
 
 /* The pose state of FIGHTSTG's Model (keyframes, blending), ported as it is */
@@ -131,6 +134,10 @@ std::vector<uint32_t> decode_page(const std::vector<uint16_t> &vram, uint16_t tp
 
 /* Writes VECS over entry WHICH (0 vertices, 1 normals) of the mesh archive at MESHENTRY, in place: the count stays */
 void patch_vecs(std::vector<uint8_t> &file, int meshEntry, int which, const std::vector<Vec3s> &vecs);
+
+/* Writes the TIM T (its pixels changed) over its entry of the textures' archive at TEXENTRY, in place: an RLEN one
+   is packed again and has to fit where it was; false and ERR when it doesn't */
+bool patch_tim(std::vector<uint8_t> &file, int texEntry, const Tim &t, std::string &err);
 
 /* A bone's matrix (column-major) from its position, rotation and scale: Rz *
    Ry * Rx (RotMatrixZYX), its columns scaled, at its position */

@@ -26,6 +26,14 @@ trademark of its owners.
   - the face as in battle: the eyes blink, close when hit, and the other face parts
     cycle;
   - wireframe, back-face culling and a floor grid.
+- **Adjusting a model** (for the native port; the animations and scripts are not touched):
+  - a bone's piece moves, turns or scales about its middle, in the bone's own axes (the
+    fields in Model, or the gizmo's arrows and box in the view), or is not drawn;
+  - a palette color changes (Textures: click one);
+  - **Save to game** writes the model's file, same size, to the port's `data/mods/<file>.bin`;
+    **Revert to the disc's** deletes it. A saved model is the one opened. Ctrl+Z undoes.
+  - limits: bones that share a mesh change together; a recolored texture has to pack
+    into the room its file has (it tells you when it doesn't).
 - **Skeleton**:
   - the bone tree, with each part's mesh;
   - show or hide any part, and select one (click it in the view or the tree): it turns

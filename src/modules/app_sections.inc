@@ -36,7 +36,14 @@
     };
     std::map<int, PieceEdit> charEdits;
     std::vector<std::vector<Vec3s>> charV0, charN0; /* each bone's vertices and normals as the file has them */
-    std::vector<std::map<int, PieceEdit>> charUndo, charRedo;
+    struct CharSnap {
+        std::map<int, PieceEdit> e;
+        std::map<int, uint16_t> pal;
+    };
+    std::vector<CharSnap> charUndo, charRedo;
+    std::map<int, uint16_t> charPal; /* palette colors changed, by VRAM halfword */
+    std::set<int> charPalShown;      /* ... and which of them the view's VRAM has */
+    bool palSession = false, palEdited = false;
     const Model *charOf = nullptr;
     std::string charPath;
     bool charDirty = false, charEditing = false, charMoved = false;
@@ -68,7 +75,8 @@
         const Model *m = scene.model.get();
         if (m == charOf && scene.path == charPath) return;
         charOf = m, charPath = scene.path, charDirty = charEditing = false;
-        charEdits.clear(), charUndo.clear(), charRedo.clear(), charV0.clear(), charN0.clear();
+        charEdits.clear(), charUndo.clear(), charRedo.clear(), charV0.clear(), charN0.clear(), charPal.clear(), charPalShown.clear();
+        palSession = false;
         if (!m) return;
         for (const Bone &b : m->bones) {
             charV0.push_back(b.mesh >= 0 ? m->meshes[b.mesh].verts : std::vector<Vec3s>());
@@ -297,8 +305,23 @@
         memcpy(scene.center, center, sizeof center);
         scene.radius = radius;
     };
+    /* a VRAM halfword as the file's TIMs have it */
+    auto vram_orig = [&](int idx) -> uint16_t {
+        int x = idx % 1024, y = idx / 1024;
+        for (const Tim &t : scene.model->tims)
+            if (x >= t.x && x < t.x + t.w && y >= t.y && y < t.y + t.h) return t.pixels[(y - t.y) * t.w + x - t.x];
+        return scene.model->vram[idx];
+    };
+    /* the view's VRAM gets the changed colors (and the ones changed back their own) */
+    auto char_pal_apply = [&]() {
+        for (int idx : charPalShown)
+            if (!charPal.count(idx)) scene.model->vram[idx] = vram_orig(idx);
+        charPalShown.clear();
+        for (const auto &kv : charPal) scene.model->vram[kv.first] = kv.second, charPalShown.insert(kv.first);
+        upload_vram(scene);
+    };
     auto char_mark = [&]() { /* before an edit */
-        charUndo.push_back(charEdits);
+        charUndo.push_back({charEdits, charPal});
         if (charUndo.size() > 40) charUndo.erase(charUndo.begin());
         charRedo.clear();
     };
@@ -320,6 +343,18 @@
             const Mesh &me = scene.model->meshes[scene.model->bones[kv.first].mesh];
             patch_vecs(bytes, me.entry, 0, me.verts);
             patch_vecs(bytes, me.entry, 1, me.normals);
+        }
+        std::map<int, Tim> tims; /* the TIMs with a changed color */
+        for (const auto &kv : charPal)
+            for (const Tim &t : scene.model->tims) {
+                int x = kv.first % 1024, y = kv.first / 1024;
+                if (x < t.x || x >= t.x + t.w || y < t.y || y >= t.y + t.h) continue;
+                Tim &c = tims.emplace(t.entry, t).first->second;
+                c.pixels[(y - t.y) * t.w + x - t.x] = kv.second;
+            }
+        for (const auto &kv : tims) {
+            std::string err;
+            if (!patch_tim(bytes, scene.model->texEntry, kv.second, err)) return note(NOTE_ERROR, err);
         }
         SDL_CreateDirectory(mods_root().c_str());
         std::ofstream(mod_path(scene.fid), std::ios::binary).write((const char *)bytes.data(), (std::streamsize)bytes.size());
@@ -392,10 +427,12 @@
             own_restore(s);
         } else if (section == MODEL && char_on()) {
             auto &from = redo ? charRedo : charUndo, &to = redo ? charUndo : charRedo;
-            to.push_back(charEdits);
-            charEdits = std::move(from.back());
+            to.push_back({charEdits, charPal});
+            CharSnap s = std::move(from.back());
             from.pop_back();
+            charEdits = std::move(s.e), charPal = std::move(s.pal);
             char_apply();
+            char_pal_apply();
             charDirty = true;
         } else {
             std::vector<StageSnap> &from = redo ? stageHist.redo : stageHist.undo, &to = redo ? stageHist.undo : stageHist.redo;
@@ -2142,6 +2179,48 @@
             snprintf(name, sizeof name, "%s_%04x_%04x.bmp", m.name.substr(0, m.name.find('.')).c_str(), tp, cl);
             save_bmp(g_exe_dir + name, texPixels, texW, texH);
             note(NOTE_OK, std::string("Saved ") + g_exe_dir + name);
+        }
+        if (char_on() && tpage_depth(tp) < 2) {
+            heading("Palette");
+            int n = tpage_depth(tp) == 0 ? 16 : 256, base = clut_y(cl) * 1024 + clut_x(cl);
+            static int pick = -1;
+            static float rgb[3];
+            bool openPal = false;
+            for (int i = 0; i < n; i++) {
+                uint16_t c = m.vram[base + i];
+                ImGui::PushID(i);
+                if (i % 16) ImGui::SameLine(0, 2 * dpi);
+                ImVec4 col((c & 31) / 31.0f, (c >> 5 & 31) / 31.0f, (c >> 10 & 31) / 31.0f, 1);
+                if (ImGui::ColorButton("##c", col, ImGuiColorEditFlags_NoAlpha | ImGuiColorEditFlags_NoTooltip, ImVec2(20 * dpi, 20 * dpi))) {
+                    pick = base + i;
+                    rgb[0] = col.x, rgb[1] = col.y, rgb[2] = col.z;
+                    char_mark(), palSession = true, palEdited = false, openPal = true;
+                }
+                if (c == 0) tip("Transparent (0): coloring it makes it opaque");
+                ImGui::PopID();
+            }
+            if (openPal) ImGui::OpenPopup("##pal");
+            if (ImGui::BeginPopup("##pal")) {
+                if (ImGui::ColorPicker3("##rgb", rgb, ImGuiColorEditFlags_NoSidePreview | ImGuiColorEditFlags_NoAlpha)) {
+                    uint16_t old = m.vram[pick];
+                    uint16_t v = (uint16_t)((int)lroundf(rgb[0] * 31) | (int)lroundf(rgb[1] * 31) << 5 | (int)lroundf(rgb[2] * 31) << 10 | (old & 0x8000));
+                    if (!v) v = 0x0421; /* black, not the transparent 0 */
+                    charPal[pick] = v;
+                    palEdited = charDirty = true;
+                    char_pal_apply();
+                }
+                if (ImGui::Button(IC_UNDO "  Back to the start")) {
+                    palEdited = charDirty = true;
+                    charPal.erase(pick);
+                    char_pal_apply();
+                    ImGui::CloseCurrentPopup();
+                }
+                ImGui::EndPopup();
+            } else if (palSession) {
+                palSession = false;
+                if (!palEdited && !charUndo.empty()) charUndo.pop_back();
+            }
+            hint("Click a color to change it; Save to game writes the model's file with it. The palette is the model's own.");
         }
         heading("Legend");
         auto swatch = [](ImU32 c, const char *text) {
