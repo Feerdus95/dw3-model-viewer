@@ -285,10 +285,34 @@
         bool openViewMenu = false;
         float &zoom2 = section == EFFECTS ? fxZoom : view.texZoom;
         float *pan2 = section == EFFECTS ? fxPan : texPan;
+        /* the selected part's gizmo: where it is, and what the mouse is on */
+        gzHot = -1;
+        gz.on = false;
+        if (section == STAGES && stage_on() && !mode2d && scene.model && stagePart >= 0 && stagePart < (int)stageEdit.parts.size()) {
+            std::vector<int> gb = selected_bones();
+            float lo[3], hi[3];
+            if (!gb.empty() && bones_box(scene, gb, lo, hi)) {
+                const StagePart &sp = stageEdit.parts[stagePart];
+                float o[3];
+                for (int i = 0; i < 3; i++) o[i] = (lo[i] + hi[i]) / 2 + (partEditing ? sp.move[i] - partStart[i] : 0);
+                gizmo_make(gz, view_proj(view, (int)vw, (int)vh), o, vw, vh, view.fov, dpi);
+            }
+        }
+        if (gz.on) {
+            gzHot = gzDrag >= 0 ? gzDrag : vpHover ? gizmo_hit(gz, ImVec2(mp.x - vx, mp.y - vy), dpi) : -1;
+            if (gzHot >= 0) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+        }
         for (int b = 0; b < 3; b++) {
             if (!ImGui::IsMouseClicked(b) || !vpHover) continue;
             vpDown[b] = true, vpUses++;
-            if (b == 0 && io.KeyCtrl && !mode2d && stage_on()) { /* Ctrl+drag: the part under the mouse (or the selected one) moves */
+            if (b == 0 && gzHot >= 0 && gz.on) {
+                float pl[5];
+                part_place(stagePart, pl);
+                part_begin(gzHot == 3 ? "Turning" : gzHot == 4 ? "Scaling" : "Moving", pl);
+                vpMoving = partEditing;
+                gzDrag = vpMoving ? gzHot : -1;
+                gzAngSet = false;
+            } else if (b == 0 && io.KeyCtrl && !mode2d && stage_on()) { /* Ctrl+drag: the part under the mouse (or the selected one) moves */
                 int hit = pick_bone(scene, view, vw, vh, mp.x - vx, mp.y - vy);
                 int k = hit > 0 ? part_of_bone(hit) : stagePart;
                 if (k >= 0) {
@@ -310,7 +334,35 @@
                 pan2[0] = (vc.x + px * zoom2 - mp.x) / zoom2, pan2[1] = (vc.y + py * zoom2 - mp.y) / zoom2;
             }
         } else if (scene.model) {
-            if (vpDown[0] && vpMoving && moved && stagePart >= 0) {
+            if (vpDown[0] && vpMoving && gzDrag >= 0 && stagePart >= 0) {
+                /* the gizmo: an arrow moves along its axis, the ring turns, the box scales */
+                StagePart &p = stageEdit.parts[stagePart];
+                if (gzDrag < 3) {
+                    ImVec2 s = gz.tip[gzDrag] - gz.c;
+                    float sl = s.x * s.x + s.y * s.y;
+                    if (sl > 1) {
+                        float k = (d.x * s.x + d.y * s.y) / sl * gz.len; /* the mouse's part along the arrow, in the world */
+                        if (gzDrag == 1) p.move[1] -= k;
+                        else p.move[gzDrag] += k;
+                    }
+                } else if (gzDrag == 3) {
+                    /* the mouse in the ring's plane: its two unit vectors are the ring's points at 0 and 90 degrees */
+                    ImVec2 a = gz.ring[0] - gz.c, b = gz.ring[12] - gz.c, q = ImVec2(mp.x - vx, mp.y - vy) - gz.c;
+                    float det = a.x * b.y - a.y * b.x;
+                    if (fabsf(det) > 1) {
+                        float ang = atan2f((a.x * q.y - a.y * q.x) / det, (q.x * b.y - q.y * b.x) / det);
+                        if (gzAngSet) {
+                            float da = ang - gzAng;
+                            if (da > 3.1415927f) da -= 6.2831853f;
+                            if (da < -3.1415927f) da += 6.2831853f;
+                            p.turn = std::remainder(p.turn - da * 57.29578f, 360.0f);
+                        }
+                        gzAng = ang, gzAngSet = true;
+                    }
+                } else if (moved) {
+                    p.scale = std::clamp(p.scale * powf(1.01f, d.x - d.y), 0.05f, 20.0f);
+                }
+            } else if (vpDown[0] && vpMoving && moved && stagePart >= 0) {
                 /* on the ground, the way the mouse goes on screen; Shift: up and down */
                 StagePart &p = stageEdit.parts[stagePart];
                 float k = view.cam.dist * 0.0015f, cy = cosf(view.cam.yaw), sy = sinf(view.cam.yaw);
@@ -336,6 +388,7 @@
             if (!vpDown[b] || ImGui::IsMouseDown(b)) continue;
             vpDown[b] = false;
             if (b == 0 && vpMoving) {
+                gzDrag = -1;
                 float pl[5];
                 part_place(stagePart, pl);
                 part_end(memcmp(pl, partStart, sizeof pl) != 0);
@@ -582,13 +635,14 @@
                     box_text(p, IM_COL32(20, 22, 26, 225), IM_COL32(255, 217, 51, 230), IM_COL32(255, 232, 140, 255), text, bold);
                 }
             }
+            if (gz.on) gizmo_draw(dl, gz, ImVec2(vx, vy), gzDrag >= 0 ? gzDrag : gzHot, dpi);
             /* what's being edited, while it is */
             if (partEditing && stagePart >= 0 && stagePart < (int)stageEdit.parts.size()) {
                 const StagePart &p = stageEdit.parts[stagePart];
                 char t[160];
                 if (partVerb == "Turning") snprintf(t, sizeof t, "Turning  %s   %.1f deg", p.name.c_str(), p.turn);
                 else if (partVerb == "Scaling") snprintf(t, sizeof t, "Scaling  %s   x%.2f", p.name.c_str(), p.scale);
-                else snprintf(t, sizeof t, "Moving  %s   x %.0f   y %.0f   z %.0f", p.name.c_str(), p.move[0], p.move[1], p.move[2]);
+                else snprintf(t, sizeof t, "Moving  %s   x %.0f   y %.0f   z %.0f", p.name.c_str(), p.move[0], -p.move[1], p.move[2]);
                 ImVec2 ts = bold->CalcTextSizeA(bold->FontSize, FLT_MAX, 0, t) + pad * 2;
                 box_text(ImVec2(vc.x - ts.x / 2, vy + 10 * dpi), IM_COL32(44, 84, 160, 235), 0, IM_COL32(255, 255, 255, 255), t, bold);
             }
@@ -601,7 +655,7 @@
                 ImGui::TextDisabled("%d polygons", thing_polys(hoverBone));
                 bool sel = stage_on() ? part_of_bone(hoverBone) == stagePart : hoverBone == scene.selected;
                 ImGui::TextDisabled("%s  Right-click: its actions", sel ? "Selected." : "Click: select it.");
-                if (stage_on()) ImGui::TextDisabled("Ctrl+drag: move it");
+                if (stage_on()) ImGui::TextDisabled("Select it, then drag its arrows");
                 ImGui::EndTooltip();
             }
         }

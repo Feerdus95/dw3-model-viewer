@@ -22,6 +22,10 @@
     int ownFrame = -1;        /* the own images' frame picked in their table */
     std::set<std::string> stageHidden; /* the stage's parts hidden in the view, by name */
     bool partEditing = false, vpMoving = false; /* a part being moved, turned or scaled; by Ctrl+drag in the view */
+    Gizmo gz;                                   /* the selected part's arrows, ring and box */
+    int gzHot = -1, gzDrag = -1;                /* what is under the mouse, and what is being dragged */
+    float gzAng = 0;
+    bool gzAngSet = false;
     float partStart[5] = {};                    /* its move, turn and scale when that began */
     std::string partVerb;
     float texPan[2] = {0, 0};
@@ -780,13 +784,63 @@
                 if (ImGui::IsItemActivated()) part_begin(verb, before);
                 if (ImGui::IsItemDeactivated() && partEditing && !vpMoving) part_end(ImGui::IsItemDeactivatedAfterEdit());
             };
-            ImGui::DragFloat3("Move", pt.move, 10, -40000, 40000, "%.0f");
-            part_field("Moving");
-            tip("x, y (down), z in the game's units. In the view: Ctrl+drag the part, Shift+Ctrl+drag lifts it.");
-            ImGui::DragFloat("Turn", &pt.turn, 0.5f, -180, 180, "%.1f deg");
-            part_field("Turning");
-            ImGui::DragFloat("Scale", &pt.scale, 0.01f, 0.05f, 20, "%.2f");
-            part_field("Scaling");
+            /* label, field and a button that puts it back, a row each, in columns: the field takes what is
+               left, so nothing falls off the panel's edge at any width. X, Y, Z are colored; y is up */
+            const ImGuiStyle &sty = ImGui::GetStyle();
+            float bw = ImGui::GetFrameHeight();
+            static const ImU32 AXC[3] = {IM_COL32(236, 84, 84, 255), IM_COL32(118, 208, 96, 255), IM_COL32(84, 142, 245, 255)};
+            static const char *AXN[3] = {"X", "Y", "Z"};
+            static const char *AXT[3] = {"Left and right.", "Up and down: up is positive (the game's y goes down).", "Depth."};
+            if (ImGui::BeginTable("##place", 3, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings)) {
+                ImGui::TableSetupColumn("##l", ImGuiTableColumnFlags_WidthFixed, std::max(bw, ImGui::CalcTextSize("Scale").x));
+                ImGui::TableSetupColumn("##f", ImGuiTableColumnFlags_WidthStretch);
+                ImGui::TableSetupColumn("##r", ImGuiTableColumnFlags_WidthFixed, bw);
+                auto row = [&](const char *id, const std::function<void()> &label, const std::function<void()> &field, const char *verb,
+                               const std::function<void()> &reset) {
+                    ImGui::PushID(id);
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    label();
+                    ImGui::TableNextColumn();
+                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    field();
+                    part_field(verb);
+                    ImGui::TableNextColumn();
+                    if (ImGui::Button(IC_UNDO, ImVec2(bw, bw))) part_begin(verb, before), reset(), part_end(true);
+                    tip("Back to the start");
+                    ImGui::PopID();
+                };
+                for (int a = 0; a < 3; a++)
+                    row(AXN[a],
+                        [&]() {
+                            ImVec2 p0 = ImGui::GetCursorScreenPos();
+                            ImDrawList *adl = ImGui::GetWindowDrawList();
+                            adl->AddRectFilled(p0, p0 + ImVec2(bw, bw), AXC[a], sty.FrameRounding);
+                            adl->AddText(p0 + (ImVec2(bw, bw) - ImGui::CalcTextSize(AXN[a])) * 0.5f, IM_COL32(20, 22, 26, 255), AXN[a]);
+                            ImGui::Dummy(ImVec2(bw, bw));
+                            tip("%s In the game's units. In the view: drag its arrow.", AXT[a]);
+                        },
+                        [&]() {
+                            float v = a == 1 ? 0.0f - pt.move[1] : pt.move[a]; /* 0 - x: never -0 */
+                            if (ImGui::DragFloat("##v", &v, 10, -40000, 40000, "%.0f")) pt.move[a] = a == 1 ? -v : v;
+                        },
+                        "Moving", [&]() { pt.move[a] = 0; });
+                row("turn",
+                    [&]() {
+                        ImGui::AlignTextToFramePadding();
+                        ImGui::TextUnformatted("Turn");
+                        tip("Around the vertical axis. In the view: drag the ring.");
+                    },
+                    [&]() { ImGui::DragFloat("##v", &pt.turn, 0.5f, -180, 180, "%.1f deg"); }, "Turning", [&]() { pt.turn = 0; });
+                row("scale",
+                    [&]() {
+                        ImGui::AlignTextToFramePadding();
+                        ImGui::TextUnformatted("Scale");
+                        tip("In the view: drag the box.");
+                    },
+                    [&]() { ImGui::DragFloat("##v", &pt.scale, 0.01f, 0.05f, 20, "%.2f"); }, "Scaling", [&]() { pt.scale = 1; });
+                ImGui::EndTable();
+            }
             bool nb = pt.noBounds;
             if (ImGui::Checkbox("Always drawn", &nb)) part_bounds(stagePart);
             tip("No bounds check: drawn even when its box seems off screen (the ground and the panorama; 8 bones at most)");
@@ -804,7 +858,7 @@
             if (button(IC_DELETE "  Delete", 2)) part_delete(k);
             tip("Del; Ctrl+Z brings it back");
         } else {
-            hint("Click a part in the view or in the Parts list. Right-click one for its actions; Ctrl+drag one in the view to move it.");
+            hint("Click a part in the view or in the Parts list. Right-click one for its actions. Then drag its arrows to move it, the ring to turn it and the box to scale it.");
         }
 
         heading("Add parts from another stage");
@@ -874,7 +928,7 @@
             tip("Open %s", stageDir.c_str());
         }
 
-        if (ImGui::CollapsingHeader("Technical details")) {
+        if (details("Technical details")) {
             std::string shared;
             for (const StageInfo &o : stageInfos)
                 if (o.fid == si.fid && o.id != si.id) shared += (shared.empty() ? "" : ", ") + std::to_string(o.id);
@@ -947,7 +1001,7 @@
         }
         heading("Display");
         display_options();
-        if (ImGui::CollapsingHeader("Technical details")) {
+        if (details("Technical details")) {
             size_t polys = 0, verts = 0;
             for (const Mesh &me : m.meshes) polys += me.polys.size(), verts += me.verts.size();
             field("File", "%s", m.name.c_str());
@@ -1382,7 +1436,7 @@
                 tip("Camera %d: %s", i, r.what);
             }
         }
-        if (ImGui::CollapsingHeader("Technical details"))
+        if (details("Technical details"))
             field("Entries", "bones %d, motions %d, scripts %d", cf.modelEntry, cf.motionsEntry, cf.effectsEntry);
     };
 
@@ -1605,7 +1659,7 @@
             ownPushTime = ImGui::GetTime();
             ownDirty = true, fxDrawn = -1;
         }
-        if (ImGui::CollapsingHeader("Technical details")) {
+        if (details("Technical details")) {
             field("Animations", "%s #%d entry %d", fid_name(fx.fid).c_str(), fx.fid, fx.entry);
             field("Sheet", "%s #%d entry %d", fid_name(fx.sheetFid).c_str(), fx.sheetFid, fx.sheetEntry);
             field("Fields", "%d", fx.duration);

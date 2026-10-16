@@ -220,6 +220,15 @@ static void chip(const char *text, ImVec4 col) {
     dl->AddText(ImVec2(p.x + pad.x, p.y + pad.y), ImGui::GetColorU32(col), text);
     ImGui::Dummy(ImVec2(sz.x + pad.x * 2, ImGui::GetFrameHeight()));
 }
+/* a section that opens, quiet: the theme's header color is for what is selected */
+static bool details(const char *label) {
+    ImGui::PushStyleColor(ImGuiCol_Header, ImGui::GetStyleColorVec4(ImGuiCol_FrameBg));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImGui::GetStyleColorVec4(ImGuiCol_FrameBgHovered));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImGui::GetStyleColorVec4(ImGuiCol_FrameBgActive));
+    bool open = ImGui::CollapsingHeader(label);
+    ImGui::PopStyleColor(3);
+    return open;
+}
 /* a button in the accent (KIND 1) or the danger color (2) */
 static bool button(const char *label, int kind = 0, ImVec2 size = ImVec2(0, 0)) {
     static const ImVec4 FILL[3][3] = {{}, {{0.22f, 0.43f, 0.85f, 1}, {0.28f, 0.51f, 0.95f, 1}, {0.20f, 0.38f, 0.75f, 1}},
@@ -303,6 +312,88 @@ static bool to_screen(const M4 &vp, const float p[3], float w, float h, ImVec2 &
     float x = (m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12]) / cw, y = (m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13]) / cw;
     out = ImVec2((x + 1) / 2 * w, (1 - y) / 2 * h);
     return true;
+}
+
+/* --- the stage editor's gizmo: an arrow a axis (x red, y green and up, z blue), a ring on the ground
+   to turn and a box to scale; all on the view (from its top left), a constant size on screen --- */
+
+struct Gizmo {
+    bool on = false;
+    float o[3] = {}, len = 0; /* its centre in the world, and an arrow's length there */
+    ImVec2 c, tip[3], ring[48];
+};
+static const float GZ_DIR[3][3] = {{1, 0, 0}, {0, -1, 0}, {0, 0, 1}}; /* the game's y goes down: the arrow up is -y */
+
+static bool gizmo_make(Gizmo &g, const M4 &vp, const float o[3], float w, float h, float fov, float dpi) {
+    const float *m = vp.m;
+    float depth = m[3] * o[0] + m[7] * o[1] + m[11] * o[2] + m[15];
+    g.on = false;
+    if (depth < 1e-3f || !to_screen(vp, o, w, h, g.c)) return false;
+    memcpy(g.o, o, sizeof g.o);
+    g.len = 90 * dpi * 2 * depth * tanf(fov / 2) / std::max(h, 1.0f);
+    for (int a = 0; a < 3; a++) {
+        float p[3] = {o[0] + GZ_DIR[a][0] * g.len, o[1] + GZ_DIR[a][1] * g.len, o[2] + GZ_DIR[a][2] * g.len};
+        if (!to_screen(vp, p, w, h, g.tip[a])) return false;
+    }
+    for (int i = 0; i < 48; i++) {
+        float t = i * 6.2831853f / 48, r = g.len * 0.7f, p[3] = {o[0] + r * cosf(t), o[1], o[2] + r * sinf(t)};
+        if (!to_screen(vp, p, w, h, g.ring[i])) return false;
+    }
+    return g.on = true;
+}
+
+static float seg_dist(ImVec2 p, ImVec2 a, ImVec2 b) {
+    ImVec2 ab = b - a;
+    float l = ab.x * ab.x + ab.y * ab.y, t = l > 0 ? std::clamp(((p.x - a.x) * ab.x + (p.y - a.y) * ab.y) / l, 0.0f, 1.0f) : 0;
+    float dx = p.x - (a.x + ab.x * t), dy = p.y - (a.y + ab.y * t);
+    return sqrtf(dx * dx + dy * dy);
+}
+
+/* What is under P: 0-2 an arrow, 3 the ring, 4 the box; -1 nothing */
+static int gizmo_hit(const Gizmo &g, ImVec2 p, float dpi) {
+    if (!g.on) return -1;
+    if (seg_dist(p, g.c, g.c) < 8 * dpi) return 4;
+    float best = 7 * dpi;
+    int hit = -1;
+    for (int a = 0; a < 3; a++) {
+        float d = seg_dist(p, g.c, g.tip[a]);
+        if (d < best) best = d, hit = a;
+    }
+    if (hit >= 0) return hit;
+    for (int i = 0; i < 48; i++) {
+        float d = seg_dist(p, g.ring[i], g.ring[(i + 1) % 48]);
+        if (d < best) best = d, hit = 3;
+    }
+    return hit;
+}
+
+static void gizmo_draw(ImDrawList *dl, const Gizmo &g, ImVec2 at, int hot, float dpi) {
+    static const ImU32 COL[3] = {IM_COL32(236, 84, 84, 255), IM_COL32(118, 208, 96, 255), IM_COL32(84, 142, 245, 255)};
+    static const char *NAME[3] = {"X", "Y", "Z"};
+    const ImU32 yel = IM_COL32(255, 217, 51, 255), shade = IM_COL32(0, 0, 0, 120);
+    for (int i = 0; i < 48; i++) {
+        ImVec2 a = at + g.ring[i], b = at + g.ring[(i + 1) % 48];
+        dl->AddLine(a, b, shade, 4.5f * dpi);
+        dl->AddLine(a, b, hot == 3 ? yel : IM_COL32(255, 170, 60, 235), (hot == 3 ? 3.0f : 2.0f) * dpi);
+    }
+    for (int a = 0; a < 3; a++) {
+        ImU32 c = hot == a ? yel : COL[a];
+        ImVec2 s = at + g.c, t = at + g.tip[a], d = t - s;
+        float l = sqrtf(d.x * d.x + d.y * d.y);
+        if (l < 1) continue;
+        d = d * (1 / l);
+        ImVec2 n(-d.y, d.x);
+        dl->AddLine(s, t, shade, 5 * dpi);
+        dl->AddLine(s, t, c, 2.5f * dpi);
+        dl->AddTriangleFilled(t + d * (11 * dpi), t - d * (2 * dpi) + n * (5.5f * dpi), t - d * (2 * dpi) - n * (5.5f * dpi), c);
+        ImVec2 ts = ImGui::CalcTextSize(NAME[a]);
+        ImVec2 lp = t + d * (22 * dpi) - ts * 0.5f;
+        dl->AddText(lp + ImVec2(1, 1), IM_COL32(0, 0, 0, 200), NAME[a]);
+        dl->AddText(lp, c, NAME[a]);
+    }
+    ImVec2 c = at + g.c;
+    dl->AddRectFilled(c - ImVec2(5 * dpi, 5 * dpi), c + ImVec2(5 * dpi, 5 * dpi), hot == 4 ? yel : IM_COL32(236, 238, 242, 255));
+    dl->AddRect(c - ImVec2(5 * dpi, 5 * dpi), c + ImVec2(5 * dpi, 5 * dpi), IM_COL32(0, 0, 0, 200));
 }
 
 /* The box (in the view's world) around BONES' vertices; false when none shows */
