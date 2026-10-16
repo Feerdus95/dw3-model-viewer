@@ -586,3 +586,26 @@ bool patch_tim(std::vector<uint8_t> &file, int texEntry, const Tim &t, std::stri
     memset(dst + out.size(), 0, room - out.size());
     return true;
 }
+
+std::vector<uint8_t> replace_entries(const std::vector<uint8_t> &file, const std::map<int, std::vector<uint8_t>> &repl) {
+    Archive base;
+    base.data = file.data(), base.size = file.size();
+    int count = base.count();
+    std::vector<std::vector<uint8_t>> entries(count);
+    for (int i = 0; i < count; i++) {
+        const uint8_t *e = base.entry(i);
+        if (e && rd32(file.data() + i * 4)) entries[i].assign(e, e + base.entry_size(i));
+    }
+    for (const auto &kv : repl)
+        if (kv.first >= 0 && kv.first < count) entries[kv.first] = kv.second;
+    std::vector<uint8_t> out(count * 4, 0);
+    for (int i = 0; i < count; i++) {
+        if (!rd32(file.data() + i * 4)) continue; /* the disc's 0: kept */
+        uint32_t at = (uint32_t)out.size();
+        memcpy(&out[i * 4], &at, 4);
+        out.insert(out.end(), entries[i].begin(), entries[i].end());
+        while (out.size() & 3) out.push_back(0);
+    }
+    while (out.size() % 2048) out.push_back(0);
+    return out;
+}

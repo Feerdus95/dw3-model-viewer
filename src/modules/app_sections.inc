@@ -44,6 +44,7 @@
     std::map<int, uint16_t> charPal; /* palette colors changed, by VRAM halfword */
     std::set<int> charPalShown;      /* ... and which of them the view's VRAM has */
     bool palSession = false, palEdited = false;
+    std::string charDir; /* the last OBJ export's folder */
     const Model *charOf = nullptr;
     std::string charPath;
     bool charDirty = false, charEditing = false, charMoved = false;
@@ -337,8 +338,8 @@
                         -(a * f - c * dd), (dd * h - e * g), -(a * h - bb * g), (a * e - bb * dd)};
         for (int r = 0; r < 3; r++) out[r] = (inv[r * 3] * d[0] + inv[r * 3 + 1] * d[1] + inv[r * 3 + 2] * d[2]) / det;
     };
-    auto char_save = [&]() {
-        std::vector<uint8_t> bytes = scene.model->file;
+    auto char_bytes = [&](std::vector<uint8_t> &bytes) {
+        bytes = scene.model->file;
         for (const auto &kv : charEdits) {
             const Mesh &me = scene.model->meshes[scene.model->bones[kv.first].mesh];
             patch_vecs(bytes, me.entry, 0, me.verts);
@@ -354,12 +355,88 @@
             }
         for (const auto &kv : tims) {
             std::string err;
-            if (!patch_tim(bytes, scene.model->texEntry, kv.second, err)) return note(NOTE_ERROR, err);
+            if (!patch_tim(bytes, scene.model->texEntry, kv.second, err)) {
+                note(NOTE_ERROR, err);
+                return false;
+            }
         }
+        return true;
+    };
+    auto char_save = [&]() {
+        std::vector<uint8_t> bytes;
+        if (!char_bytes(bytes)) return;
         SDL_CreateDirectory(mods_root().c_str());
         std::ofstream(mod_path(scene.fid), std::ios::binary).write((const char *)bytes.data(), (std::streamsize)bytes.size());
         charDirty = false;
         note(NOTE_OK, "Saved " + scene.model->name + " to " + mod_path(scene.fid) + ": the game reads it when it starts");
+    };
+    /* the model's bones as parts: the OBJ's objects */
+    auto char_parts = [&](StageEdit &e) {
+        StageInfo info;
+        info.fid = scene.fid;
+        e.fromModel(*scene.model, info);
+    };
+    auto char_export = [&]() {
+        StageEdit e;
+        char_parts(e);
+        std::string nm = lower(scene.model->name.substr(0, scene.model->name.find('.')));
+        charDir = g_exe_dir + "models";
+        SDL_CreateDirectory(charDir.c_str());
+        charDir += "/" + nm;
+        if (e.exportObj(charDir, nm)) note(NOTE_OK, "Exported " + scene.model->name + " to " + charDir);
+        else note(NOTE_ERROR, "Can't write " + charDir);
+    };
+    /* the model as bytes, shown again (the camera and the motion kept) */
+    auto char_reload = [&](std::vector<uint8_t> bytes) {
+        const Fighter *f = scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter];
+        auto m = std::make_unique<Model>();
+        if (!m->load(scene.model->name, std::move(bytes), f)) {
+            note(NOTE_ERROR, scene.model->name + ": " + m->error);
+            return false;
+        }
+        int motion = scene.model->motion;
+        float center[3] = {scene.center[0], scene.center[1], scene.center[2]}, radius = scene.radius;
+        scene.model = std::move(m);
+        upload(scene);
+        memcpy(scene.center, center, sizeof center);
+        scene.radius = radius;
+        if (motion > 0) scene.model->setMotion(motion);
+        return true;
+    };
+    /* an OBJ back: the bones whose faces changed get new meshes (the others stay), the file's size may change */
+    auto char_import = [&](const std::string &path) {
+        StageEdit cur, imp;
+        char_parts(cur);
+        imp = cur;
+        if (!imp.importObj(path)) return note(NOTE_ERROR, imp.error);
+        std::string warning = imp.error;
+        std::vector<uint8_t> bytes;
+        if (!char_bytes(bytes)) return;
+        std::map<int, std::vector<uint8_t>> repl;
+        std::set<int> seen;
+        int changed = 0, skipped = 0;
+        for (int k = 0; k < (int)imp.parts.size(); k++) {
+            int b = 0;
+            if (sscanf(imp.parts[k].name.c_str(), "part_%d", &b) != 1 || b < 1 || b >= (int)scene.model->bones.size()) {
+                skipped++;
+                continue;
+            }
+            seen.insert(b);
+            if (imp.signature(k) == cur.signature(b - 1)) continue;
+            std::vector<uint8_t> mesh;
+            if (!imp.boneMesh(k, mesh)) return note(NOTE_ERROR, imp.error);
+            repl[scene.model->meshes[scene.model->bones[b].mesh].entry] = std::move(mesh);
+            changed++;
+        }
+        if (!changed) return note(NOTE_INFO, "No bone's faces changed in " + path);
+        if (!char_reload(replace_entries(bytes, repl))) return;
+        char_sync();
+        charDirty = true;
+        std::string extra;
+        if (skipped) extra += "; " + std::to_string(skipped) + " objects not named part_N skipped";
+        if (seen.size() + 1 < scene.model->bones.size()) extra += "; bones with no object kept";
+        note(warning.empty() ? NOTE_OK : NOTE_WARN,
+             "Imported " + std::to_string(changed) + " bones from " + path + extra + " (Revert goes back; Ctrl+Z can't undo it)");
     };
     auto char_mod = [&]() { return char_on() && SDL_GetPathInfo(mod_path(scene.fid).c_str(), nullptr); };
     auto ask_revert_char = [&]() {
@@ -1452,6 +1529,29 @@
             ImGui::EndDisabled();
             if (charDirty) ImGui::TextColored(C_SELECT, "Unsaved changes");
             else if (char_mod()) ImGui::TextDisabled("This is the mod's file.");
+            heading("Blender and the like (OBJ)");
+            if (ImGui::Button(IC_EXPORT "  Export OBJ")) char_export();
+            tip("One object per bone, named part_N, at rest (y up, 1 unit = 100 of the game's), with the model's texture pages as PNGs. "
+                "Move vertices, edit faces and UVs; keep the names, the materials and the PNGs as they are.");
+            same_line_if_fits(IC_IMPORT "  Import OBJ...");
+            if (ImGui::Button(IC_IMPORT "  Import OBJ...")) {
+                static const SDL_DialogFileFilter OBJ = {"OBJ models", "obj"};
+                SDL_ShowOpenFileDialog(
+                    [](void *u, const char *const *l, int) {
+                        if (!l || !*l) return;
+                        Picked *p = (Picked *)u;
+                        std::lock_guard<std::mutex> lock(p->m);
+                        p->obj = *l;
+                    },
+                    &picked, win, &OBJ, 1, charDir.empty() ? nullptr : charDir.c_str(), false);
+            }
+            tip("The bones whose faces changed get a new mesh (up to 256 vertices each, textured with the model's own pages); "
+                "the others stay. Then Save to game.");
+            if (!charDir.empty()) {
+                ImGui::SameLine();
+                if (ImGui::Button(IC_FOLDER "##chardir")) open_folder(charDir);
+                tip("Open %s", charDir.c_str());
+            }
         }
         heading("Display");
         display_options();

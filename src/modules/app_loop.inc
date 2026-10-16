@@ -80,6 +80,8 @@
                         stageHist.undo.pop_back();
                         note(NOTE_ERROR, stageEdit.error);
                     }
+                } else if (char_on()) {
+                    char_import(picked.obj);
                 }
                 picked.obj.clear();
             }

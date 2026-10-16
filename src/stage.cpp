@@ -168,6 +168,7 @@ void StageEdit::fromModel(const Model &m, const StageInfo &info) {
                 auto it = byCombo.find(key);
                 if (it == byCombo.end()) {
                     StageImage img;
+                    img.tpage = key.first, img.pageClut = key.second;
                     img.w = img.h = 256;
                     img.px = decode_page(m.vram, (uint16_t)key.first, (uint16_t)key.second, 256, 256, semi.count(key) > 0);
                     if (tpage_depth((uint16_t)key.first) == 0) {
@@ -188,6 +189,7 @@ void StageEdit::fromModel(const Model &m, const StageInfo &info) {
                 if (white < 0) {
                     white = (int)images.size();
                     images.push_back({4, 4, std::vector<uint32_t>(16, 0xFFFFFFFFu)});
+                    images.back().flat = true;
                 }
                 f.image = white;
                 for (auto &uv : f.uv) uv[0] = uv[1] = 1;
@@ -261,7 +263,7 @@ bool StageEdit::exportObj(const std::string &dir, const std::string &name) const
     SDL_CreateDirectory(dir.c_str());
     std::ofstream obj(dir + "/" + name + ".obj"), mtl(dir + "/" + name + ".mtl");
     if (!obj || !mtl) return false;
-    obj << "# a Digimon World 2003 fight stage, from DW3 Model Viewer: y up, 1 unit = " << OBJ_UNIT << " of the game's\n";
+    obj << "# a Digimon World 2003 model, from DW3 Model Viewer: y up, 1 unit = " << OBJ_UNIT << " of the game's\n";
     obj << "# keep each object's name to keep its part (its keys, its place); a material's _abrN is its semi-transparency\n";
     obj << "mtllib " << name << ".mtl\n";
     std::set<std::pair<int, int>> mats;
@@ -958,5 +960,157 @@ bool StageEdit::build(const std::vector<uint8_t> &disc, int boneEntry, std::vect
         else made.warning = "more than 8 bones skip the bounds check: the rest may vanish near the screen's edges";
     }
     memcpy(info.bg, bg, 3);
+    return true;
+}
+
+/* --- a battle model's bones --- */
+
+static bool local_verts(const StagePart &part, const std::vector<std::array<float, 3>> &world, std::vector<std::array<int, 3>> &out) {
+    float inv[16];
+    if (!invert(part.bind, inv)) return false;
+    out.clear();
+    for (const auto &w : world) {
+        std::array<float, 3> l = apply(inv, w[0], w[1], w[2]);
+        out.push_back({(int)lroundf(l[0]), (int)lroundf(l[1]), (int)lroundf(l[2])});
+    }
+    return true;
+}
+
+std::string StageEdit::signature(int p) const {
+    const StagePart &part = parts[p];
+    std::vector<std::array<int, 3>> loc;
+    if (!local_verts(part, placed(part), loc)) return "?";
+    std::vector<std::string> faces;
+    for (const StageFace &f : part.faces) {
+        std::vector<std::string> cs;
+        char b[96];
+        for (int c = 0; c < f.n; c++) {
+            const auto &v = loc[f.v[c]];
+            snprintf(b, sizeof b, "%d,%d,%d,%d,%d", v[0], v[1], v[2], (int)lroundf(f.uv[c][0]), (int)lroundf(f.uv[c][1]));
+            cs.push_back(b);
+        }
+        std::sort(cs.begin(), cs.end());
+        const StageImage &im = images[f.image];
+        snprintf(b, sizeof b, "|%d,%d,%d,%d", f.n, f.abr, im.tpage, im.pageClut);
+        std::string s;
+        for (const std::string &c : cs) s += c + ";";
+        faces.push_back(s + b);
+    }
+    std::sort(faces.begin(), faces.end());
+    std::string all;
+    for (const std::string &f : faces) all += f + "\n";
+    return all;
+}
+
+bool StageEdit::boneMesh(int p, std::vector<uint8_t> &m) {
+    error.clear();
+    const StagePart &part = parts[p];
+    std::vector<std::array<int, 3>> loc;
+    if (!local_verts(part, placed(part), loc)) return error = part.name + ": its keys scale it to nothing", false;
+    std::map<int, int> vmap; /* the vertices the faces use, in order */
+    std::vector<int> used;
+    for (const StageFace &f : part.faces)
+        for (int c = 0; c < f.n; c++)
+            if (!vmap.count(f.v[c])) vmap.emplace(f.v[c], (int)used.size()), used.push_back(f.v[c]);
+    if (used.empty()) return error = part.name + " has no faces", false;
+    if (used.size() > 256) return error = part.name + " has " + std::to_string(used.size()) + " vertices: a bone's mesh holds 256", false;
+    for (int v : used)
+        for (int k = 0; k < 3; k++)
+            if (abs(loc[v][k]) > 32767) return error = part.name + " is too big (its points past 32767 of its own space)", false;
+    for (const StageFace &f : part.faces) {
+        const StageImage &im = images[f.image];
+        if (im.tpage < 0 && !im.flat)
+            return error = part.name + ": a face's texture isn't one of the model's pages (changing the pages isn't supported yet)", false;
+    }
+    /* a normal for each vertex: its faces' (the PSX's winding), smoothed */
+    static const int PSX[2][4] = {{0, 2, 1, 0}, {0, 3, 1, 2}};
+    std::vector<std::array<float, 3>> acc(used.size(), {0, 0, 0});
+    for (const StageFace &f : part.faces) {
+        const int *ord = PSX[f.n == 4];
+        int tri[2][3] = {{0, 1, 2}, {1, 3, 2}};
+        for (int t = 0; t < (f.n == 4 ? 2 : 1); t++) {
+            int i[3];
+            for (int k = 0; k < 3; k++) i[k] = vmap[f.v[ord[tri[t][k]]]];
+            const auto &a = loc[used[i[0]]], &b = loc[used[i[1]]], &c = loc[used[i[2]]];
+            float u[3], w[3];
+            for (int k = 0; k < 3; k++) u[k] = (float)(b[k] - a[k]), w[k] = (float)(c[k] - a[k]);
+            float n[3] = {-(u[1] * w[2] - u[2] * w[1]), -(u[2] * w[0] - u[0] * w[2]), -(u[0] * w[1] - u[1] * w[0])};
+            for (int k = 0; k < 3; k++)
+                for (int q : i) acc[q][k] += n[k];
+        }
+    }
+    std::vector<Vec3s> normals;
+    for (const auto &n : acc) {
+        float l = sqrtf(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+        if (l < 1e-6f) normals.push_back({0, -4096, 0});
+        else normals.push_back({(int16_t)lroundf(n[0] / l * 4096), (int16_t)lroundf(n[1] / l * 4096), (int16_t)lroundf(n[2] / l * 4096)});
+    }
+    /* the commands (FIGHTSTG_drawMesh): lit, gouraud; a run of each image, semi-transparency and kind */
+    std::vector<int> faces(part.faces.size());
+    std::iota(faces.begin(), faces.end(), 0);
+    std::stable_sort(faces.begin(), faces.end(), [&](int a, int b) {
+        const StageFace &x = part.faces[a], &y = part.faces[b];
+        return std::make_tuple(x.image, x.abr, x.n) < std::make_tuple(y.image, y.abr, y.n);
+    });
+    std::vector<uint8_t> cmd = {0xA0, 0xB1, 0xC1, 0xD1};
+    int last = -1;
+    for (int fi : faces) {
+        const StageFace &f = part.faces[fi];
+        const StageImage &im = images[f.image];
+        int run = (f.image * 8 + f.abr) * 2 + (f.n == 4);
+        if (run != last) {
+            last = run;
+            cmd.push_back((uint8_t)(0xE0 | f.abr));
+            cmd.push_back((uint8_t)(0x80 | (f.n == 4)));
+            if (im.flat) {
+                cmd.push_back(0x90);
+                cmd.push_back(0x02), cmd.push_back(part.color[0]), cmd.push_back(part.color[1]), cmd.push_back(part.color[2]);
+            } else {
+                int page = (im.tpage & 15) - TEX_X / 64, cx = (im.pageClut & 63) * 16 - TEX_X, cy = (im.pageClut >> 6 & 511) - TEX_Y;
+                if (page < 0 || cx < 0 || cx > 255 || cy < 0 || cy > 255)
+                    return error = part.name + ": a texture page the mesh can't point to", false;
+                cmd.push_back(0x91);
+                uint8_t tex[7] = {0x01, 0, (uint8_t)page, 0, (uint8_t)cx, (uint8_t)cy, (uint8_t)(im.tpage >> 7 & 3)};
+                cmd.insert(cmd.end(), tex, tex + 7);
+            }
+        }
+        const int *ord = PSX[f.n == 4];
+        cmd.push_back(0x00);
+        for (int c = 0; c < f.n; c++) cmd.push_back((uint8_t)vmap[f.v[ord[c]]]);
+        for (int c = 0; c < f.n; c++) cmd.push_back((uint8_t)vmap[f.v[ord[c]]]); /* its normals: the vertices' */
+        if (!im.flat)
+            for (int c = 0; c < f.n; c++) {
+                const float *uv = f.uv[ord[c]];
+                cmd.push_back((uint8_t)std::clamp((int)lroundf(uv[0]), 0, 255));
+                cmd.push_back((uint8_t)std::clamp((int)lroundf(uv[1]), 0, 255));
+            }
+    }
+    cmd.push_back(0xFF);
+    /* the mesh's archive: vertices (0), normals (1), commands (2), its box's middle and corners (5) */
+    m.clear();
+    for (int k = 0; k < 6; k++) put32(m, 0);
+    set32(m, 0, (uint32_t)m.size());
+    put16(m, (int)used.size()), put16(m, 0), put16(m, 0);
+    int lo[3] = {32767, 32767, 32767}, hi[3] = {-32768, -32768, -32768};
+    for (int v : used) {
+        for (int k = 0; k < 3; k++) {
+            put16(m, loc[v][k]);
+            lo[k] = std::min(lo[k], loc[v][k]), hi[k] = std::max(hi[k], loc[v][k]);
+        }
+    }
+    pad4(m);
+    set32(m, 20, (uint32_t)m.size());
+    put16(m, 9), put16(m, 0), put16(m, 0);
+    put16(m, (lo[0] + hi[0]) / 2), put16(m, (lo[1] + hi[1]) / 2), put16(m, (lo[2] + hi[2]) / 2);
+    for (int z : {hi[2], lo[2]})
+        for (int y : {hi[1], lo[1]})
+            for (int x : {hi[0], lo[0]}) put16(m, x), put16(m, y), put16(m, z);
+    set32(m, 4, (uint32_t)m.size());
+    put16(m, (int)normals.size()), put16(m, 0), put16(m, 0);
+    for (const Vec3s &n : normals) put16(m, n.x), put16(m, n.y), put16(m, n.z);
+    pad4(m);
+    set32(m, 8, (uint32_t)m.size());
+    m.insert(m.end(), cmd.begin(), cmd.end());
+    pad4(m);
     return true;
 }

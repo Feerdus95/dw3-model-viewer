@@ -32,6 +32,11 @@ trademark of its owners.
   - a palette color changes (Textures: click one);
   - **Save to game** writes the model's file, same size, to the port's `data/mods/<file>.bin`;
     **Revert to the disc's** deletes it. A saved model is the one opened. Ctrl+Z undoes.
+  - **Export OBJ / Import OBJ** (Model): one object per bone (`part_N`, at rest), the model's
+    texture pages as PNGs. Move vertices, add or remove faces, change UVs in Blender; a bone
+    whose faces changed gets a new mesh (up to 256 vertices, the model's own pages, a smooth
+    normal each) and the others stay. The file may grow by sectors. Keep the names, materials
+    and PNGs: new textures and new bones aren't supported yet. `--import-obj FILE` imports at start.
   - limits: bones that share a mesh change together; a recolored texture has to pack
     into the room its file has (it tells you when it doesn't).
 - **Skeleton**:

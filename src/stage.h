@@ -35,6 +35,9 @@ struct StageImage {
     std::vector<uint8_t> index;
     uint16_t clut[16] = {};
     int clutX = -1, clutY = -1; /* where its CLUT was in VRAM */
+    /* a battle model's page as its polygons read it (tpage & 0x19F, CLUT); -1: not one of its pages */
+    int tpage = -1, pageClut = 0;
+    bool flat = false; /* the polygons with no texture */
 };
 
 /* A polygon: its corners counter-clockwise seen from the front (OBJ's), its
@@ -83,4 +86,9 @@ struct StageEdit {
     /* the stage's model file: DISC's entries, the bone list (BONE_ENTRY) and
        textures made anew, the meshes and keys added; INFO's noBounds set */
     bool build(const std::vector<uint8_t> &disc, int boneEntry, std::vector<uint8_t> &out, StageInfo &info, StageBuild &made);
+    /* A battle model's bone (the parts of fromModel), for the OBJ round trip: SIGNATURE is its faces in its own
+       space, to tell a bone that was edited; BONEMESH its mesh archive as the file has it (vertices, a normal each,
+       commands), the pages and CLUTs the faces' images say; false and ERROR when it can't be */
+    std::string signature(int part) const;
+    bool boneMesh(int part, std::vector<uint8_t> &mesh);
 };

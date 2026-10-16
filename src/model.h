@@ -4,6 +4,7 @@
 #pragma once
 #include "game.h"
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -138,6 +139,9 @@ void patch_vecs(std::vector<uint8_t> &file, int meshEntry, int which, const std:
 /* Writes the TIM T (its pixels changed) over its entry of the textures' archive at TEXENTRY, in place: an RLEN one
    is packed again and has to fit where it was; false and ERR when it doesn't */
 bool patch_tim(std::vector<uint8_t> &file, int texEntry, const Tim &t, std::string &err);
+
+/* FILE with its entries REPL (index -> bytes) replaced, as a disc's file again (whole sectors) */
+std::vector<uint8_t> replace_entries(const std::vector<uint8_t> &file, const std::map<int, std::vector<uint8_t>> &repl);
 
 /* A bone's matrix (column-major) from its position, rotation and scale: Rz *
    Ry * Rx (RotMatrixZYX), its columns scaled, at its position */

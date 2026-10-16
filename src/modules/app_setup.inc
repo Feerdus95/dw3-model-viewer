@@ -1,5 +1,6 @@
 int main(int argc, char **argv) {
     std::string shot, open_path, data;
+    std::string start_obj; /* an OBJ to import once the model is open */
     int shot_motion = 1, shot_key = 0, shot_cam = -1, shot_stage = 0, shot_fighter = 0;
     bool check = false, users = false, stages = false;
     int effect = -1;
@@ -11,6 +12,7 @@ int main(int argc, char **argv) {
         else if (a == "--cam" && i + 1 < argc) shot_cam = atoi(argv[++i]);
         else if (a == "--stage" && i + 1 < argc) shot_stage = atoi(argv[++i]);
         else if (a == "--fighter" && i + 1 < argc) shot_fighter = atoi(argv[++i]);
+        else if (a == "--import-obj" && i + 1 < argc) start_obj = argv[++i];
         else if (a == "--data" && i + 1 < argc) data = argv[++i];
         else if (a == "--check") check = true;
         else if (a == "--stages") stages = true;
@@ -188,6 +190,7 @@ int main(int argc, char **argv) {
         std::vector<std::string> files;
         std::string folder, data, obj, bin;
     } picked;
+    picked.obj = start_obj;
     std::set<int> ownIds = own_effects(ownRoot); /* the effects with own images in ownRoot */
     read_techs({g_data + "/../SLES_039.36", ownRoot + "/../../SLES_039.36"});
 
