@@ -91,7 +91,7 @@
                         find_data(dir);
                         scene.model.reset(), scene.fighters.clear(), scene.fid = -1;
                         fx = Effect(), listed = false, ownDirty = false;
-                        stage_tables(), stageId = -1, stageFromId = -1, view.stageView = false, stageDirty = false;
+                        stage_tables(), cat_free(), stageId = -1, stageFromId = -1, view.stageView = false, stageDirty = false;
                         fxGrouped = false, fxCommon.clear(), fxByDigimon.clear();
                         stageHist.clear(), ownHist.clear(), stageHidden.clear();
                         reset_selection();
@@ -778,6 +778,7 @@
         ImGui::PopStyleVar();
 
         /* --- help: the controls --- */
+        catalog_window();
         if (helpOpen) {
             ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
             ImGui::SetNextWindowSize(ImVec2(std::min(ds.x - 40 * dpi, 600 * dpi), std::min(ds.y - 60 * dpi, 760 * dpi)), ImGuiCond_Appearing);
