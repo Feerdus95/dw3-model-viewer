@@ -152,6 +152,7 @@ static void blend_audit(Model &m, const Entry &e, const std::vector<SeamJoint> &
                     }
             }
         }
+        printf("  fade (--weld-fade): the weight is cut in %d of %d poses measured (%.0f%%), to %.0f%% at the most\n", bp.fadeHit, bp.fadePoses, 100.0 * bp.fadeHit / std::max(1, bp.fadePoses), 100 * bp.fadeMin);
         printf("  legacy drift (the nearest vertex pairs at the idle pose) covers %d vertex pairs, %d of them among the matched\n", tracked, trackedOn);
         if (bp.decision)
             printf("  decision: %s (%s, inspected at motion %d key %d): %s\n", bp.decision->kind == BLEND_APPROVED ? "approved" : bp.decision->kind == BLEND_EXCLUDED ? "excluded" : "pending",

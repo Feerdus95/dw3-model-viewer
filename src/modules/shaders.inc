@@ -13,6 +13,7 @@ layout(location = 7) in vec3 wgt;     /* how much it follows each partner of its
 uniform mat4 mvp, world;
 uniform mat4 mvpO[3], worldO[3];     /* the partners', for the vertices with a weight */
 uniform float blendOn;
+uniform vec3 blendFade;               /* the share of each partner's weight kept (--weld-fade) */
 uniform vec3 light;
 uniform int lighting; /* 0 none, 1 the viewer's light, 2 the stage's (the GTE's NCS) */
 uniform vec3 ldir[3], lcol[3], amb;
@@ -21,7 +22,7 @@ out vec3 col;
 flat out uvec4 t, lim;
 flat out uint md;
 void main() {
-    vec3 wk = wgt * blendOn;
+    vec3 wk = wgt * blendOn * blendFade;
     float home = 1.0 - (wk.x + wk.y + wk.z);
     vec4 p4 = vec4(pos, 1.0);
     gl_Position = home * (mvp * p4) + wk.x * (mvpO[0] * p4) + wk.y * (mvpO[1] * p4) + wk.z * (mvpO[2] * p4);

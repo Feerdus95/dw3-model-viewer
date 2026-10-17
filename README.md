@@ -363,6 +363,10 @@ Five things are kept apart, and nothing is blended unless asked for (the details
 - **Exclusion**, which wins over everything: `--weld-skip A,B` (repeat it), and `BLEND_SKIP` in `joint_blend.inc` for good (the jaws of
   Brachiomon and Guilmon: hinges whose opening is meant to show). Bones are the file's numbers; `--seams` and `--blend-audit` show each
   pair's state: eligible, validated, review, rejected, enabled or excluded.
+- **Fade** (`--weld-fade`, an opt-in prototype): averaging two matrices collapses a ring when one bone turns a lot against the other (an elbow's inside,
+  a twisted tube). With the fade, a pair's weights shrink with the turn between its two bones, whole up to 60 degrees and none from 120 (smoothstep;
+  the 60 is where the ring shrinks 15%, the 85% warning), so extreme poses return to the rigid pose and ordinary ones are unchanged. `--blend-audit`
+  prints in how many poses a pair is cut. Presentation only; not part of the verdict.
 - **Decisions** (`src/modules/blend_decisions.inc`, with the evidence in `docs/joint_blend_review.md`): pairs looked at with `--inspect`, by eye,
   and what was decided. *Approved* pairs are drawn by default (Guilmon's wrist, Brachiomon's tail 9,8, REDV and VEGI; the geometry must still
   validate); *excluded* ones (BVND's jaws, which close blended) are never drawn, `--weld` included; *pending* ones (neutral,

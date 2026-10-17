@@ -166,7 +166,7 @@ static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vec
     GLint loc_pass = GL(glGetUniformLocation)(g_mesh, "pass"), loc_abr = GL(glGetUniformLocation)(g_mesh, "abr");
     GLint loc_tint = GL(glGetUniformLocation)(g_mesh, "tint");
     GLint loc_mvpO = GL(glGetUniformLocation)(g_mesh, "mvpO"), loc_worldO = GL(glGetUniformLocation)(g_mesh, "worldO");
-    GLint loc_blend = GL(glGetUniformLocation)(g_mesh, "blendOn");
+    GLint loc_blend = GL(glGetUniformLocation)(g_mesh, "blendOn"), loc_fade = GL(glGetUniformLocation)(g_mesh, "blendFade");
     /* a model: its bones through PRE, opaque first and then the semi-transparent, each blending its own way */
     auto draw_model = [&](Scene &sc, const M4 &pre) {
         Model &m = *sc.model;
@@ -179,7 +179,7 @@ static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vec
                 GL(glUniformMatrix4fv)(loc_mvp, 1, GL_FALSE, mvp.m);
                 GL(glUniformMatrix4fv)(loc_world, 1, GL_FALSE, pose.m);
                 /* a joint blended: the vertices with a weight also follow their bone's partners (a partner that isn't shown: itself) */
-                float on = 0;
+                float on = 0, fade[3] = {1, 1, 1};
                 float mvpO[3][16], worldO[3][16];
                 for (int k = 0; k < 3; k++) memcpy(mvpO[k], mvp.m, sizeof mvpO[k]), memcpy(worldO[k], pose.m, sizeof worldO[k]);
                 const BoneBlend &bb = sc.blend.bone[b];
@@ -189,11 +189,13 @@ static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vec
                         if (!m.pose[bb.partner[k]].visible) continue;
                         M4 pose2 = mul(pre, mul(bone_pose(sc, bb.partner[k]), from(bb.rel[k]))), mvp2 = mul(vp, mul(PSX_TO_GL, pose2));
                         memcpy(mvpO[k], mvp2.m, sizeof mvpO[k]), memcpy(worldO[k], pose2.m, sizeof worldO[k]);
+                        if (g_blendFade) fade[k] = blend_fade(pose.m, pose2.m);
                     }
                 }
                 GL(glUniformMatrix4fv)(loc_mvpO, 3, GL_FALSE, &mvpO[0][0]);
                 GL(glUniformMatrix4fv)(loc_worldO, 3, GL_FALSE, &worldO[0][0]);
                 GL(glUniform1f)(loc_blend, on);
+                GL(glUniform3fv)(loc_fade, 1, fade);
                 int mark = b < sc.mark.size() ? sc.mark[b] : 0;
                 if (mark == 2) GL(glUniform4f)(loc_tint, 1, 0.85f, 0.2f, 0.35f);
                 else GL(glUniform4f)(loc_tint, 0.55f, 0.8f, 1, mark == 1 ? 0.22f : 0);

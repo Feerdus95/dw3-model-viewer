@@ -56,6 +56,26 @@ struct BlendReject {
 static const BlendReject BLEND_REJECT[] = {
     {"M122HAGU.BIN", 1, 2, "the gear spins inside the body shell; blended, the shell collapses (seen)"},
 };
+/* FADE (opt-in, --weld-fade): averaging two matrices collapses a ring when one bone turns a lot against the other (an elbow's inside, a twisted tube: a
+   turn of THETA shrinks it by cos(THETA/2), 15% at about 60 degrees, half at 120). So a pair's weights fade with the turn of its partner's image from
+   where its own bone puts the vertex: whole up to FADE_START, none from FADE_END, smoothstep between, back to the rigid pose (and its crack) at extremes. */
+static bool g_blendFade = false;
+static const float BLEND_FADE_START = 60.0f, BLEND_FADE_END = 120.0f; /* degrees */
+/* the share of the weight kept: A the bone's own world matrix, B its partner's image of it (both column-major, scale allowed, no shear) */
+static float blend_fade(const float *A, const float *B) {
+    float a[9], b[9];
+    for (int c = 0; c < 3; c++) {
+        float la = sqrtf(A[c * 4] * A[c * 4] + A[c * 4 + 1] * A[c * 4 + 1] + A[c * 4 + 2] * A[c * 4 + 2]);
+        float lb = sqrtf(B[c * 4] * B[c * 4] + B[c * 4 + 1] * B[c * 4 + 1] + B[c * 4 + 2] * B[c * 4 + 2]);
+        if (la < 1e-6f || lb < 1e-6f) return 1;
+        for (int r = 0; r < 3; r++) a[c * 3 + r] = A[c * 4 + r] / la, b[c * 3 + r] = B[c * 4 + r] / lb;
+    }
+    float tr = 0; /* trace of a^T b */
+    for (int i = 0; i < 9; i++) tr += a[i] * b[i];
+    float theta = acosf(std::max(-1.0f, std::min(1.0f, (tr - 1) / 2))) * 57.29578f;
+    float t = std::max(0.0f, std::min(1.0f, (theta - BLEND_FADE_START) / (BLEND_FADE_END - BLEND_FADE_START)));
+    return 1 - t * t * (3 - 2 * t);
+}
 static const float BLEND_SEP_SLACK = 1.0f; /* blended, matched vertices may be this much (rounding) farther apart than at rest */
 /* Displacement: a vertex follows its partner bone by w (at most 0.5) of the way, so it moves at most w times the two bones' offset, and for a
    ring turned about its own middle that offset is at most twice the vertex's distance L from the middle: displacement <= L. A weighted vertex is
@@ -258,6 +278,8 @@ struct BlendPair {
     float sepRigid = 0, sepBlended = 0, disp = 0, pinch = 1; float pinchVsRigid = 1; /* the smallest blended ring over the rigid ring of the SAME pose (an animated scale shrinks both): the metric the verdict uses */
     int pvMo = 0, pvKey = 0, pvPoses = 0, pvDegen = 0; /* where, and the poses measured and skipped (a rigid ring under BLEND_RING_MIN has no scale) */
     bool review = false;
+    float fadeMin = 1;  /* --weld-fade: the least share of the weight kept in any pose (blend_fade) ... */
+    int fadePoses = 0, fadeHit = 0; /* ... and the poses measured and those where it was under 1 */
     const BlendDecision *decision = nullptr; /* what was decided by eye (blend_decisions.inc), if anyone looked */
     int pinchMo = 0, pinchKey = 0; /* pinch: the smallest the blended ring gets, as a share of its rest radius */
     int dispMo = 0, dispKey = 0;
@@ -429,6 +451,10 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
                         ring.push_back(xa), rring.push_back(ra);
                     }
                     if (bp.ring > 0 && blend_ring(ring) / bp.ring < bp.pinch) bp.pinch = blend_ring(ring) / bp.ring, bp.pinchMo = (int)mo, bp.pinchKey = key;
+                    {
+                        float f = std::min(blend_fade(pm.pose[bp.a].world, mab.m), blend_fade(pm.pose[bp.b].world, mba.m));
+                        bp.fadePoses++, bp.fadeHit += f < 0.999f, bp.fadeMin = std::min(bp.fadeMin, f);
+                    }
                     if (float rr = blend_ring(rring); rr < BLEND_RING_MIN) bp.pvDegen++;
                     else {
                         bp.pvPoses++;
