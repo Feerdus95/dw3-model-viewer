@@ -34,6 +34,7 @@ static float blend_fall(float t) {
 static bool g_blendNormals = false;                  /* --weld-normals: a matched seam vertex gets one normal, the mean of both pieces' (the lighting doesn't break at the joint) */
 static bool g_blendBridge = false;                   /* --weld-bridge: a sleeve drawn between each enabled pair's rings, instead of the weld (which is off) */
 static bool g_blendBandLimb = false;                 /* --weld-band-limb: a pair's band is at least half the distance between its two bones' origins (the whole limb bends) */
+static bool g_blendOverlap = false;                  /* --weld-overlap: pieces that overlap with no shared ring are joined by distance: every vertex within reach of the other piece follows both bones */
 static bool g_blendSkin = false;                     /* --weld-skin: every flag above, for every model */
 static const char *BLEND_SKIN_MODELS[] = {"M041GIRO.BIN"}; /* models drawn with the full skinning by default */
 static bool g_blendBandAuto = false;                /* --weld-band-auto: a pair's band is at least BLEND_BAND_RING times its ring's radius */
@@ -277,9 +278,9 @@ static BlendMatch blend_match(const Model &m, const BlendRest &r, int a, int b) 
 
 /* PATH F (full skinning models only): two pieces that never touch (a floating arm and its head) are joined at the point where they come nearest:
    the K vertices of A nearest B, each with its nearest on B; the pair's middle is where the weight is a half */
-static BlendMatch blend_force(const BlendRest &r, const Mesh &ma, const Mesh &mb, int a, int b) {
+static BlendMatch blend_force(const BlendRest &r, const Mesh &ma, const Mesh &mb, int a, int b, size_t K = 4, bool idle = false) {
     BlendMatch mt;
-    const auto &world = r.bind;
+    const auto &world = idle ? r.idle : r.bind;
     std::vector<BlendPt> pa = blend_pts(ma, world[a].data()), pb = blend_pts(mb, world[b].data());
     std::vector<float> d(pa.size(), 1e30f);
     std::vector<int> nearest(pa.size(), -1), order(pa.size());
@@ -291,12 +292,14 @@ static BlendMatch blend_force(const BlendRest &r, const Mesh &ma, const Mesh &mb
         }
     }
     std::sort(order.begin(), order.end(), [&](int x, int y) { return d[x] < d[y] || (d[x] == d[y] && x < y); });
-    const size_t K = 4;
     if (pa.size() < 3 || pb.size() < 3) return mt;
     std::vector<BlendPt> mid;
     float gap = 0;
+    /* overlap (K > 4, idle pose): every vertex within a tenth of the smaller piece of the other, at most K, and at least the 4 nearest */
+    float reach = K > 4 ? 0.1f * std::min(blend_size(pa), blend_size(pb)) : 0;
     for (size_t i = 0; i < order.size() && i < K; i++) {
         int ia = order[i];
+        if (i >= 4 && d[ia] > reach) break;
         mt.pairs.push_back({ia, nearest[ia]});
         BlendPt q;
         for (int j = 0; j < 3; j++) q[j] = (pa[ia][j] + pb[nearest[ia]][j]) / 2;
@@ -397,6 +400,7 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
     BlendRest rest = blend_rest(m);
     /* MATCHING: every parent and child that have meshes */
     std::map<std::pair<int, int>, BlendMatch> match;
+    std::set<std::pair<int, int>> overlapKeys;
     std::map<std::pair<int, int>, std::string> missed; /* near misses of path B, for the notes */
     for (size_t b = 1; b < m.bones.size(); b++) {
         int p = m.bones[b].parent;
@@ -405,8 +409,12 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
         BlendMatch mt = blend_match(m, rest, key.first, key.second);
         bool skinModel = false;
         for (const char *n : BLEND_SKIN_MODELS) skinModel = skinModel || m.name == n;
-        if (!mt.candidate && skinModel && m.bones[key.first].mesh >= 0 && m.bones[key.second].mesh >= 0)
-            mt = blend_force(rest, m.meshes[m.bones[key.first].mesh], m.meshes[m.bones[key.second].mesh], key.first, key.second);
+        bool ovl = false;
+        if (!mt.candidate && (skinModel || g_blendOverlap) && m.bones[key.first].mesh >= 0 && m.bones[key.second].mesh >= 0) {
+            mt = blend_force(rest, m.meshes[m.bones[key.first].mesh], m.meshes[m.bones[key.second].mesh], key.first, key.second, skinModel ? 4 : 64, !skinModel);
+            ovl = !skinModel && mt.candidate;
+        }
+        if (ovl) overlapKeys.insert(key);
         if (mt.candidate) match[key] = std::move(mt);
         else if (!mt.miss.empty()) missed[key] = mt.miss;
     }
@@ -418,6 +426,7 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
         for (const auto &p : g_blendExtra) want.insert(blend_key(p.first, p.second));
         explicitAsk = want;
     }
+    for (const auto &k : overlapKeys) want.insert(k), explicitAsk.insert(k);
     /* the per-pair decisions: approved are asked for by name, excluded are left out (over everything), pending are drawn only by name */
     std::map<std::pair<int, int>, const BlendDecision *> decided;
     for (const BlendDecision &d : BLEND_DECISIONS)

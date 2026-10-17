@@ -38,6 +38,7 @@ int main(int argc, char **argv) {
         else if (a == "--weld-fade") g_blendFade = true;
         else if (a == "--weld-subdiv") g_blendSubdiv = true;
         else if (a == "--weld-soft") g_blendSoft = true;
+        else if (a == "--weld-overlap") g_blendOverlap = true;
         else if (a == "--weld-bridge") g_blendBridge = true;
         else if (a == "--weld-normals") g_blendNormals = true;
         else if (a == "--weld-band-limb") g_blendBandLimb = true;
