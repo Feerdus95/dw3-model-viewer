@@ -104,6 +104,7 @@ struct SeamJoint {
     const char *cls = "";
     int pairs = 0, verts = 0;
     float cover = 0, minGap = 0, drift = 0, normalDeg = 0, maxSep = 0;
+    int blendMeet = 0; /* vertices on one another at the bind pose: the joint can be blended with 3 or more */
     int poses = 0, apart = 0, sepMotion = 0, sepKey = 0; /* poses seen, and those where the two pieces' boxes are 1% of the model apart */
     std::vector<std::pair<int, int>> pv; /* child vertex, parent vertex */
 };
@@ -154,6 +155,7 @@ static int check_seams(const std::string &only) {
             return sm[k];
         };
         std::vector<SeamJoint> js;
+        BlendRest blendRest = blend_rest(m);
         std::vector<JointBlend> blends;
         if (g_seamsBlend) blend_build(m, blends);
         int curMo = 0, curKey = 0, moveMo = 0, moveKey = 0; /* the pose being placed, and where the blended vertices moved most */
@@ -239,6 +241,7 @@ static int check_seams(const std::string &only) {
                 std::sort(cand.begin(), cand.end());
                 for (size_t i = 0; i < cand.size() && i < 16; i++) j.rimV[s].push_back(cand[i].second);
             }
+            j.blendMeet = blend_meets(m, blendRest, (int)b, p);
             j.minGap /= D;
             js.push_back(std::move(j));
         }
@@ -318,10 +321,10 @@ static int check_seams(const std::string &only) {
         for (SeamJoint &j : js) all.push_back(std::move(j));
     }
     for (const SeamJoint &j : all)
-        printf("%04d %-13s b%-3d <- b%-3d %-4s pairs %3d/%-3d cover %3.0f%% gap %5.2f%% drift %6.2f%% normals %5.1f deg  apart %3d%% of poses, up to %5.1f%% (motion %d key %d)  rim child %2d: %5.2f%% parent %2d: %5.2f%% (motion %d key %d) unsure %4.2f%% %4.2f%%\n", j.fid,
+        printf("%04d %-13s b%-3d <- b%-3d %-4s pairs %3d/%-3d cover %3.0f%% gap %5.2f%% drift %6.2f%% normals %5.1f deg  apart %3d%% of poses, up to %5.1f%% (motion %d key %d)  rim child %2d: %5.2f%% parent %2d: %5.2f%% (motion %d key %d) unsure %4.2f%% %4.2f%% blend %d\n", j.fid,
                j.model.c_str(), j.bone, j.parent, j.cls, j.pairs, j.verts, j.cover * 100, j.minGap * 100, j.drift * 100, j.normalDeg,
                j.poses ? j.apart * 100 / j.poses : 0, j.maxSep * 100, j.sepMotion, j.sepKey, (int)j.rimV[0].size(), j.rimExp[0] * 100,
-               (int)j.rimV[1].size(), j.rimExp[1] * 100, j.rimMotion, j.rimKey, j.rimAmb[0] * 100, j.rimAmb[1] * 100);
+               (int)j.rimV[1].size(), j.rimExp[1] * 100, j.rimMotion, j.rimKey, j.rimAmb[0] * 100, j.rimAmb[1] * 100, j.blendMeet);
     /* the summary */
     const char *names[] = {"COIN", "OVER", "GAP", "FAR"};
     printf("\n%d models (%d skipped), %d joints\n", models, skipped, (int)all.size());

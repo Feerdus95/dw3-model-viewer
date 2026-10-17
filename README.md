@@ -298,10 +298,11 @@ with changes you haven't saved, quitting, or reverting a stage asks first.
                                           motion's keyframe, through a fighter's
                                           camera, with a stage's lights
           [--frame A,B] [--only A,B] [--zoom F] [--yaw DEG] [--wire]
-          [--blend] [--weld A,B] [--weld-band R]
+          [--blend] [--weld A,B] [--weld-band R] [--weld-eps E]
                                           draws the joints that can be blended (see below)
                                           blended; --weld asks for bones A and B on any model,
-                                          R is the band in game units (60)
+                                          R is the band in game units (60), E how near
+                                          two vertices are to be the same point (1% of the model)
                                           a close-up: frames bones A and B (--only
                                           draws just those), zoomed F times, seen from
                                           DEG degrees around, as a wireframe
