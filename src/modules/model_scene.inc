@@ -19,6 +19,7 @@ struct Bridge {
 struct Scene {
     std::unique_ptr<Model> model;
     std::vector<Bridge> bridges;
+    bool skin = false; /* drawn with the full skinning */
     GLuint bvao = 0, bvbo = 0;
     std::vector<int> first, count; /* each bone's vertices */
     std::vector<bool> hidden;
@@ -59,6 +60,13 @@ static void gvert_attribs() { /* the bound VAO and VBO carry GVerts */
 
 static void upload(Scene &s) {
     Model &m = *s.model;
+    /* the full skinning (fade, subdivision, soft fall, limb band) for the models that have it by default, or all with --weld-skin; the globals are the
+       build's and the render's own, so they are set for this upload and put back */
+    bool skin = g_blendSkin;
+    for (const char *n : BLEND_SKIN_MODELS) skin = skin || m.name == n;
+    struct Keep { bool f = g_blendFade, d = g_blendSubdiv, so = g_blendSoft, l = g_blendBandLimb; ~Keep() { g_blendFade = f, g_blendSubdiv = d, g_blendSoft = so, g_blendBandLimb = l; } } keep;
+    if (skin) g_blendFade = g_blendSubdiv = g_blendSoft = g_blendBandLimb = true;
+    s.skin = skin;
     std::vector<GVert> v;
     s.first.assign(m.bones.size(), 0);
     s.count.assign(m.bones.size(), 0);

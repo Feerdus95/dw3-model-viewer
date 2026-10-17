@@ -29,7 +29,7 @@ static const BlendDecision BLEND_DECISIONS[] = {
     {"M241HNGY.BIN", 22, 23, BLEND_PENDING, "neutral", 2, 60, "near-identical at idle and motion 5 key 20; at the audited pose (motion 2 key 60) the lower piece is pulled up under the upper one with a crease"},
     {"M241HNGY.BIN", 2, 3, BLEND_PENDING, "improved", 13, 80, "With --weld-fade, 8 poses (motions 2-15): the gap at the red band closes in about 5 of 8 and nothing degrades. Needs the fade on; awaiting approval"},
     {"M241HNGY.BIN", 5, 6, BLEND_PENDING, "neutral", 13, 80, "With --weld-fade, 8 poses (motions 2-15): almost identical to rigid, a slightly smoother band at times; no defect"},
-    {"M041GIRO.BIN", 2, 3, BLEND_PENDING, "improved", 15, 40, "With --weld-fade, 8 poses (motions 2-15): the torn white ring becomes one clean band and the elbow is natural in all 8; no pinch. Needs the fade on; awaiting approval"},
+    {"M041GIRO.BIN", 2, 3, BLEND_APPROVED, "improved", 15, 40, "With --weld-fade, 8 poses (motions 2-15): the torn white ring becomes one clean band and the elbow is natural in all 8; no pinch. Needs the fade on; drawn with the full skinning (fade, subdivision, soft fall, limb-wide band), which this model has by default"},
     {"M108GOLE.BIN", 2, 3, BLEND_PENDING, "neutral", 13, 104, "With --weld-fade, 8 poses (motions 2-15): identical to rigid in all 8 (the fade cuts 87% of its poses): nothing gained"},
     {"M110GECO.BIN", 6, 7, BLEND_PENDING, "improved", 15, 80, "With --weld-fade, 8 poses (motions 2-15): a smoother elbow, no wedge; the gain is small. Needs the fade on; awaiting approval"},
     {"M143CLOK.BIN", 8, 9, BLEND_PENDING, "neutral", 13, 44, "no visible crack or defect either way"},

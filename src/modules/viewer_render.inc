@@ -189,7 +189,7 @@ static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vec
                         if (!m.pose[bb.partner[k]].visible) continue;
                         M4 pose2 = mul(pre, mul(bone_pose(sc, bb.partner[k]), from(bb.rel[k]))), mvp2 = mul(vp, mul(PSX_TO_GL, pose2));
                         memcpy(mvpO[k], mvp2.m, sizeof mvpO[k]), memcpy(worldO[k], pose2.m, sizeof worldO[k]);
-                        if (g_blendFade) fade[k] = blend_fade(pose.m, pose2.m);
+                        if (g_blendFade || sc.skin) fade[k] = blend_fade(pose.m, pose2.m);
                     }
                 }
                 GL(glUniformMatrix4fv)(loc_mvpO, 3, GL_FALSE, &mvpO[0][0]);
