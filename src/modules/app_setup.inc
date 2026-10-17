@@ -34,7 +34,8 @@ int main(int argc, char **argv) {
             int p = 0, q = 0;
             if (sscanf(argv[++i], "%d,%d", &p, &q) == 2) g_blendExtra.push_back({p, q});
         } else if (a == "--weld-band" && i + 1 < argc) g_blendBand = (float)atof(argv[++i]);
-        else if (a == "--weld-all") g_blendAll = true;
+        else if (a == "--weld-unreviewed") g_blendUnreviewed = true;
+        else if (a == "--weld-all") fprintf(stderr, "--weld-all no longer draws unreviewed pairs (only the approved ones are drawn by default); the experiment is --weld-unreviewed\n");
         else if (a == "--weld-inspect") g_blendInspect = true;
         else if (a == "--weld-skip" && i + 1 < argc) {
             int p = 0, q = 0;

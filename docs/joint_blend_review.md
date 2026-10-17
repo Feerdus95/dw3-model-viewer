@@ -4,8 +4,8 @@ Each pair was inspected with `dw3mv --inspect A,B --only A,B --shot out.bmp file
 A good ratio or a low residual separation never decided anything: a verdict is what the sheet showed. Decisions live in
 `src/modules/blend_decisions.inc` (explicit, apart from eligibility and from the geometric verdict).
 
-Matrix: **approved** (clear improvement, drawn by default), **excluded** (destructive or a hinge: never drawn, `--weld-all` and `--weld` included),
-**pending** (evidence insufficient, neutral, ambiguous or unresolved: drawn only by `--weld`, never by `--weld-all`).
+Matrix: **approved** (clear improvement, drawn by default), **excluded** (destructive or a hinge: never drawn, `--weld-unreviewed` and `--weld` included),
+**pending** (evidence insufficient, neutral, ambiguous or unresolved: drawn only by `--weld`, never by `--weld-unreviewed`).
 Always rejected, as confirmed destructive and not part of this table: M122HAGU 2<-1 (`BLEND_REJECT`). Always excluded as a rigid hinge:
 Guilmon 7<-6 and Brachiomon 17<-16 (`BLEND_SKIP`).
 

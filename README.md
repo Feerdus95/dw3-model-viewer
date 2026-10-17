@@ -298,7 +298,7 @@ with changes you haven't saved, quitting, or reverting a stage asks first.
                                           motion's keyframe, through a fighter's
                                           camera, with a stage's lights
           [--frame A,B] [--only A,B] [--zoom F] [--yaw DEG] [--wire]
-          [--blend] [--weld A,B] [--weld-all] [--weld-skip A,B] [--weld-band R]
+          [--blend] [--weld A,B] [--weld-unreviewed] [--weld-skip A,B] [--weld-band R]
                                           draws the joints that can be blended (see below)
                                           blended; --weld asks for bones A and B on any model,
                                           R is the band in game units (60)
@@ -357,17 +357,16 @@ Five things are kept apart, and nothing is blended unless asked for (the details
   the figure measures shrinkage, not whether the joint looks right (in the inspected set it covers good, neutral and bad joints). A rigid
   ring under 10 units has no scale and is skipped; if every pose is, the pair is *indeterminate* (review). Joints confirmed destructive by
   eye (`BLEND_REJECT`: M122HAGU's gear) are rejected. Only validated pairs are drawn, except that a review pair is drawn when asked for by
-  name (`--weld`), never by `--weld-all`. `--weld-inspect` draws a rejected pair asked for with `--weld`, to look at why.
-- **Activation**: only the pairs asked for, and validated: `--weld A,B` (repeat it), `--weld-all` (every validated pair), and Guilmon's wrist
+  name (`--weld`), never in bulk. `--weld-inspect` draws a rejected pair asked for with `--weld`, to look at why.
+- **Activation**: only the pairs asked for, and validated: `--weld A,B` (repeat it), `--weld-unreviewed` (an experiment: also the pairs nobody has reviewed, if they validate; `--weld-all` is gone), and Guilmon's wrist
   (4,3), built in. Asking for a pair that isn't eligible or is rejected is reported with why, not forced.
 - **Exclusion**, which wins over everything: `--weld-skip A,B` (repeat it), and `BLEND_SKIP` in `joint_blend.inc` for good (the jaws of
   Brachiomon and Guilmon: hinges whose opening is meant to show). Bones are the file's numbers; `--seams` and `--blend-audit` show each
   pair's state: eligible, validated, review, rejected, enabled or excluded.
 - **Decisions** (`src/modules/blend_decisions.inc`, with the evidence in `docs/joint_blend_review.md`): pairs looked at with `--inspect`, by eye,
   and what was decided. *Approved* pairs are drawn by default (Guilmon's wrist, Brachiomon's neck, REDV and VEGI limbs; the geometry must still
-  validate); *excluded* ones (BVND's jaws, which close blended) are never drawn, `--weld-all` and `--weld` included; *pending* ones (neutral,
-  inconclusive or degraded) are drawn only by name with `--weld`, never by `--weld-all`. A pair nobody looked at has no entry, and `--weld-all`
-  still draws it if it validates: an experiment, not a decision. The table is not a rule and holds no threshold. `--blend-audit` prints each
+  validate); *excluded* ones (BVND's jaws, which close blended) are never drawn, `--weld` included; *pending* ones (neutral,
+  inconclusive or degraded) are drawn only by name with `--weld`, never in bulk. A pair nobody looked at has no entry and is drawn only by `--weld-unreviewed`: an experiment, not a decision. The table is not a rule and holds no threshold. `--blend-audit` prints each
   pair's decision.
 - **Conflicts**: a bone can be in up to 3 pairs. Each vertex keeps one weight per partner bone (partners in bone order, so asking for the
   pairs in another order changes nothing), the weights are added and scaled to 1 if they pass it. Where one pair's meeting vertices carry

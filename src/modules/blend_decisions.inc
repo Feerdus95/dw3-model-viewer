@@ -1,10 +1,10 @@
 /* The per-pair decisions: which joints were looked at (--inspect, at the audited worst pose, rigid beside blended), and what was decided.
    Kept apart from eligibility and from the geometric verdict, and explicit and deterministic: nothing here is a rule or a threshold.
      APPROVED  a clear visual improvement and no relevant deformation: drawn by default (when the geometry still validates).
-     EXCLUDED  a destructive deformation or a joint that must stay rigid (a hinge): never drawn, not even by --weld-all or --weld.
+     EXCLUDED  a destructive deformation or a joint that must stay rigid (a hinge): never drawn, not even by --weld-unreviewed or --weld.
      PENDING   not enough evidence, an ambiguous or unjudgeable pose, or a defect not resolved: drawn only when asked for by name (--weld),
-               never by --weld-all. "Neutral" (no change worth having) is pending too.
-   A pair nobody has looked at has no entry; --weld-all still draws it if it validates (an experiment, not a decision).
+               never by --weld-unreviewed. "Neutral" (no change worth having) is pending too.
+   A pair nobody has looked at has no entry; --weld-unreviewed still draws it if it validates (an experiment, not a decision).
    Bones are the file's numbers; MOTION and KEY are the pose that was inspected. The figures (ratio, separation, displacement) are
    what `dw3mv --blend-audit` prints for the pair; docs/joint_blend_review.md has them next to each decision. */
 enum BlendDecisionKind { BLEND_APPROVED, BLEND_EXCLUDED, BLEND_PENDING };

@@ -26,7 +26,7 @@
 static float g_blendBand = 60;                       /* game units over which the blending fades out */
 static std::vector<std::pair<int, int>> g_blendExtra; /* pairs asked for on the command line, on any model */
 static std::vector<std::pair<int, int>> g_blendSkip;  /* pairs left out on the command line */
-static bool g_blendAll = false;                       /* --weld-all: every eligible pair that validates (but the excluded) */
+static bool g_blendUnreviewed = false;                /* --weld-unreviewed: EXPERIMENT. Also draws the pairs nobody has looked at, if they validate */
 /* --weld-inspect: DRAW asked-for pairs even when rejected, to look at why. A diagnostic only; --weld-all ignores it */
 static bool g_blendInspect = false;
 static bool g_blendValidateAll = false;               /* --blend-audit: run the verdict for every eligible pair, drawn or not */
@@ -303,12 +303,9 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
         want = explicitAsk = *only;
     } else {
         for (const auto &p : g_blendExtra) want.insert(blend_key(p.first, p.second));
-        if (m.name == "M366GIRU.BIN") want.insert({3, 4}); /* Guilmon's wrist, the prototype's */
         explicitAsk = want;
-        if (g_blendAll)
-            for (const auto &kv : match) want.insert(kv.first);
     }
-    /* the per-pair decisions: approved are asked for by name, excluded are left out (over everything), pending are kept out of --weld-all */
+    /* the per-pair decisions: approved are asked for by name, excluded are left out (over everything), pending are drawn only by name */
     std::map<std::pair<int, int>, const BlendDecision *> decided;
     for (const BlendDecision &d : BLEND_DECISIONS)
         if (m.name == d.model) {
@@ -319,6 +316,11 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
             else if (d.kind == BLEND_EXCLUDED) skip.insert(k);
             else if (!explicitAsk.count(k)) want.erase(k);
         }
+    if (g_blendUnreviewed && !only) { /* the experiment: what nobody has looked at (a decided pair keeps its decision) */
+        for (const auto &kv : match)
+            if (!decided.count(kv.first)) want.insert(kv.first);
+        out.notes.push_back("experimental: pairs nobody has reviewed are drawn (--weld-unreviewed)");
+    }
     for (const auto &p : g_blendSkip) skip.insert(blend_key(p.first, p.second));
     for (const BlendSkip &s : BLEND_SKIP)
         if (m.name == s.model) skip.insert(blend_key(s.a, s.b));
@@ -480,7 +482,7 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
             bp.state = "enabled";
             out.notes.push_back("pair " + std::to_string(bp.a) + "," + std::to_string(bp.b) + " is drawn although flagged for review: " + bp.why);
         }
-        else if (!strcmp(bp.state, "rejected") && want.count(key) && bp.judged && g_blendInspect && !g_blendAll) {
+        else if (!strcmp(bp.state, "rejected") && want.count(key) && bp.judged && g_blendInspect && !g_blendUnreviewed) {
             bp.state = "enabled";
             out.notes.push_back("pair " + std::to_string(bp.a) + "," + std::to_string(bp.b) + " is drawn for inspection although rejected: " + bp.why);
         } else if (!strcmp(bp.state, "rejected") && want.count(key) && bp.judged)
