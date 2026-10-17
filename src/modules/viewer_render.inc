@@ -17,6 +17,7 @@ struct View {
     bool uvs = true;
     bool stageView = false;          /* a fight stage: its background, no grid */
     float stageBg[3] = {0, 0, 0};
+    float pfog[4] = {}, pfogz[2] = {}; /* the props' own fog when set (alpha 0: none): colour and amount; where it starts and ends */
 };
 
 static GLuint g_mesh, g_line, g_lineVao, g_lineVbo, g_sprite, g_prop, g_propVao, g_propVbo;
@@ -25,9 +26,20 @@ static GLuint g_mesh, g_line, g_lineVao, g_lineVbo, g_sprite, g_prop, g_propVao,
    bottom left, bottom right corners, in the view's world), times a tint */
 struct PropQuad {
     GLuint tex = 0;
-    float c[4][3] = {};
-    float tint[3] = {1, 1, 1};
+    std::vector<float> v; /* 9 floats a vertex: position, uv, tint, how much fog it takes */
 };
+
+static void pq_vertex(PropQuad &q, const float p[3], float u, float v, const float tint[3], float fog) {
+    const float o[9] = {p[0], p[1], p[2], u, v, tint[0], tint[1], tint[2], fog};
+    q.v.insert(q.v.end(), o, o + 9);
+}
+
+/* four corners (top left, top right, bottom left, bottom right) as two triangles */
+static void pq_quad(PropQuad &q, const float c[4][3], const float tint[3], float fog) {
+    static const int TRI[6] = {0, 1, 2, 1, 3, 2};
+    static const float UV[4][2] = {{0, 0}, {1, 0}, {0, 1}, {1, 1}};
+    for (int k : TRI) pq_vertex(q, c[k], UV[k][0], UV[k][1], tint, fog);
+}
 
 /* A sprite effect's picture (the 320x240 screen around its point) as the
    battle draws it: at its point in the view's world, or at a screen position
@@ -50,13 +62,32 @@ struct ExtraModel {
 /* A billboard's corners (top left, top right, bottom left, bottom right) in
    the view's world. The port's props have y up and z as the game's, which the
    view has the other way (-z); a billboard faces the camera (YAW) unless fixed */
-static void prop_corners(const StageProp &p, float yaw, float c[4][3]) {
+static void prop_corners(const StageProp &p, float yaw, float c[4][3], float bx = 0, float bz = 0) {
     float w = p.size[0] * p.scale, h = p.size[1] * p.scale, a = p.fixed ? p.rot * 0.017453293f : yaw;
     float rx = cosf(a) * w * 0.5f, rz = -sinf(a) * w * 0.5f;
     for (int k = 0; k < 4; k++) {
         float side = k & 1 ? 1.0f : -1.0f;
-        c[k][0] = p.pos[0] + rx * side, c[k][1] = p.pos[1] + (k < 2 ? h : 0), c[k][2] = -p.pos[2] + rz * side;
+        c[k][0] = p.pos[0] + rx * side + (k < 2 ? bx : 0), c[k][1] = p.pos[1] + (k < 2 ? h : 0), c[k][2] = -p.pos[2] + rz * side - (k < 2 ? bz : 0);
     }
+}
+
+/* The wind as the port has it (stagefx.c's wind_at), T in frames, and how far it bends a prop of height H whose
+   sway is p's: the tip's offset is the wind times this (the port's world) */
+static void prop_wind(float t, float wind, float out[2]) {
+    float gust = 0.6f + 0.4f * sinf(t * 0.011f) * sinf(t * 0.0037f + 1.0f), dir = 0.6f + 0.5f * sinf(t * 0.0013f);
+    out[0] = cosf(dir) * 18.0f * wind * gust, out[1] = sinf(dir) * 18.0f * wind * gust;
+}
+static float prop_bend(const StageProp &p, float t, float h) {
+    return p.sway / 18.0f * h * 0.3f * (0.5f + sinf(t * 0.042f + (p.pos[0] + p.pos[2]) * 0.0004f));
+}
+
+/* A model's point (the OBJ's x, y, z) in the view's world: scaled, turned, set down, bent by WW * BEND at its height squared */
+static void prop_model_point(const StageProp &p, const ObjMesh &m, float x, float y, float z, const float ww[2], float bend, float out[3]) {
+    float a = p.rot * 0.017453293f, ca = cosf(a), sa = sinf(a), lx = x * p.scale, ly = (y - m.miny) * p.scale, lz = z * p.scale;
+    float rel = std::clamp(ly / (m.h * p.scale), 0.0f, 1.0f);
+    out[0] = p.pos[0] + lx * ca + lz * sa + ww[0] * bend * rel * rel;
+    out[1] = p.pos[1] + ly;
+    out[2] = -(p.pos[2] - lx * sa + lz * ca + ww[1] * bend * rel * rel);
 }
 
 static void draw_lines(const std::vector<float> &v, const M4 &mvp) {
@@ -229,24 +260,19 @@ static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vec
     GL(glDisable)(GL_CULL_FACE);
     GL(glPolygonMode)(GL_FRONT_AND_BACK, GL_FILL);
     if (!props.empty()) {
-        static const int TRI[6] = {0, 1, 2, 1, 3, 2};
-        static const float UV[4][2] = {{0, 0}, {1, 0}, {0, 1}, {1, 1}};
         GL(glUseProgram)(g_prop);
         GL(glUniformMatrix4fv)(GL(glGetUniformLocation)(g_prop, "mvp"), 1, GL_FALSE, vp.m);
         GL(glUniform1i)(GL(glGetUniformLocation)(g_prop, "tex"), 0);
+        GL(glUniform4f)(GL(glGetUniformLocation)(g_prop, "fog"), v.pfog[0], v.pfog[1], v.pfog[2], v.pfog[3]);
+        GL(glUniform2f)(GL(glGetUniformLocation)(g_prop, "fogz"), v.pfogz[0], v.pfogz[1]);
         GL(glActiveTexture)(GL_TEXTURE0);
         GL(glBindVertexArray)(g_propVao);
         GL(glBindBuffer)(GL_ARRAY_BUFFER, g_propVbo);
         for (const PropQuad &q : props) {
-            float vb[6 * 8];
-            for (int j = 0; j < 6; j++) {
-                float *o = vb + j * 8;
-                int k = TRI[j];
-                memcpy(o, q.c[k], 12), o[3] = UV[k][0], o[4] = UV[k][1], memcpy(o + 5, q.tint, 12);
-            }
-            GL(glBufferData)(GL_ARRAY_BUFFER, sizeof vb, vb, GL_STREAM_DRAW);
+            if (q.v.empty()) continue;
+            GL(glBufferData)(GL_ARRAY_BUFFER, q.v.size() * 4, q.v.data(), GL_STREAM_DRAW);
             GL(glBindTexture)(GL_TEXTURE_2D, q.tex);
-            GL(glDrawArrays)(GL_TRIANGLES, 0, 6);
+            GL(glDrawArrays)(GL_TRIANGLES, 0, (GLsizei)(q.v.size() / 9));
         }
     }
     if (v.skeleton) {

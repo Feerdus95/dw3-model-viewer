@@ -142,9 +142,9 @@ int main(int argc, char **argv) {
     GL(glBindVertexArray)(g_propVao);
     GL(glBindBuffer)(GL_ARRAY_BUFFER, g_propVbo);
     for (int i = 0; i < 3; i++) GL(glEnableVertexAttribArray)(i);
-    GL(glVertexAttribPointer)(0, 3, GL_FLOAT, GL_FALSE, 32, (void *)0);
-    GL(glVertexAttribPointer)(1, 2, GL_FLOAT, GL_FALSE, 32, (void *)12);
-    GL(glVertexAttribPointer)(2, 3, GL_FLOAT, GL_FALSE, 32, (void *)20);
+    GL(glVertexAttribPointer)(0, 3, GL_FLOAT, GL_FALSE, 36, (void *)0);
+    GL(glVertexAttribPointer)(1, 2, GL_FLOAT, GL_FALSE, 36, (void *)12);
+    GL(glVertexAttribPointer)(2, 4, GL_FLOAT, GL_FALSE, 36, (void *)20);
 
     Scene scene;
     View view;
@@ -199,7 +199,7 @@ int main(int argc, char **argv) {
     struct Picked { /* what the file dialogs gave, maybe from another thread */
         std::mutex m;
         std::vector<std::string> files;
-        std::string folder, data, obj, bin, prop;
+        std::string folder, data, obj, bin, prop, propTex;
     } picked;
     picked.obj = start_obj;
     std::set<int> ownIds = own_effects(ownRoot); /* the effects with own images in ownRoot */
@@ -219,13 +219,16 @@ int main(int argc, char **argv) {
     std::string stageDir; /* the last export's folder */
     /* its props for the port (custom.h), in <mods>/fightstages/<id>/: the list, the one picked, the PNGs as textures */
     std::vector<StageProp> props;
-    int propSel = -1;
+    PropsMeta propsMeta;
+    bool propWind = false; /* the view shows the wind bending the props */
+    int propSel = -1, propKind = 0; /* the one picked; what the file dialog is for: 0 billboard, 1 emitter, 2 model */
     struct PropImg {
         GLuint tex = 0;
         float w = 1, h = 1;
     };
     std::map<std::string, PropImg> propImgs; /* by path */
-    bool propMoving = false, propEmitterWanted = false; /* a gizmo drag on a prop; what the PNG dialog is for */
+    std::map<std::string, ObjMesh> propMeshes; /* the models' OBJs by path; empty if unreadable */
+    bool propMoving = false;                            /* a gizmo drag on a prop */
     StageProp propBefore;                               /* the prop as that drag found it */
     auto mods_root = [&]() {
         size_t e = ownRoot.find_last_of("/\\");
@@ -259,6 +262,14 @@ int main(int argc, char **argv) {
         pi.w = (float)rgba->w, pi.h = (float)rgba->h;
         SDL_DestroySurface(rgba);
         return pi;
+    };
+    auto prop_mesh = [&](const std::string &name) -> const ObjMesh & {
+        std::string path = props_dir(stageId) + "/" + name;
+        auto it = propMeshes.find(path);
+        if (it != propMeshes.end()) return it->second;
+        ObjMesh &m = propMeshes[path];
+        obj_load(path, m);
+        return m;
     };
     auto stage_tables = [&]() {
         std::vector<uint8_t> t;
@@ -388,7 +399,8 @@ int main(int argc, char **argv) {
         if (!stage_load(id, stageEdit, stageInfo, bytes)) return;
         read_file(fid_path(stageInfo.fid), stageDisc);
         stageId = id, stagePart = -1, stageDirty = false, stageMade = StageBuild();
-        props_load(props_dir(id), props), propSel = -1;
+        props_load(props_dir(id), props, propsMeta), propSel = -1;
+        propMeshes.clear();
         for (auto &it : propImgs) GL(glDeleteTextures)(1, &it.second.tex);
         propImgs.clear();
         for (int k = 0; k < (int)stageEdit.parts.size(); k++) stageMade.firstBone.push_back(k + 1);
@@ -430,7 +442,7 @@ int main(int argc, char **argv) {
         std::ofstream(mod_path(459), std::ios::binary).write((const char *)table.data(), (std::streamsize)table.size());
         stageDirty = false;
         stageMods.insert(stageInfo.fid);
-        if (!props_save(props_dir(stageId), props)) note(NOTE_ERROR, "Can't write " + props_dir(stageId) + "/props.json");
+        if (!props_save(props_dir(stageId), props, propsMeta)) note(NOTE_ERROR, "Can't write " + props_dir(stageId) + "/props.json");
         note(NOTE_OK, "Saved stage " + std::to_string(stageId) + " to " + mod_path(stageInfo.fid) + ": the game reads it when it starts");
     };
     /* back to the disc's: the mod's model gone, its table entries the disc's */

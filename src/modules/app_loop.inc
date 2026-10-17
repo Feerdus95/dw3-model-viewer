@@ -85,7 +85,8 @@
                 }
                 picked.obj.clear();
             }
-            if (!picked.prop.empty()) prop_add(picked.prop, propEmitterWanted), picked.prop.clear();
+            if (!picked.prop.empty()) prop_add(picked.prop, propKind), picked.prop.clear();
+            if (!picked.propTex.empty()) prop_set_tex(picked.propTex), picked.propTex.clear();
             if (!picked.bin.empty()) open_dropped(picked.bin), picked.bin.clear();
             if (!picked.data.empty()) { /* another data folder: everything read again from it */
                 std::string dir = picked.data;
@@ -382,7 +383,7 @@
                 } else if (moved) {
                     float f = powf(1.01f, d.x - d.y);
                     if (p.emitter) p.radius = std::clamp(p.radius * f, 50.0f, 40000.0f);
-                    else p.scale = std::clamp(p.scale * f, 0.05f, 20.0f);
+                    else p.scale = std::clamp(p.scale * f, 0.01f, 400.0f);
                     stageDirty = true;
                 }
             } else if (vpDown[0] && vpMoving && charEditing && gzDrag >= 0 && charGz) {
@@ -491,16 +492,10 @@
                     float best = 1e30f;
                     for (int i = 0; i < (int)props.size(); i++) {
                         const StageProp &p = props[i];
-                        float c[4][3], lo[2] = {1e30f, 1e30f}, hi[2] = {-1e30f, -1e30f};
-                        if (p.emitter) {
-                            float a[3] = {p.pos[0], p.pos[1], -p.pos[2]};
-                            for (int k = 0; k < 4; k++) memcpy(c[k], a, 12);
-                            c[0][1] += p.top;
-                        } else {
-                            prop_corners(p, view.cam.yaw, c);
-                        }
-                        bool all = true;
-                        for (int k = 0; k < (p.emitter ? 2 : 4); k++) {
+                        float c[8][3], lo[2] = {1e30f, 1e30f}, hi[2] = {-1e30f, -1e30f};
+                        int np = prop_points(p, c);
+                        bool all = np > 0;
+                        for (int k = 0; k < np; k++) {
                             ImVec2 sp;
                             if (!to_screen(pvp, c[k], vw, vh, sp)) all = false;
                             else lo[0] = std::min(lo[0], sp.x), lo[1] = std::min(lo[1], sp.y), hi[0] = std::max(hi[0], sp.x), hi[1] = std::max(hi[1], sp.y);

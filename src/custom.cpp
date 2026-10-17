@@ -228,25 +228,38 @@ static float jnum(const Json &o, const char *key, float def) {
     return v && v->type == 'n' ? (float)v->num : def;
 }
 
-bool props_load(const std::string &dir, std::vector<StageProp> &props) {
+bool props_load(const std::string &dir, std::vector<StageProp> &props, PropsMeta &meta) {
     props.clear();
+    meta = PropsMeta();
     std::ifstream f(dir + "/props.json", std::ios::binary);
     if (!f) return false;
     std::string text((std::istreambuf_iterator<char>(f)), {});
     const char *p = text.c_str();
     Json root;
     if (!parse(p, root) || root.type != '{') return false;
-    for (int pass = 0; pass < 2; pass++) {
-        const Json *list = root.get(pass ? "emitters" : "props");
+    meta.wind = jnum(root, "wind", 1);
+    if (const Json *fg = root.get("fog"); fg && fg->type == '{') {
+        meta.fog = true;
+        jvec(*fg, "color", meta.fogColor, 3);
+        meta.fogAmount = jnum(*fg, "amount", meta.fogAmount), meta.fogFrom = jnum(*fg, "from", meta.fogFrom);
+    }
+    for (int pass = 0; pass < 3; pass++) {
+        const Json *list = root.get(pass == 0 ? "props" : pass == 1 ? "emitters" : "models");
         if (!list) continue;
         for (const auto &it : list->items) {
             const Json &o = it.second;
             const Json *img = o.get("image");
             if (!img || img->type != 's') continue;
             StageProp s;
-            s.emitter = pass == 1;
+            s.emitter = pass == 1, s.model = pass == 2;
             s.image = img->str;
+            if (s.model) {
+                const Json *ob = o.get("model");
+                if (!ob || ob->type != 's') continue;
+                s.obj = ob->str;
+            }
             jvec(o, "pos", s.pos, 3), jvec(o, "size", s.size, 2), jvec(o, "tint", s.tint, 3);
+            s.fog = jnum(o, "fog", 1);
             if (s.emitter) {
                 s.count = (int)jnum(o, "count", 20), s.fall = jnum(o, "fall", 1), s.wind = jnum(o, "wind", 1);
                 if (const Json *a = o.get("area")) {
@@ -264,7 +277,7 @@ bool props_load(const std::string &dir, std::vector<StageProp> &props) {
     return !props.empty();
 }
 
-bool props_save(const std::string &dir, const std::vector<StageProp> &props) {
+bool props_save(const std::string &dir, const std::vector<StageProp> &props, const PropsMeta &meta) {
     if (props.empty()) {
         SDL_RemovePath((dir + "/props.json").c_str());
         return true;
@@ -272,28 +285,48 @@ bool props_save(const std::string &dir, const std::vector<StageProp> &props) {
     SDL_CreateDirectory(dir.c_str());
     std::ofstream f(dir + "/props.json", std::ios::binary);
     if (!f) return false;
-    char b[256];
+    char b[320];
     auto name = [](const std::string &s) {
         std::string out;
         for (char c : s) out += c == '"' || c == '\\' ? std::string("\\") + c : std::string(1, c);
         return out;
     };
-    for (int pass = 0; pass < 2; pass++) {
-        f << (pass ? ",\n \"emitters\": [" : "{\n \"props\": [");
+    f << "{\n";
+    if (meta.wind != 1) {
+        snprintf(b, sizeof b, " \"wind\": %g,\n", meta.wind);
+        f << b;
+    }
+    if (meta.fog) {
+        snprintf(b, sizeof b, " \"fog\": {\"color\": [%g, %g, %g], \"amount\": %g, \"from\": %g},\n", meta.fogColor[0], meta.fogColor[1], meta.fogColor[2],
+                 meta.fogAmount, meta.fogFrom);
+        f << b;
+    }
+    for (int pass = 0; pass < 3; pass++) {
+        f << (pass == 0 ? " \"props\": [" : pass == 1 ? ",\n \"emitters\": [" : ",\n \"models\": [");
         bool first = true;
         for (const StageProp &s : props) {
-            if (s.emitter != (pass == 1)) continue;
+            if ((s.model ? 2 : s.emitter ? 1 : 0) != pass) continue;
             f << (first ? "\n" : ",\n") << "  {\n   \"image\": \"" << name(s.image) << "\"";
             first = false;
-            snprintf(b, sizeof b, ",\n   \"size\": [%g, %g]", s.size[0], s.size[1]);
-            f << b;
+            if (s.model) f << ",\n   \"model\": \"" << name(s.obj) << "\"";
+            else {
+                snprintf(b, sizeof b, ",\n   \"size\": [%g, %g]", s.size[0], s.size[1]);
+                f << b;
+            }
             if (s.tint[0] != 255 || s.tint[1] != 255 || s.tint[2] != 255) {
                 snprintf(b, sizeof b, ",\n   \"tint\": [%g, %g, %g]", s.tint[0], s.tint[1], s.tint[2]);
+                f << b;
+            }
+            if (s.fog != 1) {
+                snprintf(b, sizeof b, ",\n   \"fog\": %g", s.fog);
                 f << b;
             }
             if (s.emitter) {
                 snprintf(b, sizeof b, ",\n   \"count\": %d,\n   \"area\": {\"center\": [%g, %g, %g], \"radius\": %g, \"top\": %g},\n   \"fall\": %g,\n   \"wind\": %g",
                          s.count, s.pos[0], s.pos[1], s.pos[2], s.radius, s.top, s.fall, s.wind);
+            } else if (s.model) {
+                snprintf(b, sizeof b, ",\n   \"pos\": [%g, %g, %g],\n   \"scale\": %g,\n   \"sway\": %g,\n   \"rot\": %g", s.pos[0], s.pos[1], s.pos[2], s.scale,
+                         s.sway, s.rot);
             } else {
                 snprintf(b, sizeof b, ",\n   \"pos\": [%g, %g, %g],\n   \"scale\": %g,\n   \"sway\": %g,\n   \"rot\": %g,\n   \"facing\": \"%s\"",
                          s.pos[0], s.pos[1], s.pos[2], s.scale, s.sway, s.rot, s.fixed ? "fixed" : "camera");
@@ -304,4 +337,97 @@ bool props_save(const std::string &dir, const std::vector<StageProp> &props) {
     }
     f << "\n}\n";
     return (bool)f;
+}
+
+/* --- an OBJ --- */
+
+static std::string read_text(const std::string &path) {
+    std::ifstream f(path, std::ios::binary);
+    return std::string((std::istreambuf_iterator<char>(f)), {});
+}
+
+bool obj_load(const std::string &path, ObjMesh &mesh) {
+    std::string text = read_text(path);
+    std::vector<float> pos, uv, nrm;
+    mesh.v.clear();
+    const char *p = text.c_str();
+    while (*p) {
+        const char *line = p;
+        while (*p && *p != '\n') p++;
+        const char *end = p;
+        if (line[0] == 'v' && (line[1] == ' ' || line[1] == 't' || line[1] == 'n')) {
+            int kind = line[1] == ' ' ? 0 : line[1] == 't' ? 1 : 2, need = kind == 1 ? 2 : 3;
+            const char *q = line + (kind == 0 ? 1 : 2);
+            std::vector<float> &arr = kind == 0 ? pos : kind == 1 ? uv : nrm;
+            for (int i = 0; i < need; i++) {
+                char *e;
+                arr.push_back((float)strtod(q, &e));
+                q = e;
+            }
+        } else if (line[0] == 'f' && line[1] == ' ') {
+            struct Ix {
+                int v, t, n;
+            };
+            std::vector<Ix> face;
+            const char *q = line + 1;
+            int np = (int)pos.size() / 3, nu = (int)uv.size() / 2, nn = (int)nrm.size() / 3;
+            auto num = [&]() {
+                char *e;
+                long v = strtol(q, &e, 10);
+                if (e == q) return 0L;
+                q = e;
+                return v;
+            };
+            while (face.size() < 64) {
+                while (q < end && (*q == ' ' || *q == '\t')) q++;
+                if (q >= end || *q == '\r') break;
+                Ix x = {(int)num(), 0, 0};
+                if (*q == '/') {
+                    q++;
+                    x.t = (int)num();
+                    if (*q == '/') q++, x.n = (int)num();
+                }
+                if (!x.v) break;
+                x.v = x.v < 0 ? np + x.v : x.v - 1, x.t = x.t < 0 ? nu + x.t : x.t - 1, x.n = x.n < 0 ? nn + x.n : x.n - 1;
+                if (x.v < 0 || x.v >= np) break;
+                face.push_back(x);
+            }
+            for (size_t i = 1; i + 1 < face.size(); i++) {
+                const Ix tri[3] = {face[0], face[i], face[i + 1]};
+                const float *a = &pos[tri[0].v * 3], *b = &pos[tri[1].v * 3], *c = &pos[tri[2].v * 3];
+                float u0 = b[0] - a[0], u1 = b[1] - a[1], u2 = b[2] - a[2], w0 = c[0] - a[0], w1 = c[1] - a[1], w2 = c[2] - a[2];
+                float fn[3] = {u1 * w2 - u2 * w1, u2 * w0 - u0 * w2, u0 * w1 - u1 * w0};
+                float l = sqrtf(fn[0] * fn[0] + fn[1] * fn[1] + fn[2] * fn[2]);
+                if (l > 1e-9f) fn[0] /= l, fn[1] /= l, fn[2] /= l;
+                else fn[0] = 0, fn[1] = 1, fn[2] = 0;
+                for (const Ix &x : tri) {
+                    bool hasT = x.t >= 0 && x.t < nu, hasN = x.n >= 0 && x.n < nn;
+                    float o[8] = {pos[x.v * 3], pos[x.v * 3 + 1], pos[x.v * 3 + 2], hasT ? uv[x.t * 2] : 0, hasT ? 1 - uv[x.t * 2 + 1] : 0,
+                                  hasN ? nrm[x.n * 3] : fn[0], hasN ? nrm[x.n * 3 + 1] : fn[1], hasN ? nrm[x.n * 3 + 2] : fn[2]};
+                    mesh.v.insert(mesh.v.end(), o, o + 8);
+                }
+            }
+        }
+        if (*p) p++;
+    }
+    if (mesh.v.empty()) return false;
+    float lo = 1e30f, hi = -1e30f;
+    for (size_t i = 1; i < mesh.v.size(); i += 8) lo = std::min(lo, mesh.v[i]), hi = std::max(hi, mesh.v[i]);
+    mesh.miny = lo, mesh.h = std::max(hi - lo, 1e-3f);
+    return true;
+}
+
+std::string obj_texture(const std::string &path) {
+    std::string text = read_text(path), dir = path.substr(0, path.find_last_of("/\\") + 1);
+    size_t m = text.find("mtllib ");
+    if (m == std::string::npos) return "";
+    size_t e = text.find_first_of("\r\n", m);
+    std::string mtl = text.substr(m + 7, e == std::string::npos ? std::string::npos : e - m - 7);
+    std::string mt = read_text(dir + mtl);
+    size_t k = mt.find("map_Kd ");
+    if (k == std::string::npos) return "";
+    size_t le = mt.find_first_of("\r\n", k);
+    std::string tex = mt.substr(k + 7, le == std::string::npos ? std::string::npos : le - k - 7);
+    size_t sp = tex.find_last_of(" /\\");
+    return sp == std::string::npos ? tex : tex.substr(sp + 1);
 }

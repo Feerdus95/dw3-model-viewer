@@ -46,22 +46,43 @@ struct CustomEffect {
 };
 
 /* A fight stage's props for the native port (its platform/stagefx.c): the
-   billboards (an upright PNG at a point) and emitters (a PNG falling through
-   an area, like the leaves) of data/mods/fightstages/<id>/props.json, with
-   their PNGs beside it. Positions are the port's world: y up, z as the game's. */
+   billboards (an upright PNG at a point), emitters (a PNG falling through an
+   area, like the leaves) and 3D models (an OBJ with a PNG texture) of
+   data/mods/fightstages/<id>/props.json, with their files beside it. Positions
+   are the port's world: y up, z as the game's. */
 struct StageProp {
-    bool emitter = false;
+    bool emitter = false, model = false;
     std::string image; /* a PNG's name in the folder */
-    float pos[3] = {0, 0, 0}; /* a billboard's base; an emitter's area centre */
+    std::string obj;   /* a model's OBJ */
+    float pos[3] = {0, 0, 0}; /* a billboard's base, a model's foot; an emitter's area centre */
     float size[2] = {100, 100}; /* a billboard's width, height; an emitter's smallest, biggest */
     float tint[3] = {255, 255, 255};
-    float scale = 1, sway = 0, rot = 0; /* billboards: size factor, wind sway, turn when fixed */
-    bool fixed = false;                 /* flat in the world instead of facing the camera */
+    float scale = 1, sway = 0, rot = 0; /* size factor, wind sway, turn (models, and billboards when fixed) */
+    bool fixed = false;                 /* a billboard flat in the world instead of facing the camera */
+    float fog = 1;                      /* how much of the fog it takes: 0 none */
     int count = 20;                     /* emitters: particles */
     float radius = 3000, top = 4000, fall = 1, wind = 1;
 };
 
+/* What the whole list shares: the wind's strength for its props (a factor of
+   the stage's) and, if set, a fog of its own instead of the battle's */
+struct PropsMeta {
+    float wind = 1;
+    bool fog = false;
+    float fogColor[3] = {140, 150, 190}; /* 0-255 */
+    float fogAmount = 0.6f, fogFrom = 0.3f;
+};
+
 /* DIR's props.json; false (and PROPS empty) when there is none */
-bool props_load(const std::string &dir, std::vector<StageProp> &props);
+bool props_load(const std::string &dir, std::vector<StageProp> &props, PropsMeta &meta);
 /* writes it, or deletes it when PROPS is empty */
-bool props_save(const std::string &dir, const std::vector<StageProp> &props);
+bool props_save(const std::string &dir, const std::vector<StageProp> &props, const PropsMeta &meta);
+
+/* An OBJ's triangles, 8 floats a vertex (x, y, z, u, v, nx, ny, nz; v down), and its height */
+struct ObjMesh {
+    std::vector<float> v;
+    float miny = 0, h = 1;
+};
+bool obj_load(const std::string &path, ObjMesh &mesh);
+/* the PNG its MTL gives as the diffuse map, as a name beside the OBJ; "" none */
+std::string obj_texture(const std::string &path);

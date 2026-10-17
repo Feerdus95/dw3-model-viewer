@@ -158,21 +158,27 @@ void main() { frag = texture(tex, uv); }
 static const char *PROP_VS = R"(#version 330 core
 layout(location = 0) in vec3 pos;
 layout(location = 1) in vec2 uv_in;
-layout(location = 2) in vec3 tint;
+layout(location = 2) in vec4 tint; /* the colour, and how much fog it takes */
 uniform mat4 mvp;
 out vec2 uv;
-out vec3 col;
-void main() { gl_Position = mvp * vec4(pos, 1.0); uv = uv_in; col = tint; }
+out vec4 col;
+out float vz;
+void main() { gl_Position = mvp * vec4(pos, 1.0); uv = uv_in; col = tint; vz = gl_Position.w; }
 )";
 
 static const char *PROP_FS = R"(#version 330 core
 uniform sampler2D tex;
+uniform vec4 fog;  /* the list's own fog: colour, how much */
+uniform vec2 fogz; /* where it starts and is thickest, in depth */
 in vec2 uv;
-in vec3 col;
+in vec4 col;
+in float vz;
 out vec4 frag;
 void main() {
     vec4 t = texture(tex, uv);
     if (t.a < 0.5) discard;
-    frag = vec4(t.rgb * col, 1.0);
+    vec3 c = t.rgb * col.rgb;
+    if (fog.a > 0.0) c = mix(c, fog.rgb, fog.a * col.a * smoothstep(fogz.x, fogz.y, vz));
+    frag = vec4(c, 1.0);
 }
 )";

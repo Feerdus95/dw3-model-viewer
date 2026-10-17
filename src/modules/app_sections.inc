@@ -198,6 +198,7 @@
     struct StageSnap {
         std::vector<StagePart> parts;
         std::vector<StageProp> props;
+        PropsMeta meta;
         std::shared_ptr<const std::vector<StageImage>> images; /* shared by the steps that didn't change them */
         uint8_t bg[3];
         StageInfo info;
@@ -562,7 +563,7 @@
     auto stage_snap = [&]() {
         StageSnap s;
         s.parts = stageEdit.parts;
-        s.props = props;
+        s.props = props, s.meta = propsMeta;
         if (!stageImages || !same_images(*stageImages, stageEdit.images))
             stageImages = std::make_shared<const std::vector<StageImage>>(stageEdit.images);
         s.images = stageImages;
@@ -572,7 +573,7 @@
     };
     auto stage_mark = [&]() { stageHist.push(stage_snap()); }; /* before an edit */
     auto stage_restore = [&](const StageSnap &s) {
-        stageEdit.parts = s.parts, stageEdit.images = *s.images, stageInfo = s.info, props = s.props;
+        stageEdit.parts = s.parts, stageEdit.images = *s.images, stageInfo = s.info, props = s.props, propsMeta = s.meta;
         if (propSel >= (int)props.size()) propSel = -1;
         memcpy(stageEdit.bg, s.bg, 3);
         for (int k = 0; k < 3; k++) view.stageBg[k] = s.bg[k] / 255.0f;
@@ -1339,36 +1340,56 @@
         if (addNow >= 0) cat_add(addNow);
         ImGui::End();
     };
-    /* ===== the stage's props: PNGs for the native port, placed anywhere in it ===== */
-    auto prop_add = [&](const std::string &path, bool emitter) {
-        if (!stage_on()) return;
+    /* ===== the stage's props: PNGs and OBJs for the native port, placed anywhere in it ===== */
+    auto copy_to_props = [&](const std::string &path, std::string &name) {
         size_t sl = path.find_last_of("/\\");
-        std::string name = sl == std::string::npos ? path : path.substr(sl + 1), dir = props_dir(stageId), to = dir + "/" + name;
-        if (name.find("..") != std::string::npos) return note(NOTE_ERROR, "The port can't read a name with \"..\" in it: rename " + name);
+        name = sl == std::string::npos ? path : path.substr(sl + 1);
+        std::string dir = props_dir(stageId), to = dir + "/" + name;
+        if (name.find("..") != std::string::npos) return note(NOTE_ERROR, "The port can't read a name with \"..\" in it: rename " + name), false;
         SDL_CreateDirectory((mods_root() + "/fightstages").c_str());
         SDL_CreateDirectory(dir.c_str());
         if (SDL_strcasecmp(path.c_str(), to.c_str()) != 0 && !SDL_CopyFile(path.c_str(), to.c_str()))
-            return note(NOTE_ERROR, to + ": " + SDL_GetError());
-        auto old = propImgs.find(to);
+            return note(NOTE_ERROR, to + ": " + SDL_GetError()), false;
+        auto old = propImgs.find(to); /* a new file under an old name */
         if (old != propImgs.end()) GL(glDeleteTextures)(1, &old->second.tex), propImgs.erase(old);
-        const PropImg &pi = prop_img(name);
-        if (!pi.tex) return note(NOTE_ERROR, "Can't read " + to);
-        stage_mark();
+        propMeshes.erase(to);
+        return true;
+    };
+    auto prop_add = [&](const std::string &path, int kind) {
+        if (!stage_on()) return;
+        std::string name, tex;
+        if (!copy_to_props(path, name)) return;
         StageProp s;
-        s.emitter = emitter;
-        s.image = name;
+        s.emitter = kind == 1, s.model = kind == 2;
+        if (kind == 2) {
+            s.obj = name;
+            tex = obj_texture(path);
+            std::string from = path.substr(0, path.find_last_of("/\\") + 1) + tex;
+            if (!tex.empty() && std::ifstream(from)) {
+                std::string tn;
+                if (copy_to_props(from, tn)) s.image = tn;
+            }
+            const ObjMesh &m = prop_mesh(name);
+            if (m.v.empty()) return note(NOTE_ERROR, "No triangles in " + name);
+            s.scale = 400.0f / m.h; /* about as tall as a man to start with */
+        } else {
+            s.image = name;
+            const PropImg &pi = prop_img(name);
+            if (!pi.tex) return note(NOTE_ERROR, "Can't read " + props_dir(stageId) + "/" + name);
+            if (kind == 1) s.size[0] = 60, s.size[1] = 110, s.count = 40;
+            else s.size[1] = 300, s.size[0] = std::max(10.0f, 300 * pi.w / pi.h);
+        }
+        stage_mark();
         s.pos[0] = view.cam.target[0], s.pos[2] = -view.cam.target[2]; /* on the ground where the camera looks */
-        if (emitter) s.size[0] = 60, s.size[1] = 110, s.count = 40;
-        else s.size[1] = 300, s.size[0] = std::max(10.0f, 300 * pi.w / pi.h);
         props.push_back(s);
         propSel = (int)props.size() - 1;
         select_part(-1);
         stageDirty = true;
-        note(NOTE_OK, "Added " + name + " to the stage's props");
+        note(s.image.empty() ? NOTE_WARN : NOTE_OK, s.image.empty() ? "Added " + name + ": it has no texture, pick a PNG for it" : "Added " + name + " to the stage's props");
     };
-    auto pick_prop = [&](bool emitter) {
-        static const SDL_DialogFileFilter PNG = {"PNG images", "png"};
-        propEmitterWanted = emitter;
+    auto pick_prop = [&](int kind) {
+        static const SDL_DialogFileFilter PNG = {"PNG images", "png"}, OBJ = {"OBJ models", "obj"};
+        propKind = kind;
         SDL_ShowOpenFileDialog(
             [](void *u, const char *const *l, int) {
                 if (!l || !*l) return;
@@ -1376,25 +1397,86 @@
                 std::lock_guard<std::mutex> lock(p->m);
                 p->prop = *l;
             },
+            &picked, win, kind == 2 ? &OBJ : &PNG, 1, nullptr, false);
+    };
+    auto pick_prop_tex = [&]() { /* a PNG for the picked model (or another for a billboard) */
+        static const SDL_DialogFileFilter PNG = {"PNG images", "png"};
+        SDL_ShowOpenFileDialog(
+            [](void *u, const char *const *l, int) {
+                if (!l || !*l) return;
+                Picked *p = (Picked *)u;
+                std::lock_guard<std::mutex> lock(p->m);
+                p->propTex = *l;
+            },
             &picked, win, &PNG, 1, nullptr, false);
     };
-    /* the props on the view: billboards as quads, emitters as their volume and a few of their particles, and the
-       outlines (the picked one yellow) */
+    auto prop_set_tex = [&](const std::string &path) {
+        std::string name;
+        if (propSel < 0 || propSel >= (int)props.size() || !copy_to_props(path, name)) return;
+        stage_mark();
+        props[propSel].image = name;
+        stageDirty = true;
+    };
+    /* the points of a prop that fence it on screen (to pick it): a billboard's corners, a model's box, an emitter's axis */
+    auto prop_points = [&](const StageProp &p, float pts[8][3]) -> int {
+        if (p.emitter) {
+            pts[0][0] = pts[1][0] = p.pos[0], pts[0][2] = pts[1][2] = -p.pos[2], pts[0][1] = p.pos[1], pts[1][1] = p.pos[1] + p.top;
+            return 2;
+        }
+        if (!p.model) {
+            prop_corners(p, view.cam.yaw, (float(*)[3])pts);
+            return 4;
+        }
+        const ObjMesh &m = prop_mesh(p.obj);
+        if (m.v.empty()) return 0;
+        float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f}, none[2] = {0, 0};
+        for (size_t i = 0; i < m.v.size(); i += 8)
+            for (int k = 0; k < 3; k++) lo[k] = std::min(lo[k], m.v[i + k]), hi[k] = std::max(hi[k], m.v[i + k]);
+        for (int c = 0; c < 8; c++) prop_model_point(p, m, c & 1 ? hi[0] : lo[0], c & 2 ? hi[1] : lo[1], c & 4 ? hi[2] : lo[2], none, 0, pts[c]);
+        return 8;
+    };
+    /* the props on the view: billboards and models drawn, emitters as their volume and a few of their particles, and
+       the outlines (the picked one yellow) */
     auto props_build = [&](std::vector<PropQuad> &quads, std::vector<float> &lines) {
         float yaw = view.cam.yaw, rt[3] = {cosf(yaw), 0, -sinf(yaw)};
+        float t = propWind ? (float)ImGui::GetTime() * 60.0f : 0, ww[2] = {0, 0};
+        if (propWind) prop_wind(t, propsMeta.wind, ww);
         for (int i = 0; i < (int)props.size(); i++) {
             const StageProp &p = props[i];
             bool sel = i == propSel;
-            float col[3] = {1.0f, 0.85f, 0.2f};
-            if (!sel) col[0] = p.emitter ? 0.3f : 0.6f, col[1] = p.emitter ? 0.8f : 0.6f, col[2] = p.emitter ? 1.0f : 0.6f;
+            float col[3] = {1.0f, 0.85f, 0.2f}, tint[3] = {p.tint[0] / 255.0f, p.tint[1] / 255.0f, p.tint[2] / 255.0f};
+            if (!sel) col[0] = p.emitter ? 0.3f : p.model ? 0.5f : 0.6f, col[1] = p.emitter ? 0.8f : p.model ? 0.9f : 0.6f, col[2] = p.emitter ? 1.0f : p.model ? 0.5f : 0.6f;
             PropQuad q;
-            for (int k = 0; k < 3; k++) q.tint[k] = p.tint[k] / 255.0f;
-            if (!p.emitter) {
-                prop_corners(p, yaw, q.c);
-                q.tex = prop_img(p.image).tex;
+            if (p.model) {
+                const ObjMesh &m = prop_mesh(p.obj);
+                if (m.v.empty()) continue;
+                float h = m.h * p.scale, bend = propWind ? prop_bend(p, t, h) : 0, L = 1 / 0.98f;
+                float a = p.rot * 0.017453293f, ca = cosf(a), sa = sinf(a);
+                q.tex = p.image.empty() ? 0 : prop_img(p.image).tex;
+                if (q.tex)
+                    for (size_t k = 0; k < m.v.size(); k += 8) {
+                        const float *v = &m.v[k];
+                        float at[3], nx = v[5] * ca + v[7] * sa, nz = -v[5] * sa + v[7] * ca;
+                        float shade = 0.55f + 0.45f * std::max((nx * 0.35f + v[6] * 0.8f + nz * 0.45f) * L, 0.0f), tn[3] = {tint[0] * shade, tint[1] * shade, tint[2] * shade};
+                        prop_model_point(p, m, v[0], v[1], v[2], ww, bend, at);
+                        pq_vertex(q, at, v[3], v[4], tn, p.fog);
+                    }
                 if (q.tex) quads.push_back(q);
+                if (sel) { /* its box */
+                    float bx[8][3];
+                    prop_points(p, bx);
+                    static const int E[12][2] = {{0, 1}, {2, 3}, {4, 5}, {6, 7}, {0, 2}, {1, 3}, {4, 6}, {5, 7}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
+                    for (const auto &e : E) line(lines, bx[e[0]], bx[e[1]], col[0], col[1], col[2]);
+                }
+                continue;
+            }
+            if (!p.emitter) {
+                float c[4][3], h = p.size[1] * p.scale, bend = propWind ? prop_bend(p, t, h) : 0;
+                prop_corners(p, yaw, c, ww[0] * bend, ww[1] * bend);
+                q.tex = prop_img(p.image).tex;
+                if (q.tex) pq_quad(q, c, tint, p.fog), quads.push_back(q);
                 static const int E[4][2] = {{0, 1}, {1, 3}, {3, 2}, {2, 0}};
-                for (const auto &e : E) line(lines, q.c[e[0]], q.c[e[1]], col[0], col[1], col[2]);
+                for (const auto &e : E) line(lines, c[e[0]], c[e[1]], col[0], col[1], col[2]);
                 continue;
             }
             float cx = p.pos[0], cy = p.pos[1], cz = -p.pos[2];
@@ -1415,36 +1497,78 @@
                 uint32_t h = (uint32_t)(k + 1) * 2654435761u ^ (uint32_t)(i + 1) * 40503u;
                 auto rnd = [&]() { return (h = h * 1664525u + 1013904223u, (h >> 8) / 16777216.0f); };
                 float r = sqrtf(rnd()) * p.radius, a = rnd() * 6.2831853f, y = rnd() * p.top, sz = p.size[0] + rnd() * (p.size[1] - p.size[0]);
-                float at[3] = {cx + cosf(a) * r, cy + y, cz + sinf(a) * r};
-                for (int c = 0; c < 4; c++) {
-                    float side = c & 1 ? 0.5f : -0.5f, up = c < 2 ? 0.5f : -0.5f;
-                    for (int j = 0; j < 3; j++) q.c[c][j] = at[j] + rt[j] * sz * side + (j == 1 ? sz * up : 0);
+                float at[3] = {cx + cosf(a) * r, cy + y, cz + sinf(a) * r}, c[4][3];
+                for (int cc = 0; cc < 4; cc++) {
+                    float side = cc & 1 ? 0.5f : -0.5f, up = cc < 2 ? 0.5f : -0.5f;
+                    for (int j = 0; j < 3; j++) c[cc][j] = at[j] + rt[j] * sz * side + (j == 1 ? sz * up : 0);
                 }
-                quads.push_back(q);
+                pq_quad(q, c, tint, p.fog);
             }
+            quads.push_back(q);
+        }
+        /* the fog of the list's own, for the props: the stage's isn't known here, so its far side is about the arena's */
+        if (propsMeta.fog) {
+            float zf = view.cam.dist + 9000;
+            for (int k = 0; k < 3; k++) view.pfog[k] = propsMeta.fogColor[k] / 255.0f;
+            view.pfog[3] = propsMeta.fogAmount;
+            view.pfogz[0] = zf * propsMeta.fogFrom, view.pfogz[1] = zf;
+        } else {
+            view.pfog[3] = 0;
         }
     };
     auto props_panel = [&]() {
         char head[48];
         snprintf(head, sizeof head, "Props (%d)", (int)props.size());
         heading(head);
-        if (button(IC_ADD "  Billboard...")) pick_prop(false);
+        if (button(IC_ADD "  Billboard...")) pick_prop(0);
         tip("A PNG standing upright in the stage (grass, a flower, a rock), facing the camera. Its transparency cuts it out.");
         same_line_if_fits(IC_ADD "  Emitter...");
-        if (button(IC_ADD "  Emitter...")) pick_prop(true);
+        if (button(IC_ADD "  Emitter...")) pick_prop(1);
         tip("A PNG falling through an area, like the forest's leaves: petals, snow, embers");
+        same_line_if_fits(IC_ADD "  Model...");
+        if (button(IC_ADD "  Model...")) pick_prop(2);
+        tip("A small 3D model from an OBJ (a rock, a signpost, a tree) with a PNG texture; if the OBJ's MTL names one, it comes along");
         if (!props.empty()) {
             float lh = ImGui::GetTextLineHeightWithSpacing();
             if (ImGui::BeginChild("##props", ImVec2(0, std::min((int)props.size(), 6) * lh + 8 * dpi), ImGuiChildFlags_Borders)) {
                 for (int i = 0; i < (int)props.size(); i++) {
                     const StageProp &p = props[i];
                     ImGui::PushID(i);
-                    std::string l = std::string(p.emitter ? "Emitter  " : "Billboard  ") + p.image;
+                    std::string l = std::string(p.model ? "Model  " : p.emitter ? "Emitter  " : "Billboard  ") + (p.model ? p.obj : p.image);
                     if (ImGui::Selectable(l.c_str(), i == propSel)) propSel = i, select_part(-1);
                     ImGui::PopID();
                 }
             }
             ImGui::EndChild();
+        }
+        /* what all the props share: undo gets the list's settings as they were */
+        PropsMeta mbefore = propsMeta;
+        auto me = [&](bool changed) {
+            if (ImGui::IsItemActivated()) stage_mark(), stageHist.undo.back().meta = mbefore;
+            if (changed) stageDirty = true;
+        };
+        if (ImGui::TreeNode("Wind and fog for all of them")) {
+            ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.55f);
+            me(ImGui::DragFloat("Wind", &propsMeta.wind, 0.01f, 0, 5, "%.2f"));
+            tip("How hard the wind blows on the props, as a factor of the stage's own: 0 none, 1 as the trees, 2 a storm");
+            ImGui::Checkbox("Show the wind", &propWind);
+            tip("Only in the view: bends the props that sway, to see how far they go");
+            me(ImGui::Checkbox("Own fog", &propsMeta.fog));
+            tip("Off: the props take the stage's fog, as its trees do. On: a fog of their own that you set here.");
+            if (propsMeta.fog) {
+                float c[3] = {propsMeta.fogColor[0] / 255, propsMeta.fogColor[1] / 255, propsMeta.fogColor[2] / 255};
+                bool cc = ImGui::ColorEdit3("Fog color", c, ImGuiColorEditFlags_NoInputs);
+                me(cc);
+                if (cc)
+                    for (int k = 0; k < 3; k++) propsMeta.fogColor[k] = (float)lroundf(c[k] * 255);
+                me(ImGui::DragFloat("Fog amount", &propsMeta.fogAmount, 0.005f, 0, 1, "%.2f"));
+                tip("How much of the fog's color the farthest props take");
+                me(ImGui::DragFloat("Fog starts", &propsMeta.fogFrom, 0.005f, 0, 0.99f, "%.2f"));
+                tip("Where it begins, as a part of the way to the farthest thing drawn");
+                hint("The view's fog is approximate: the game measures it from its own camera and the stage's farthest point.");
+            }
+            ImGui::PopItemWidth();
+            ImGui::TreePop();
         }
         if (propSel < 0 || propSel >= (int)props.size()) {
             hint("Click one in the view or in the list. Drag its arrows to place it anywhere; the box scales it. "
@@ -1454,11 +1578,12 @@
         StageProp &p = props[propSel];
         StageProp before = p;
         ImGui::PushFont(g_fontBold);
-        ImGui::TextColored(C_SELECT, "%s", p.image.c_str());
+        ImGui::TextColored(C_SELECT, "%s", (p.model ? p.obj : p.image).c_str());
         ImGui::PopFont();
         ImGui::SameLine();
-        ImGui::TextDisabled(p.emitter ? "emitter" : "billboard");
-        if (!prop_img(p.image).tex) chip(IC_WARN " PNG missing", C_WARN);
+        ImGui::TextDisabled(p.model ? "model" : p.emitter ? "emitter" : "billboard");
+        if (p.image.empty() || !prop_img(p.image).tex) chip(IC_WARN " texture missing", C_WARN);
+        if (p.model && prop_mesh(p.obj).v.empty()) chip(IC_WARN " OBJ unreadable", C_WARN);
         /* a field: undo gets the prop as it was when the drag or typing began */
         auto pe = [&](bool changed) {
             if (ImGui::IsItemActivated()) stage_mark(), stageHist.undo.back().props[propSel] = before;
@@ -1483,16 +1608,22 @@
             pe(ImGui::DragFloat("Smallest", &p.size[0], 1, 1, 2000, "%.0f"));
             pe(ImGui::DragFloat("Biggest", &p.size[1], 1, 1, 2000, "%.0f"));
         } else {
-            pe(ImGui::DragFloat("Width", &p.size[0], 5, 1, 20000, "%.0f"));
-            pe(ImGui::DragFloat("Height", &p.size[1], 5, 1, 20000, "%.0f"));
-            pe(ImGui::DragFloat("Scale", &p.scale, 0.01f, 0.05f, 20, "%.2f"));
+            if (!p.model) {
+                pe(ImGui::DragFloat("Width", &p.size[0], 5, 1, 20000, "%.0f"));
+                pe(ImGui::DragFloat("Height", &p.size[1], 5, 1, 20000, "%.0f"));
+            }
+            pe(ImGui::DragFloat("Scale", &p.scale, p.model ? 0.05f : 0.01f, 0.01f, 400, p.model ? "%.2f" : "%.2f"));
             tip("In the view: the box.");
             pe(ImGui::DragFloat("Sway", &p.sway, 0.01f, 0, 3, "%.2f"));
-            tip("How much the wind bends it (only in the game); 0 stands still");
-            pe(ImGui::Checkbox("Flat in the world", &p.fixed));
-            tip("Instead of facing the camera, a plane turned about the vertical: a path, a puddle, a banner");
-            if (p.fixed) pe(ImGui::DragFloat("Turn", &p.rot, 0.5f, -180, 180, "%.1f deg"));
+            tip("How much the wind bends it, from its foot to its top (the view shows it with Show the wind); 0 stands still");
+            if (!p.model) {
+                pe(ImGui::Checkbox("Flat in the world", &p.fixed));
+                tip("Instead of facing the camera, a plane turned about the vertical: a path, a puddle, a banner");
+            }
+            if (p.fixed || p.model) pe(ImGui::DragFloat("Turn", &p.rot, 0.5f, -180, 180, "%.1f deg"));
         }
+        pe(ImGui::DragFloat("Fog", &p.fog, 0.01f, 0, 1, "%.2f"));
+        tip("How much of the fog it takes: 1 as the rest, 0 none (a lantern, a glow)");
         float t[3] = {p.tint[0] / 255, p.tint[1] / 255, p.tint[2] / 255};
         bool tc = ImGui::ColorEdit3("Tint", t, ImGuiColorEditFlags_NoInputs);
         pe(tc);
@@ -1500,9 +1631,14 @@
             for (int k = 0; k < 3; k++) p.tint[k] = (float)lroundf(t[k] * 255);
         ImGui::PopItemWidth();
         if (ImGui::Button(IC_FIT "  Frame")) {
-            view.cam.target[0] = p.pos[0], view.cam.target[1] = p.pos[1] + (p.emitter ? 0 : p.size[1] * p.scale / 2), view.cam.target[2] = -p.pos[2];
+            float h = p.emitter ? 0 : p.model ? prop_mesh(p.obj).h * p.scale : p.size[1] * p.scale;
+            view.cam.target[0] = p.pos[0], view.cam.target[1] = p.pos[1] + h / 2, view.cam.target[2] = -p.pos[2];
+            if (!p.emitter) view.cam.dist = std::max(h * 3, 600.0f);
             view.gameCamera = -1;
         }
+        same_line_if_fits(IC_IMPORT "  Texture...");
+        if (ImGui::Button(IC_IMPORT "  Texture...")) pick_prop_tex();
+        tip("Another PNG for it, copied beside props.json");
         same_line_if_fits(IC_ADD "  Duplicate");
         if (ImGui::Button(IC_ADD "  Duplicate")) prop_duplicate(propSel);
         tip("Ctrl+D");
