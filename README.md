@@ -306,6 +306,10 @@ with changes you haven't saved, quitting, or reverting a stage asks first.
                                           a close-up: frames bones A and B (--only
                                           draws just those), zoomed F times, seen from
                                           DEG degrees around, as a wireframe
+    dw3mv --blend-audit [--weld A,B] [file.bin]
+                                          for each pair (or the ones asked for), alone: what
+                                          detection saw, which vertices matched, how far
+                                          they end up apart blended, and its state
     dw3mv --seams [file.bin]              a read-only report of how each bone's mesh
                                           meets its parent's (see below); with a file,
                                           just that one, for a mod's
@@ -335,6 +339,11 @@ Four things are kept apart, and nothing is blended unless asked for:
 - **Excluded**: pairs left out, which wins over enabled: `--weld-skip A,B` (repeat it), and `BLEND_SKIP` in
   `src/modules/joint_blend.inc` for good (Brachiomon's jaw, 16 and 17, a hinge whose opening is meant to show). Bones are the
   file's numbers; `--seams` shows each pair's state: eligible, enabled or excluded.
+- **Validated or rejected** (`--blend-audit` only; it never decides what is drawn): a pair built alone whose matched vertices stay
+  within 0.5% of the model's size of one another blended, whose weights agree across each match, and whose largest displacement is
+  under 15%; otherwise rejected, with the reason. Pairs whose vertices meet exactly at the bind pose validate (290 of 291 in the
+  game's character models); pairs matched only loosely at the idle pose mostly don't (307 of 1,509), so being eligible is not a
+  reason to enable one.
 - **Conflicts**: a bone can be in up to 3 pairs. Each vertex keeps one weight per partner bone (partners in bone order, so asking
   for the pairs in another order changes nothing), the weights are added and scaled to 1 if they pass it. Where one pair's meeting
   vertices carry another pair's weight too the pieces stop staying exactly on one another; that is printed (`--seams`, the

@@ -101,8 +101,11 @@ static int blend_count(const Model &m, const std::vector<std::array<float, 16>> 
 }
 
 /* the rest a pair meets in: the one with more of its vertices on one another (the bind pose if they tie) */
-static const std::vector<std::array<float, 16>> &blend_pick(const Model &m, const BlendRest &r, int a, int b, float &eps, int &count) {
+static const std::vector<std::array<float, 16>> &blend_pick(const Model &m, const BlendRest &r, int a, int b, float &eps, int &count,
+                                                           int *nBind = nullptr, int *nIdle = nullptr) {
     int nb = blend_count(m, r.bind, r.epsBind, a, b), ni = blend_count(m, r.idle, r.epsIdle, a, b);
+    if (nBind) *nBind = nb;
+    if (nIdle) *nIdle = ni;
     if (nb >= ni) return count = nb, eps = r.epsBind, r.bind;
     return count = ni, eps = r.epsIdle, r.idle;
 }
@@ -126,12 +129,21 @@ struct BoneBlend {
 struct BlendPair {
     int a = 0, b = 0, meets = 0;        /* a < b */
     const char *state = "eligible";     /* eligible (found, not asked for), enabled, excluded */
+    /* what the detection saw, for the audit */
+    int meetsBind = 0, meetsIdle = 0;   /* vertices of a on b's in each rest pose */
+    const char *rest = "";              /* the pose chosen: bind, or idle */
+    float eps = 0;                      /* the nearness used in it */
+    std::vector<std::pair<int, int>> matched; /* a's vertices on b's at rest, with the vertex of b they are on (enabled pairs) */
+    int weightedA = 0, weightedB = 0;   /* vertices that follow the other bone at all */
+    int contactA = 0, contactB = 0;     /* ... and those on the meeting points (weight 0.5) */
+    int vertsA = 0, vertsB = 0;
 };
 
 struct BlendSet {
     std::vector<BoneBlend> bone;        /* by bone; n == 0: drawn rigid */
     std::vector<BlendPair> pairs;       /* every eligible pair, with what became of it */
     std::vector<std::string> notes;     /* conflicts between pairs and pairs that couldn't be used */
+    int scaled = 0;                     /* vertices whose weights came to more than 1 and were scaled */
     bool any() const {
         for (const BoneBlend &b : bone)
             if (b.n) return true;
@@ -146,7 +158,7 @@ struct BlendSet {
 
 static std::pair<int, int> blend_key(int a, int b) { return {std::min(a, b), std::max(a, b)}; }
 
-static void blend_build(const Model &m, BlendSet &out) {
+static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<int, int>> *only = nullptr) {
     out = BlendSet();
     out.bone.resize(m.bones.size());
     BlendRest rest = blend_rest(m);
@@ -156,20 +168,33 @@ static void blend_build(const Model &m, BlendSet &out) {
     for (size_t b = 1; b < m.bones.size(); b++) {
         int p = m.bones[b].parent;
         if (p < 1) continue;
-        int n = blend_meets(m, rest, (int)b, p);
+        float eps;
+        int n, nb, ni;
+        blend_pick(m, rest, (int)b, p, eps, n, &nb, &ni);
         if (n >= 3) eligible.insert(blend_key((int)b, p)), meets[blend_key((int)b, p)] = n;
     }
     /* ACTIVATION and EXCLUSION */
     std::set<std::pair<int, int>> want, skip;
-    for (const auto &p : g_blendExtra) want.insert(blend_key(p.first, p.second));
-    if (m.name == "M366GIRU.BIN") want.insert({3, 4}); /* Guilmon's wrist, the prototype's */
-    if (g_blendAll) want.insert(eligible.begin(), eligible.end());
-    for (const auto &p : g_blendSkip) skip.insert(blend_key(p.first, p.second));
-    for (const BlendSkip &s : BLEND_SKIP)
-        if (m.name == s.model) skip.insert(blend_key(s.a, s.b));
+    if (only) { /* a diagnostic asking for these pairs and no others */
+        want = *only;
+    } else {
+        for (const auto &p : g_blendExtra) want.insert(blend_key(p.first, p.second));
+        if (m.name == "M366GIRU.BIN") want.insert({3, 4}); /* Guilmon's wrist, the prototype's */
+        if (g_blendAll) want.insert(eligible.begin(), eligible.end());
+        for (const auto &p : g_blendSkip) skip.insert(blend_key(p.first, p.second));
+        for (const BlendSkip &s : BLEND_SKIP)
+            if (m.name == s.model) skip.insert(blend_key(s.a, s.b));
+    }
     for (const auto &p : eligible) {
         BlendPair bp;
         bp.a = p.first, bp.b = p.second, bp.meets = meets[p];
+        {
+            float e2;
+            int c2;
+            blend_pick(m, rest, bp.a, bp.b, e2, c2, &bp.meetsBind, &bp.meetsIdle);
+            bp.rest = bp.meetsBind >= bp.meetsIdle ? "bind" : "idle";
+            bp.eps = e2;
+        }
         bp.state = skip.count(p) ? "excluded" : want.count(p) ? "enabled" : "eligible";
         out.pairs.push_back(bp);
     }
@@ -185,7 +210,7 @@ static void blend_build(const Model &m, BlendSet &out) {
         float ab[16], ba[16];                /* A's rest space to B's, and back */
     };
     std::vector<PairW> pw;
-    for (const BlendPair &bp : out.pairs) {
+    for (BlendPair &bp : out.pairs) {
         if (strcmp(bp.state, "enabled")) continue;
         int a = bp.a, b = bp.b;
         float EPS;
@@ -211,6 +236,15 @@ static void blend_build(const Model &m, BlendSet &out) {
                     break;
                 }
         if (meet.size() < 3) continue;
+        for (size_t i = 0; i < pa.size(); i++) { /* a's vertices on b's, and the vertex of b each is on */
+            int best = -1;
+            float bd = 1e30f;
+            for (size_t k = 0; k < pb.size(); k++) {
+                float d = dist(pa[i], pb[k]);
+                if (d <= EPS && d < bd) bd = d, best = (int)k;
+            }
+            if (best >= 0) bp.matched.push_back({(int)i, best});
+        }
         /* a vertex's w: 0.5 on the meeting points, a smooth fall to 0 at the band's end */
         auto weights = [&](const std::vector<std::array<float, 3>> &p, std::vector<float> &wt, std::vector<int> &contact) {
             wt.assign(p.size(), 0);
@@ -227,6 +261,10 @@ static void blend_build(const Model &m, BlendSet &out) {
             }
         };
         weights(pa, w.wa, w.contactA), weights(pb, w.wb, w.contactB);
+        bp.vertsA = (int)pa.size(), bp.vertsB = (int)pb.size();
+        bp.contactA = (int)w.contactA.size(), bp.contactB = (int)w.contactB.size();
+        for (float x : w.wa) bp.weightedA += x > 0;
+        for (float x : w.wb) bp.weightedB += x > 0;
         M4 ab = mul(from(Rbi), from(Ra)), ba = mul(from(Rai), from(Rb));
         memcpy(w.ab, ab.m, sizeof w.ab), memcpy(w.ba, ba.m, sizeof w.ba);
         pw.push_back(std::move(w));
@@ -247,7 +285,14 @@ static void blend_build(const Model &m, BlendSet &out) {
         if (sl.empty()) continue;
         std::sort(sl.begin(), sl.end(), [](const Slot &x, const Slot &y) { return x.partner < y.partner; });
         if (sl.size() > 3) {
-            out.notes.push_back("bone " + std::to_string(b) + " is in " + std::to_string(sl.size()) + " pairs; only the 3 with the lowest partner bones are used");
+            std::string kept, left;
+            for (size_t s = 0; s < sl.size(); s++) {
+                const BlendPair *bp = out.find((int)b, sl[s].partner);
+                std::string one = std::to_string(sl[s].partner) + "(" + std::to_string(bp ? bp->meets : 0) + " meet)";
+                (s < 3 ? kept : left) += (s < 3 ? (kept.empty() ? "" : " ") : (left.empty() ? "" : " ")) + one;
+            }
+            out.notes.push_back("bone " + std::to_string(b) + " is in " + std::to_string(sl.size()) + " pairs; used (partner bones, lowest first): " + kept +
+                                "; left out: " + left);
             sl.resize(3);
         }
         BoneBlend &bb = out.bone[b];
@@ -263,7 +308,7 @@ static void blend_build(const Model &m, BlendSet &out) {
         }
         for (auto &v : bb.w) { /* weights that come to more than 1 are scaled to 1 */
             float sum = v[0] + v[1] + v[2];
-            if (sum > 1) v[0] /= sum, v[1] /= sum, v[2] /= sum;
+            if (sum > 1) v[0] /= sum, v[1] /= sum, v[2] /= sum, out.scaled++;
         }
     }
 
@@ -285,5 +330,6 @@ static void blend_build(const Model &m, BlendSet &out) {
                                         "): they won't stay exactly on one another");
             }
         }
+    if (out.scaled) out.notes.push_back(std::to_string(out.scaled) + " vertices' weights came to more than 1 and were scaled");
     std::sort(out.notes.begin(), out.notes.end());
 }

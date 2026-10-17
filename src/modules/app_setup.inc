@@ -21,6 +21,7 @@ int main(int argc, char **argv) {
             for (const char *c = argv[++i]; *c; c += *c == ',') shot_only.push_back(atoi(c)), c += strspn(c, "0123456789");
         else if (a == "--wire") shot_wire = true;
         else if (a == "--blend") shot_blend = g_seamsBlend = true;
+        else if (a == "--blend-audit") seams = g_blendAudit = true;
         else if (a == "--weld" && i + 1 < argc) {
             int p = 0, q = 0;
             if (sscanf(argv[++i], "%d,%d", &p, &q) == 2) g_blendExtra.push_back({p, q});

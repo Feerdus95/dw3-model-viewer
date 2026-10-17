@@ -111,6 +111,143 @@ struct SeamJoint {
 };
 
 /* ONLY, when given, is one model file (a mod's, say): just the disc model with its number is analysed, from that file */
+static bool g_blendAudit = false; /* --blend-audit: what each pair's detection saw, and what blending does to the vertices it matched */
+
+/* a vertex of BONE in the pose now, blended by SET (the bone's partners' matrices), and where its bone alone puts it */
+static SeamPt blend_place(const Model &m, const BlendSet &set, int bone, int vi, SeamPt *rigid) {
+    const Vec3s &v = m.meshes[m.bones[bone].mesh].verts[vi];
+    SeamPt p = seam_tf(m.pose[bone].world, v);
+    if (rigid) *rigid = p;
+    const BoneBlend &bb = set.bone[bone];
+    if (!bb.n) return p;
+    float home = 1 - bb.w[vi][0] - bb.w[vi][1] - bb.w[vi][2];
+    SeamPt r{p.x * home, p.y * home, p.z * home};
+    for (int k = 0; k < bb.n; k++) {
+        float w = bb.w[vi][k];
+        if (w <= 0) continue;
+        M4 mm = mul(from(m.pose[bb.partner[k]].world), from(bb.rel[k]));
+        SeamPt q = seam_tf(mm.m, v);
+        r.x += q.x * w, r.y += q.y * w, r.z += q.z * w;
+    }
+    return r;
+}
+
+/* The audit: for each pair asked for (--weld; else every eligible pair), alone, what detection saw in the bind and idle
+   poses, which vertices matched and how many follow the other bone, whether the two sides of each match carry the same
+   weight, how far the matched vertices end up apart over the motions (rigid and blended), the largest displacement, and
+   whether the report's own metric measures those vertices. Then its state: eligible, validated or rejected (why). */
+static void blend_audit(Model &m, const Entry &e, const std::vector<SeamJoint> &js, float D) {
+    BlendSet all;
+    blend_build(m, all, nullptr);
+    std::vector<std::pair<int, int>> want;
+    if (!g_blendExtra.empty())
+        for (const auto &p : g_blendExtra) want.push_back(blend_key(p.first, p.second));
+    else
+        for (const BlendPair &bp : all.pairs) want.push_back({bp.a, bp.b});
+    struct One {
+        std::pair<int, int> key;
+        BlendSet set;
+        float rigid = 0, blended = 0, disp = 0;
+        int dispMo = 0, dispKey = 0;
+    };
+    std::vector<One> ones;
+    for (const auto &k : want) {
+        One o;
+        o.key = k;
+        std::set<std::pair<int, int>> only = {k};
+        blend_build(m, o.set, &only);
+        ones.push_back(std::move(o));
+    }
+    for (size_t mo = 1; mo <= m.motions.size(); mo++) {
+        m.setMotion((int)mo);
+        int n = m.keyframeCount, step = std::max(1, n / 30);
+        for (int k = 0; k < std::max(n, 1); k += step) {
+            m.keyframe = k;
+            m.evaluate();
+            for (One &o : ones) {
+                const BlendPair *bp = o.set.find(o.key.first, o.key.second);
+                if (!bp || strcmp(bp->state, "enabled")) continue;
+                int a = bp->a, b = bp->b;
+                if (!m.pose[a].visible || !m.pose[b].visible) continue;
+                for (const auto &pr : bp->matched) {
+                    SeamPt ra, rb;
+                    SeamPt pa = blend_place(m, o.set, a, pr.first, &ra), pb = blend_place(m, o.set, b, pr.second, &rb);
+                    o.rigid = std::max(o.rigid, seam_dist(ra, rb) / D), o.blended = std::max(o.blended, seam_dist(pa, pb) / D);
+                }
+                for (int side = 0; side < 2; side++) {
+                    int bone = side ? b : a;
+                    const BoneBlend &bb = o.set.bone[bone];
+                    for (size_t i = 0; i < bb.w.size(); i++) {
+                        if (bb.w[i][0] + bb.w[i][1] + bb.w[i][2] <= 0) continue;
+                        SeamPt rg, bl = blend_place(m, o.set, bone, (int)i, &rg);
+                        float d = seam_dist(rg, bl) / D;
+                        if (d > o.disp) o.disp = d, o.dispMo = (int)mo, o.dispKey = k;
+                    }
+                }
+            }
+        }
+    }
+    for (One &o : ones) {
+        int a = o.key.first, b = o.key.second;
+        const BlendPair *bp = o.set.find(a, b);
+        if (!bp) {
+            printf("AUDIT %04d %-13s b%d,b%d: not eligible (fewer than 3 vertices meet in either pose)\n", e.fid, e.name.c_str(), a, b);
+            continue;
+        }
+        bool built = !strcmp(bp->state, "enabled");
+        printf("AUDIT %04d %-13s b%d<-b%d\n", e.fid, e.name.c_str(), std::max(a, b), std::min(a, b));
+        printf("  rest: bind meets %d (within %.1f), idle meets %d (within %.1f); %s chosen: %s\n", bp->meetsBind, bp->eps > 0 && !strcmp(bp->rest, "bind") ? bp->eps : 1.5f,
+               bp->meetsIdle, bp->eps > 0 && !strcmp(bp->rest, "idle") ? bp->eps : 0.01f * D, bp->rest,
+               bp->meetsBind >= bp->meetsIdle ? "bind meets as many or more vertices (a tie goes to bind)" : "idle meets more vertices");
+        if (!built) {
+            printf("  state: eligible (not built)\n");
+            continue;
+        }
+        const BoneBlend &ba = o.set.bone[a], &bb = o.set.bone[b];
+        int sa = -1, sb = -1;
+        for (int s = 0; s < ba.n; s++) sa = ba.partner[s] == b ? s : sa;
+        for (int s = 0; s < bb.n; s++) sb = bb.partner[s] == a ? s : sb;
+        float wdiff = 0;
+        int half = 0;
+        for (const auto &pr : bp->matched) {
+            float x = ba.w[pr.first][sa], y = bb.w[pr.second][sb];
+            wdiff = std::max(wdiff, fabsf(x - y));
+            half += fabsf(x - 0.5f) < 1e-4f && fabsf(y - 0.5f) < 1e-4f;
+        }
+        printf("  matched vertex pairs: %d; with weight 0.5 on both sides: %d (a side %d meeting points, b side %d); largest weight difference across a match %.4f\n",
+               (int)bp->matched.size(), half, bp->contactA, bp->contactB, wdiff);
+        printf("  vertices following the other bone: a %d of %d (%.0f%%), b %d of %d (%.0f%%); without any shared influence: a %d, b %d\n", bp->weightedA, bp->vertsA,
+               100.0 * bp->weightedA / std::max(1, bp->vertsA), bp->weightedB, bp->vertsB, 100.0 * bp->weightedB / std::max(1, bp->vertsB), bp->vertsA - bp->weightedA,
+               bp->vertsB - bp->weightedB);
+        printf("  the matched vertices, farthest apart over the motions: rigid %.2f%%, blended %.2f%%; largest displacement of any vertex %.2f%% (motion %d key %d)\n", o.rigid * 100,
+               o.blended * 100, o.disp * 100, o.dispMo, o.dispKey);
+        /* does the report's own metric (drift) measure the vertices blending matched? */
+        int tracked = 0, trackedOn = 0;
+        for (const SeamJoint &j : js) {
+            if (blend_key(j.bone, j.parent) != o.key) continue;
+            for (const auto &pv : j.pv) {
+                int ia = j.bone == a ? pv.first : pv.second, ib = j.bone == a ? pv.second : pv.first;
+                tracked++;
+                for (const auto &pr : bp->matched)
+                    if (pr.first == ia && pr.second == ib) {
+                        trackedOn++;
+                        break;
+                    }
+            }
+        }
+        printf("  the report's drift metric tracks %d vertex pairs, %d of them among the matched ones\n", tracked, trackedOn);
+        const char *why = nullptr;
+        char buf[160];
+        if (bp->matched.size() < 3) why = "fewer than 3 matched vertices";
+        else if (wdiff > 1e-3f) why = "matched vertices carry different weights";
+        else if (o.blended > 0.005f) snprintf(buf, sizeof buf, "matched vertices still drift %.2f%% apart blended", o.blended * 100), why = buf;
+        else if (o.disp > 0.15f) snprintf(buf, sizeof buf, "displacement %.1f%% is over 15%%", o.disp * 100), why = buf;
+        if (why) printf("  state: rejected: %s\n", why);
+        else if (o.rigid < 0.01f) printf("  state: validated (but unneeded: the matched vertices are only %.2f%% apart rigid)\n", o.rigid * 100);
+        else printf("  state: validated\n");
+    }
+}
+
 static bool g_seamsBlend = false; /* --blend: the joints with a JointBlend placed blended */
 static int check_seams(const std::string &only) {
     int onlyFid = only.empty() ? -1 : atoi(std::filesystem::path(only).stem().string().c_str());
@@ -320,6 +457,7 @@ static int check_seams(const std::string &only) {
                 }
             }
         }
+        if (g_blendAudit) blend_audit(m, e, js, D);
         int enabled = 0;
         for (const BlendPair &bp : blends.pairs) enabled += !strcmp(bp.state, "enabled");
         if (enabled && g_seamsBlend)
