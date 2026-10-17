@@ -313,7 +313,7 @@ surface isn't necessarily a visible defect (an end meant to be open, an effect's
 pose before believing it. Guilmon's wrist (bone 3, the forearm, and bone 4, the glove) is the reference case:
 
     dw3mv --seams | findstr "M366GIRU"
-    dw3mv --shot wrist.bmp --motion 17 --key 42 --only 3,4 --yaw 30 --zoom 1.5 data/files/356.bin
+    dw3mv --shot wrist.bmp --motion 17 --key 42 --only 3,4 --yaw 30 --zoom 1.5 data/files/0356.bin
 
 By default `data/` is the one picked with **File > Change the data folder...** (kept in `data_dir.txt`), or next to the exe, or next to its `build` folder.
 
