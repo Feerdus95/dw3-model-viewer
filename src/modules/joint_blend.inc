@@ -170,6 +170,8 @@ struct BlendMatch {
     char path = 0;                    /* 'A' bind pose, exact; 'B' idle pose, by the ring's own scale */
     const std::vector<std::array<float, 16>> *world = nullptr;
     float tol = 0, ring = 0, ringMax = 0; /* the nearness used, the ring's rms radius and its farthest vertex from the middle, in units */
+    bool forced = false;              /* path F: pieces that don't touch, paired by nearness; the meeting points are the middles of the pairs */
+    float tolW = -1;                  /* the nearness of a vertex to a meeting point that gets the full weight (path F: half the gap); else tol */
     std::vector<std::pair<int, int>> pairs; /* A's vertex, the B vertex it is on */
     int nearA = 0, nearB = 0;         /* vertices of each within half a ring radius of the other piece: what coverage is of */
     std::string why;                  /* set when the ring has no usable scale */
@@ -272,6 +274,41 @@ static BlendMatch blend_match(const Model &m, const BlendRest &r, int a, int b) 
     return mt;
 }
 
+/* PATH F (full skinning models only): two pieces that never touch (a floating arm and its head) are joined at the point where they come nearest:
+   the K vertices of A nearest B, each with its nearest on B; the pair's middle is where the weight is a half */
+static BlendMatch blend_force(const BlendRest &r, const Mesh &ma, const Mesh &mb, int a, int b) {
+    BlendMatch mt;
+    const auto &world = r.bind;
+    std::vector<BlendPt> pa = blend_pts(ma, world[a].data()), pb = blend_pts(mb, world[b].data());
+    std::vector<float> d(pa.size(), 1e30f);
+    std::vector<int> nearest(pa.size(), -1), order(pa.size());
+    for (size_t i = 0; i < pa.size(); i++) {
+        order[i] = (int)i;
+        for (size_t k = 0; k < pb.size(); k++) {
+            float x = blend_dist(pa[i], pb[k]);
+            if (x < d[i]) d[i] = x, nearest[i] = (int)k;
+        }
+    }
+    std::sort(order.begin(), order.end(), [&](int x, int y) { return d[x] < d[y] || (d[x] == d[y] && x < y); });
+    const size_t K = 4;
+    if (pa.size() < 3 || pb.size() < 3) return mt;
+    std::vector<BlendPt> mid;
+    float gap = 0;
+    for (size_t i = 0; i < order.size() && i < K; i++) {
+        int ia = order[i];
+        mt.pairs.push_back({ia, nearest[ia]});
+        BlendPt q;
+        for (int j = 0; j < 3; j++) q[j] = (pa[ia][j] + pb[nearest[ia]][j]) / 2;
+        mid.push_back(q), gap = std::max(gap, d[ia]);
+    }
+    mt.candidate = true, mt.forced = true, mt.path = 'F', mt.world = &world;
+    mt.tol = gap + 1, mt.tolW = gap / 2 + 1;
+    mt.ring = blend_ring(mid), mt.ringMax = blend_ring_max(mid);
+    if (mt.ring < BLEND_RING_MIN) mt.why = "no robust local scale: the ring is " + std::to_string((int)mt.ring) + " units across, under " + std::to_string((int)BLEND_RING_MIN);
+    mt.nearA = mt.nearB = (int)mt.pairs.size();
+    return mt;
+}
+
 /* A bone's blending: up to 3 partners, and for each vertex of its mesh the weight of each */
 struct BoneBlend {
     int n = 0;
@@ -364,6 +401,10 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
         if (p < 1) continue;
         auto key = blend_key((int)b, p);
         BlendMatch mt = blend_match(m, rest, key.first, key.second);
+        bool skinModel = false;
+        for (const char *n : BLEND_SKIN_MODELS) skinModel = skinModel || m.name == n;
+        if (!mt.candidate && skinModel && m.bones[key.first].mesh >= 0 && m.bones[key.second].mesh >= 0)
+            mt = blend_force(rest, m.meshes[m.bones[key.first].mesh], m.meshes[m.bones[key.second].mesh], key.first, key.second);
         if (mt.candidate) match[key] = std::move(mt);
         else if (!mt.miss.empty()) missed[key] = mt.miss;
     }
@@ -449,14 +490,19 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
             bp.band = std::max(bp.band, 0.5f * sqrtf(d));
         }
         std::vector<BlendPt> meet; /* where the pieces meet */
-        for (const auto &pr : bp.matched) meet.push_back(pa[pr.first]);
+        for (const auto &pr : bp.matched) {
+            BlendPt q = pa[pr.first];
+            if (mt.forced) for (int i = 0; i < 3; i++) q[i] = (pa[pr.first][i] + pb[pr.second][i]) / 2;
+            meet.push_back(q);
+        }
+        const float tolW = mt.tolW >= 0 ? mt.tolW : mt.tol;
         /* a vertex's w: 0.5 on the meeting points, a smooth fall to 0 at the band's end */
         auto weights = [&](const std::vector<BlendPt> &p, std::vector<float> &wt, std::vector<int> &contact) {
             wt.assign(p.size(), 0);
             for (size_t i = 0; i < p.size(); i++) {
                 float d = 1e30f;
                 for (const auto &q : meet) d = std::min(d, blend_dist(p[i], q));
-                if (d <= mt.tol) {
+                if (d <= tolW) {
                     wt[i] = 0.5f;
                     contact.push_back((int)i);
                 } else {
@@ -466,7 +512,7 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
             }
         };
         weights(pa, w.wa, w.contactA), weights(pb, w.wb, w.contactB);
-        w.meet = meet, w.tol = mt.tol;
+        w.meet = meet, w.tol = tolW;
         w.band = bp.band;
         memcpy(w.Ra, Ra, sizeof w.Ra), memcpy(w.Rb, Rb, sizeof w.Rb);
         bp.vertsA = (int)pa.size(), bp.vertsB = (int)pb.size();
