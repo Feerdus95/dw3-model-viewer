@@ -298,6 +298,10 @@ with changes you haven't saved, quitting, or reverting a stage asks first.
                                           motion's keyframe, through a fighter's
                                           camera, with a stage's lights
           [--frame A,B] [--only A,B] [--zoom F] [--yaw DEG] [--wire]
+          [--blend] [--weld A,B] [--weld-band R]
+                                          draws the joints that can be blended (see below)
+                                          blended; --weld asks for bones A and B on any model,
+                                          R is the band in game units (60)
                                           a close-up: frames bones A and B (--only
                                           draws just those), zoomed F times, seen from
                                           DEG degrees around, as a wireframe
@@ -314,6 +318,12 @@ pose before believing it. Guilmon's wrist (bone 3, the forearm, and bone 4, the 
 
     dw3mv --seams | findstr "M366GIRU"
     dw3mv --shot wrist.bmp --motion 17 --key 42 --only 3,4 --yaw 30 --zoom 1.5 data/files/0356.bin
+
+**Blend joint** (Model > Display, only where a model has a pair) is an experiment: where two bones' meshes meet at rest (their
+vertices are the same points), the vertices near the joint follow both bones, as a skinned model does, so the two pieces stay
+together in every pose. Vertices on the meeting points weigh 0.5 for each bone, the weight fading to 0 over a band around them.
+It only changes how the viewer draws; the model's data is the game's. Only Guilmon's wrist (bones 3 and 4) has a pair for now;
+`--seams --blend` measures it (`--blend` places those vertices blended).
 
 By default `data/` is the one picked with **File > Change the data folder...** (kept in `data_dir.txt`), or next to the exe, or next to its `build` folder.
 

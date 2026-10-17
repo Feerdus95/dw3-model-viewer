@@ -10,6 +10,7 @@ struct View {
     bool face = true;
     bool wireframe = false, skeleton = false, cull = false, grid = true;
     bool marks = false; /* a cross where each effect of a script is */
+    bool blendJoints = false; /* the joints with a JointBlend drawn blended (experimental) */
     bool playing = true, loop = true;
     float speed = 1, ticks = 0;
     int texCombo = 0;
@@ -164,6 +165,8 @@ static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vec
     GLint loc_mvp = GL(glGetUniformLocation)(g_mesh, "mvp"), loc_world = GL(glGetUniformLocation)(g_mesh, "world");
     GLint loc_pass = GL(glGetUniformLocation)(g_mesh, "pass"), loc_abr = GL(glGetUniformLocation)(g_mesh, "abr");
     GLint loc_tint = GL(glGetUniformLocation)(g_mesh, "tint");
+    GLint loc_mvp2 = GL(glGetUniformLocation)(g_mesh, "mvp2"), loc_world2 = GL(glGetUniformLocation)(g_mesh, "world2");
+    GLint loc_blend = GL(glGetUniformLocation)(g_mesh, "blendOn");
     /* a model: its bones through PRE, opaque first and then the semi-transparent, each blending its own way */
     auto draw_model = [&](Scene &sc, const M4 &pre) {
         Model &m = *sc.model;
@@ -175,6 +178,20 @@ static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vec
                 M4 pose = mul(pre, bone_pose(sc, (int)b)), mvp = mul(vp, mul(PSX_TO_GL, pose));
                 GL(glUniformMatrix4fv)(loc_mvp, 1, GL_FALSE, mvp.m);
                 GL(glUniformMatrix4fv)(loc_world, 1, GL_FALSE, pose.m);
+                /* a joint blended: the vertices with a weight also follow the other bone of the pair */
+                float on = 0;
+                M4 pose2 = pose, mvp2 = mvp;
+                if (v.blendJoints)
+                    for (const JointBlend &j : sc.blends) {
+                        int other = j.a == (int)b ? j.b : j.b == (int)b ? j.a : 0;
+                        if (!other || !m.pose[other].visible) continue;
+                        pose2 = mul(pre, mul(bone_pose(sc, other), from(j.a == (int)b ? j.ab : j.ba)));
+                        mvp2 = mul(vp, mul(PSX_TO_GL, pose2));
+                        on = 1;
+                    }
+                GL(glUniformMatrix4fv)(loc_mvp2, 1, GL_FALSE, mvp2.m);
+                GL(glUniformMatrix4fv)(loc_world2, 1, GL_FALSE, pose2.m);
+                GL(glUniform1f)(loc_blend, on);
                 int mark = b < sc.mark.size() ? sc.mark[b] : 0;
                 if (mark == 2) GL(glUniform4f)(loc_tint, 1, 0.85f, 0.2f, 0.35f);
                 else GL(glUniform4f)(loc_tint, 0.55f, 0.8f, 1, mark == 1 ? 0.22f : 0);

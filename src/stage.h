@@ -95,3 +95,6 @@ struct StageEdit {
     /* ... for a new bone on PARENT (null: the root): its keys don't move it from where its parent is */
     bool newBone(int part, const StagePart *parent, std::vector<uint8_t> &mesh, std::vector<uint8_t> &keys);
 };
+/* A bone's matrix at its keys' first frame, under its parents (the model at rest, as the OBJ has it) */
+void bind_world(const Model &m, int b, float out[16]);
+

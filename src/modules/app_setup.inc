@@ -5,7 +5,7 @@ int main(int argc, char **argv) {
     std::vector<int> shot_frame; /* bones the picture is framed on */
     std::vector<int> shot_only;  /* the only bones drawn */
     float shot_zoom = 1;
-    bool shot_wire = false;
+    bool shot_wire = false, shot_blend = false;
     float shot_yaw = 1e9f;       /* degrees, around the model */
     bool check = false, users = false, stages = false, seams = false;
     int effect = -1;
@@ -20,6 +20,11 @@ int main(int argc, char **argv) {
         else if (a == "--only" && i + 1 < argc)
             for (const char *c = argv[++i]; *c; c += *c == ',') shot_only.push_back(atoi(c)), c += strspn(c, "0123456789");
         else if (a == "--wire") shot_wire = true;
+        else if (a == "--blend") shot_blend = g_seamsBlend = true;
+        else if (a == "--weld" && i + 1 < argc) {
+            int p = 0, q = 0;
+            if (sscanf(argv[++i], "%d,%d", &p, &q) == 2) g_blendExtra.push_back({p, q});
+        } else if (a == "--weld-band" && i + 1 < argc) g_blendBand = (float)atof(argv[++i]);
         else if (a == "--zoom" && i + 1 < argc) shot_zoom = (float)atof(argv[++i]);
         else if (a == "--yaw" && i + 1 < argc) shot_yaw = (float)atof(argv[++i]);
         else if (a == "--stage" && i + 1 < argc) shot_stage = atoi(argv[++i]);
@@ -447,6 +452,7 @@ int main(int argc, char **argv) {
         if (!shot_frame.empty()) frame_bones(scene, view, shot_frame);
         view.cam.dist /= shot_zoom;
         view.wireframe = shot_wire;
+        view.blendJoints = shot_blend;
         if (shot_yaw < 1e8f) view.cam.yaw = shot_yaw * 3.14159265f / 180;
         render(scene, view, 0, 0, W, H);
         std::vector<uint32_t> px(W * H), flipped(W * H);

@@ -96,7 +96,7 @@ static std::array<float, 3> apply(const float m[16], float x, float y, float z) 
 
 /* Where a bone's keys' first frame puts it, under its parents; a part
    hidden there (scaled to nothing, shown by its motion) at full size */
-static void bind_world(const Model &m, int b, float out[16]) {
+void bind_world(const Model &m, int b, float out[16]) {
     if (b <= 0) return identity(out);
     const Bone &bone = m.bones[b];
     Vec3s v[3];

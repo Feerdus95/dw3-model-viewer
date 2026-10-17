@@ -896,6 +896,11 @@
             ImGui::Checkbox("Wireframe", &view.wireframe);
             ImGui::TableNextColumn();
             ImGui::Checkbox("Skeleton", &view.skeleton);
+            if (!scene.blends.empty()) {
+                ImGui::TableNextColumn();
+                ImGui::Checkbox("Blend joint", &view.blendJoints);
+                tip("Experimental: the pieces at this joint follow both bones near it, so they stay together (this model's wrist)");
+            }
             ImGui::TableNextColumn();
             ImGui::Checkbox("Grid", &view.grid);
             ImGui::TableNextColumn();

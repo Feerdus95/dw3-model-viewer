@@ -109,6 +109,7 @@ struct SeamJoint {
 };
 
 /* ONLY, when given, is one model file (a mod's, say): just the disc model with its number is analysed, from that file */
+static bool g_seamsBlend = false; /* --blend: the joints with a JointBlend placed blended */
 static int check_seams(const std::string &only) {
     int onlyFid = only.empty() ? -1 : atoi(std::filesystem::path(only).stem().string().c_str());
     std::vector<SeamJoint> all;
@@ -153,6 +154,34 @@ static int check_seams(const std::string &only) {
             return sm[k];
         };
         std::vector<SeamJoint> js;
+        std::vector<JointBlend> blends;
+        if (g_seamsBlend) blend_build(m, blends);
+        int curMo = 0, curKey = 0, moveMo = 0, moveKey = 0; /* the pose being placed, and where the blended vertices moved most */
+        float blendMove = 0; /* the farthest a blended vertex is from where its bone alone puts it, over the poses */
+        /* where a bone's vertex I is in the pose now: its bone's, or blended with the other of its pair */
+        std::vector<std::array<float, 16>> m2(nb);
+        std::vector<char> m2Ok(nb, 0);
+        auto placed = [&](int b, int i) -> SeamPt {
+            const Vec3s &v = m.meshes[m.bones[b].mesh].verts[i];
+            SeamPt p = seam_tf(m.pose[b].world, v);
+            for (const JointBlend &j : blends) {
+                bool isA = j.a == b;
+                if (!isA && j.b != b) continue;
+                int other = isA ? j.b : j.a;
+                float w = (isA ? j.wa : j.wb)[i];
+                if (w <= 0 || !m.pose[other].visible) continue;
+                if (!m2Ok[b]) {
+                    m2Ok[b] = 1;
+                    M4 mm = mul(from(m.pose[other].world), from(isA ? j.ab : j.ba));
+                    memcpy(m2[b].data(), mm.m, sizeof(float) * 16);
+                }
+                SeamPt q = seam_tf(m2[b].data(), v);
+                SeamPt r{p.x + (q.x - p.x) * w, p.y + (q.y - p.y) * w, p.z + (q.z - p.z) * w};
+                if (seam_dist(p, r) > blendMove) blendMove = seam_dist(p, r), moveMo = curMo, moveKey = curKey;
+                return r;
+            }
+            return p;
+        };
         for (size_t b = 1; b < nb; b++) {
             int p = m.bones[b].parent;
             if (p <= 0 || rest[b].empty() || rest[p].empty()) continue;
@@ -220,15 +249,17 @@ static int check_seams(const std::string &only) {
             int n = m.keyframeCount, step = std::max(1, n / 30);
             for (int k = 0; k < std::max(n, 1); k += step) {
                 m.keyframe = k;
+                curMo = (int)mo, curKey = k;
                 m.evaluate();
+                std::fill(m2Ok.begin(), m2Ok.end(), 0);
                 std::vector<std::array<float, 6>> pb(nb);
                 std::vector<char> have(nb, 0);
                 auto boxOf = [&](int b) -> const std::array<float, 6> & {
                     if (have[b]) return pb[b];
                     have[b] = 1;
                     std::array<float, 6> bx = {1e9f, 1e9f, 1e9f, -1e9f, -1e9f, -1e9f};
-                    for (const Vec3s &v : m.meshes[m.bones[b].mesh].verts) {
-                        SeamPt q = seam_tf(m.pose[b].world, v);
+                    for (size_t vi = 0; vi < m.meshes[m.bones[b].mesh].verts.size(); vi++) {
+                        SeamPt q = placed(b, (int)vi);
                         float c[3] = {q.x, q.y, q.z};
                         for (int i = 0; i < 3; i++) bx[i] = std::min(bx[i], c[i]), bx[3 + i] = std::max(bx[3 + i], c[i]);
                     }
@@ -239,7 +270,7 @@ static int check_seams(const std::string &only) {
                 auto wvOf = [&](int b) -> const std::vector<SeamPt> & {
                     if (!wvOk[b]) {
                         wvOk[b] = 1;
-                        for (const Vec3s &v : m.meshes[m.bones[b].mesh].verts) wv[b].push_back(seam_tf(m.pose[b].world, v));
+                        for (size_t vi = 0; vi < m.meshes[m.bones[b].mesh].verts.size(); vi++) wv[b].push_back(placed(b, (int)vi));
                     }
                     return wv[b];
                 };
@@ -275,14 +306,15 @@ static int check_seams(const std::string &only) {
                         if (s > j.maxSep) j.maxSep = s, j.sepMotion = (int)mo, j.sepKey = k;
                     }
                     if (!m.pose[j.bone].visible || !m.pose[j.parent].visible) continue;
-                    const Mesh &cm = m.meshes[m.bones[j.bone].mesh], &pm = m.meshes[m.bones[j.parent].mesh];
                     for (auto &pr : j.pv) {
-                        float d = seam_dist(seam_tf(m.pose[j.bone].world, cm.verts[pr.first]), seam_tf(m.pose[j.parent].world, pm.verts[pr.second]));
+                        float d = seam_dist(placed(j.bone, pr.first), placed(j.parent, pr.second));
                         j.drift = std::max(j.drift, d / D);
                     }
                 }
             }
         }
+        if (!blends.empty()) printf("%04d %-13s blended: %d joint(s); a vertex moves at most %.2f%% of the model's size from where its bone alone puts it (motion %d key %d)\n", e.fid,
+                                    e.name.c_str(), (int)blends.size(), blendMove / D * 100, moveMo, moveKey);
         for (SeamJoint &j : js) all.push_back(std::move(j));
     }
     for (const SeamJoint &j : all)

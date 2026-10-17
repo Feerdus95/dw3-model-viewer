@@ -9,7 +9,10 @@ layout(location = 3) in vec4 color;
 layout(location = 4) in uvec4 tex;    /* CLUT x, y, page x, y */
 layout(location = 5) in uvec4 limits; /* u, v min, max */
 layout(location = 6) in uint mode;
+layout(location = 7) in float wgt;   /* how much it follows the second bone */
 uniform mat4 mvp, world;
+uniform mat4 mvp2, world2;           /* the second bone's, for the vertices with a weight */
+uniform float blendOn;
 uniform vec3 light;
 uniform int lighting; /* 0 none, 1 the viewer's light, 2 the stage's (the GTE's NCS) */
 uniform vec3 ldir[3], lcol[3], amb;
@@ -18,18 +21,20 @@ out vec3 col;
 flat out uvec4 t, lim;
 flat out uint md;
 void main() {
-    gl_Position = mvp * vec4(pos, 1.0);
+    float k = wgt * blendOn;
+    gl_Position = mix(mvp * vec4(pos, 1.0), mvp2 * vec4(pos, 1.0), k);
+    vec3 nw = mix(mat3(world) * nrm, mat3(world2) * nrm, k);
     uv = uv_in; t = tex; lim = limits; md = mode;
     col = color.rgb * 255.0;
     if ((mode & 2u) != 0u) {
         if (lighting == 1) {
-            vec3 n = normalize(mat3(world) * nrm);
+            vec3 n = normalize(nw);
             col = vec3(128.0 * (0.45 + 0.75 * max(dot(n, light), 0.0)));
         } else if (lighting == 2) {
             /* FIGHTSTG_lightMesh: the light matrix through the bone's, each
                light's color by how much the normal faces it, plus the back
                color, clamped as the GTE does */
-            vec3 n = mat3(world) * nrm, c = amb;
+            vec3 n = nw, c = amb;
             for (int i = 0; i < 3; i++) c += lcol[i] * max(dot(ldir[i], n), 0.0);
             col = min(c, vec3(255.0));
         } else {
