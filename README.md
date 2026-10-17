@@ -430,4 +430,4 @@ See [CREDITS.md](CREDITS.md):
 - **Dear ImGui** 1.91.8 (MIT, `third_party/imgui`);
 - **SDL3** (zlib), linked as `SDL3.dll`.
 
-`--weld-band-limb` makes a pair's band at least half the distance between its two bones' origins (the whole limb bends); `--weld-skin` turns on fade, subdivision, the soft fall and the limb band for every model. Gyromon (M041GIRO, bones 3<-2) has all of it by default and its pair is approved; `--weld-bridge` draws a sleeve between the two rings instead of the weld.
+`--weld-band-limb` makes a pair's band at least half the distance between its two bones' origins (the whole limb bends); `--weld-skin` turns on fade, subdivision, the soft fall and the limb band for every model. `--weld-bridge` draws a sleeve between the two rings instead of the weld.

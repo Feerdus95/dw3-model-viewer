@@ -36,7 +36,7 @@ static bool g_blendBridge = false;                   /* --weld-bridge: a sleeve 
 static bool g_blendBandLimb = false;                 /* --weld-band-limb: a pair's band is at least half the distance between its two bones' origins (the whole limb bends) */
 static bool g_blendOverlap = false;                  /* --weld-overlap: pieces that overlap with no shared ring are joined by distance: every vertex within reach of the other piece follows both bones */
 static bool g_blendSkin = false;                     /* --weld-skin: every flag above, for every model */
-static const char *BLEND_SKIN_MODELS[] = {"M041GIRO.BIN"}; /* models drawn with the full skinning by default */
+static const char *BLEND_SKIN_MODELS[] = {""}; /* models drawn with the full skinning by default: none (Gyromon had it, reverted) */
 static bool g_blendBandAuto = false;                /* --weld-band-auto: a pair's band is at least BLEND_BAND_RING times its ring's radius */
 static const float BLEND_BAND_RING = 1.2f;           /* the two rings of a pose are often as far apart as the ring is wide, and that gap is taken up over the band */
 static std::vector<std::pair<int, int>> g_blendExtra; /* pairs asked for on the command line, on any model */
