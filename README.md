@@ -338,13 +338,17 @@ Five things are kept apart, and nothing is blended unless asked for (the details
   scale). A pair with 3 matched vertices is **eligible**. `--seams` lists them in its `blend` column.
 - **Verdict** (built in; `--blend-audit` prints it): the pair alone is run over every motion, played from its start as the game plays it.
   It is **validated** if its matched vertices never end up farther apart blended than at rest, no vertex moves farther than a ring turned
-  about its middle could carry it, and the blended ring never shrinks below 85% of its radius (a twist of about 60 degrees); otherwise
-  **rejected**, with the reason. A pair that is not validated is never drawn blended.
+  about its middle could carry it; otherwise **rejected**, with the reason. Separately, if the blended ring shrinks below 85% of the
+  *rigid* ring of the same pose (a scale animation shrinks both, so the rest radius is the wrong reference) the pair is flagged **review**:
+  the figure measures shrinkage, not whether the joint looks right (in the inspected set it covers good, neutral and bad joints). A rigid
+  ring under 10 units has no scale and is skipped; if every pose is, the pair is *indeterminate* (review). Joints confirmed destructive by
+  eye (`BLEND_REJECT`: M122HAGU's gear) are rejected. Only validated pairs are drawn, except that a review pair is drawn when asked for by
+  name (`--weld`), never by `--weld-all`. `--weld-inspect` draws a rejected pair asked for with `--weld`, to look at why.
 - **Activation**: only the pairs asked for, and validated: `--weld A,B` (repeat it), `--weld-all` (every validated pair), and Guilmon's wrist
   (4,3), built in. Asking for a pair that isn't eligible or is rejected is reported with why, not forced.
 - **Exclusion**, which wins over everything: `--weld-skip A,B` (repeat it), and `BLEND_SKIP` in `joint_blend.inc` for good (the jaws of
   Brachiomon and Guilmon: hinges whose opening is meant to show). Bones are the file's numbers; `--seams` and `--blend-audit` show each
-  pair's state: eligible, validated, rejected, enabled or excluded.
+  pair's state: eligible, validated, review, rejected, enabled or excluded.
 - **Conflicts**: a bone can be in up to 3 pairs. Each vertex keeps one weight per partner bone (partners in bone order, so asking for the
   pairs in another order changes nothing), the weights are added and scaled to 1 if they pass it. Where one pair's meeting vertices carry
   another pair's weight too the pieces stop staying exactly on one another; that is printed, never settled by which pair came last.

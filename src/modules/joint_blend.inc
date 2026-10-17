@@ -17,7 +17,9 @@
    VERDICT   the deformation audit, built in: the pair alone is run over the model's motions. It is VALIDATED if its
              matched vertices never end up farther apart blended than they were at rest, and nothing moves farther than
              what a ring turned about its own middle could carry it; else REJECTED, with the reason. It is run for every pair about to be drawn.
-   ACTIVATION only the pairs asked for (--weld, --weld-all, a model's built-in ones) AND validated are drawn.
+             A ring that shrinks (blended against the rigid ring of the same pose) below BLEND_PINCH_WARN is not rejected but flagged REVIEW: the figure
+             measures shrinkage, not whether the joint looks right. Only BLEND_REJECT, confirmed by eye, rejects for how a joint looks.
+   ACTIVATION only the pairs asked for (--weld, --weld-all, a model's built-in ones) AND validated are drawn; a REVIEW pair only when asked for by name (--weld, not --weld-all).
    EXCLUSION pairs left out whatever their verdict (--weld-skip, BLEND_SKIP), which wins over activation.
    "Rest" is the bind pose for path A and the model's idle pose (first motion, first keyframe) for path B. */
 
@@ -37,12 +39,23 @@ static const float BLEND_RING_TOL = 0.05f; /* path B: the same point within this
 static const float BLEND_RING_MIN = 10;    /* a ring smaller than this (a tenth of an OBJ unit) has no scale to judge by: rounding is a tenth of it */
 static const int BLEND_RING_K = 8;         /* path B finds the ring among each piece's K vertices nearest the other piece */
 static const float BLEND_SEARCH = 0.25f;   /* ... and only within this share of the smaller piece's size */
-/* Pinch: the average of two matrices that differ by a turn of THETA about an axis through the ring shrinks the ring by cos(THETA/2) across the
+/* Pinch (the old, rest-relative figure, kept as a diagnostic): the average of two matrices that differ by a turn of THETA about an axis through the ring shrinks the ring by cos(THETA/2) across the
    axis (all across, for a twist about the ring's own axis, which at 180 degrees collapses it). So the blended ring's radius over its rest radius
    says how much twist or bend a pair carries. BLEND_PINCH_MIN is how much it may shrink: 15%, a twist of about 60 degrees or a bend of about 100;
    past that the joint reads as pinched. (Derived before measuring; it was set aside once on poses that turned out to be artifacts of jumping
    to keyframes, and put back when the motions were played properly.) */
-static const float BLEND_PINCH_MIN = 0.85f;
+static const float BLEND_PINCH_WARN = 0.85f; /* a WARNING, not a gate: the blended ring is under this share of the rigid ring of the same pose. The rigid ring is the right
+                                                reference (a scale animation shrinks both); 85% is the 15% of the derivation above, and where the visual inspection of the 40 pairs
+                                                below it found good, neutral and bad joints alike. It says "look", not "bad". */
+/* Joints confirmed destructive by eye: rejected whatever the numbers say (never drawn by --weld-all or --weld) */
+struct BlendReject {
+    const char *model;
+    int a, b;
+    const char *why;
+};
+static const BlendReject BLEND_REJECT[] = {
+    {"M122HAGU.BIN", 1, 2, "the gear spins inside the body shell; blended, the shell collapses (seen)"},
+};
 static const float BLEND_SEP_SLACK = 1.0f; /* blended, matched vertices may be this much (rounding) farther apart than at rest */
 /* Displacement: a vertex follows its partner bone by w (at most 0.5) of the way, so it moves at most w times the two bones' offset, and for a
    ring turned about its own middle that offset is at most twice the vertex's distance L from the middle: displacement <= L. A weighted vertex is
@@ -242,7 +255,9 @@ struct BlendPair {
     int sharedMatched = 0;              /* matched pairs whose two vertices both follow the other bone, with the same weight */
     /* the verdict, over the motions, in units */
     bool judged = false;
-    float sepRigid = 0, sepBlended = 0, disp = 0, pinch = 1; float pinchVsRigid = 1; /* the same, against the ring the rigid pieces make in that pose (an animated scale shrinks both) */
+    float sepRigid = 0, sepBlended = 0, disp = 0, pinch = 1; float pinchVsRigid = 1; /* the smallest blended ring over the rigid ring of the SAME pose (an animated scale shrinks both): the metric the verdict uses */
+    int pvMo = 0, pvKey = 0, pvPoses = 0, pvDegen = 0; /* where, and the poses measured and skipped (a rigid ring under BLEND_RING_MIN has no scale) */
+    bool review = false;
     int pinchMo = 0, pinchKey = 0; /* pinch: the smallest the blended ring gets, as a share of its rest radius */
     int dispMo = 0, dispKey = 0;
 };
@@ -282,12 +297,13 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
         else if (!mt.miss.empty()) missed[key] = mt.miss;
     }
     /* ACTIVATION and EXCLUSION */
-    std::set<std::pair<int, int>> want, skip;
+    std::set<std::pair<int, int>> want, skip, explicitAsk; /* explicitAsk: by name, which also draws a pair flagged for review (--weld-all doesn't) */
     if (only) { /* a diagnostic asking for these pairs and no others */
-        want = *only;
+        want = explicitAsk = *only;
     } else {
         for (const auto &p : g_blendExtra) want.insert(blend_key(p.first, p.second));
         if (m.name == "M366GIRU.BIN") want.insert({3, 4}); /* Guilmon's wrist, the prototype's */
+        explicitAsk = want;
         if (g_blendAll)
             for (const auto &kv : match) want.insert(kv.first);
     }
@@ -398,7 +414,11 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
                         ring.push_back(xa), rring.push_back(ra);
                     }
                     if (bp.ring > 0 && blend_ring(ring) / bp.ring < bp.pinch) bp.pinch = blend_ring(ring) / bp.ring, bp.pinchMo = (int)mo, bp.pinchKey = key;
-                    if (float rr = blend_ring(rring); rr > 1e-3f) bp.pinchVsRigid = std::min(bp.pinchVsRigid, blend_ring(ring) / rr);
+                    if (float rr = blend_ring(rring); rr < BLEND_RING_MIN) bp.pvDegen++;
+                    else {
+                        bp.pvPoses++;
+                        if (blend_ring(ring) / rr < bp.pinchVsRigid) bp.pinchVsRigid = blend_ring(ring) / rr, bp.pvMo = (int)mo, bp.pvKey = key;
+                    }
                     for (int side = 0; side < 2; side++) {
                         const Mesh &me = side ? mb : ma;
                         const std::vector<float> &wt = side ? w.wb : w.wa;
@@ -420,17 +440,22 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
             if (bp.sepBlended > bp.tol + BLEND_SEP_SLACK) {
                 snprintf(buf, sizeof buf, "matched vertices end up %.0f units apart blended, more than their %.1f at rest (+%.0f rounding)", bp.sepBlended, bp.tol, BLEND_SEP_SLACK);
                 bp.state = "rejected", bp.why = buf;
-            } else if (bp.pinch < BLEND_PINCH_MIN) {
-                snprintf(buf, sizeof buf, "the ring pinches to %.0f%% of its radius (a twist or bend an average of two matrices can't carry; the least allowed is %.0f%%)", 100 * bp.pinch,
-                         100 * BLEND_PINCH_MIN);
-                bp.state = "rejected", bp.why = buf;
             } else if (bp.disp > bp.ringMax + std::max(g_blendBand, 1.0f) + BLEND_SEP_SLACK) {
                 snprintf(buf, sizeof buf, "a vertex moves %.0f units, more than a ring turned about its middle could carry it (%.0f: its radius %.0f plus the band)", bp.disp,
                          bp.ringMax + std::max(g_blendBand, 1.0f), bp.ringMax);
                 bp.state = "rejected", bp.why = buf;
+            } else if (bp.pvPoses == 0) {
+                bp.state = "review", bp.review = true;
+                bp.why = "indeterminate: the rigid ring is under the smallest scale in every pose (the piece collapses), so no shrinkage can be measured";
+            } else if (bp.pinchVsRigid < BLEND_PINCH_WARN) {
+                snprintf(buf, sizeof buf, "review: the blended ring shrinks to %.0f%% of the rigid ring in the same pose (motion %d key %d); the warning is under %.0f%%", 100 * bp.pinchVsRigid,
+                         bp.pvMo, bp.pvKey, 100 * BLEND_PINCH_WARN);
+                bp.state = "review", bp.review = true, bp.why = buf;
             } else {
                 bp.state = "validated";
             }
+            for (const BlendReject &r : BLEND_REJECT)
+                if (m.name == r.model && blend_key(r.a, r.b) == blend_key(bp.a, bp.b)) bp.state = "rejected", bp.why = std::string("confirmed destructive: ") + r.why;
         }
     }
     /* ACTIVATION again: only what was asked for and validated; EXCLUSION wins */
@@ -438,6 +463,10 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
         auto key = blend_key(bp.a, bp.b);
         if (skip.count(key)) bp.state = "excluded";
         else if (!strcmp(bp.state, "validated") && want.count(key)) bp.state = "enabled";
+        else if (!strcmp(bp.state, "review") && explicitAsk.count(key)) {
+            bp.state = "enabled";
+            out.notes.push_back("pair " + std::to_string(bp.a) + "," + std::to_string(bp.b) + " is drawn although flagged for review: " + bp.why);
+        }
         else if (!strcmp(bp.state, "rejected") && want.count(key) && bp.judged && g_blendInspect && !g_blendAll) {
             bp.state = "enabled";
             out.notes.push_back("pair " + std::to_string(bp.a) + "," + std::to_string(bp.b) + " is drawn for inspection although rejected: " + bp.why);

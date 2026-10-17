@@ -137,8 +137,8 @@ static void blend_audit(Model &m, const Entry &e, const std::vector<SeamJoint> &
                "without any shared influence: a %d, b %d\n",
                bp.sharedMatched, bp.meets, bp.weightedA, bp.vertsA, bp.weightedB, bp.vertsB, bp.vertsA - bp.weightedA, bp.vertsB - bp.weightedB);
         printf("  matched-vertex separation over the motions: rigid %.0f units, blended %.1f units (their gap at rest is at most %.1f); "
-               "largest displacement of any vertex %.0f units (motion %d key %d), limit %.0f; the ring pinches to %.0f%% of its radius at worst (motion %d key %d), %.0f%% of the rigid ring in the same pose\n",
-               bp.sepRigid, bp.sepBlended, bp.tol, bp.disp, bp.dispMo, bp.dispKey, bp.ringMax + std::max(g_blendBand, 1.0f), 100 * bp.pinch, bp.pinchMo, bp.pinchKey, 100 * bp.pinchVsRigid);
+               "largest displacement of any vertex %.0f units (motion %d key %d), limit %.0f; old rest-relative pinch %.0f%% (motion %d key %d); same-pose ratio %.0f%% of the rigid ring (motion %d key %d), %d poses measured, %d skipped as degenerate (rigid ring under %.0f units)\n",
+               bp.sepRigid, bp.sepBlended, bp.tol, bp.disp, bp.dispMo, bp.dispKey, bp.ringMax + std::max(g_blendBand, 1.0f), 100 * bp.pinch, bp.pinchMo, bp.pinchKey, 100 * bp.pinchVsRigid, bp.pvMo, bp.pvKey, bp.pvPoses, bp.pvDegen, BLEND_RING_MIN);
         int tracked = 0, trackedOn = 0;
         for (const SeamJoint &j : js) {
             if (blend_key(j.bone, j.parent) != std::make_pair(bp.a, bp.b)) continue;
@@ -153,7 +153,7 @@ static void blend_audit(Model &m, const Entry &e, const std::vector<SeamJoint> &
             }
         }
         printf("  legacy drift (the nearest vertex pairs at the idle pose) covers %d vertex pairs, %d of them among the matched\n", tracked, trackedOn);
-        printf("  verdict: %s; state: %s\n", bp.why.empty() ? "validated" : ("rejected: " + bp.why).c_str(), bp.state);
+        printf("  verdict: %s; state: %s\n", bp.why.empty() ? "validated" : (bp.review ? bp.why : "rejected: " + bp.why).c_str(), bp.state);
     }
 }
 
