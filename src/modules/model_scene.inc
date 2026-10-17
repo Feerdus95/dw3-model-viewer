@@ -8,8 +8,18 @@ struct GVert {
     float wgt[3]; /* how much it follows each of its bone's partners (BoneBlend) */
 };
 
+/* --weld-bridge: a pair's ring, as the vertices that meet on each side (their attributes, to dress the sleeve) in order around the ring */
+struct Bridge {
+    int a, b;
+    std::vector<GVert> ga, gb;
+    std::vector<Vec3s> va, vb;
+    float axA[3], axB[3];
+};
+
 struct Scene {
     std::unique_ptr<Model> model;
+    std::vector<Bridge> bridges;
+    GLuint bvao = 0, bvbo = 0;
     std::vector<int> first, count; /* each bone's vertices */
     std::vector<bool> hidden;
     BlendSet blend;                 /* the joints that can be drawn blended */
@@ -35,6 +45,18 @@ static void upload_vram(Scene &s) {
     GL(glTexParameteri)(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 }
 
+static void gvert_attribs() { /* the bound VAO and VBO carry GVerts */
+    for (int i = 0; i < 8; i++) GL(glEnableVertexAttribArray)(i);
+    GL(glVertexAttribPointer)(0, 3, GL_FLOAT, GL_FALSE, sizeof(GVert), (void *)offsetof(GVert, pos));
+    GL(glVertexAttribPointer)(1, 3, GL_FLOAT, GL_FALSE, sizeof(GVert), (void *)offsetof(GVert, nrm));
+    GL(glVertexAttribPointer)(2, 2, GL_FLOAT, GL_FALSE, sizeof(GVert), (void *)offsetof(GVert, uv));
+    GL(glVertexAttribPointer)(3, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(GVert), (void *)offsetof(GVert, color));
+    GL(glVertexAttribIPointer)(4, 4, GL_UNSIGNED_SHORT, sizeof(GVert), (void *)offsetof(GVert, tex));
+    GL(glVertexAttribIPointer)(5, 4, GL_UNSIGNED_SHORT, sizeof(GVert), (void *)offsetof(GVert, limits));
+    GL(glVertexAttribIPointer)(6, 1, GL_UNSIGNED_INT, sizeof(GVert), (void *)offsetof(GVert, mode));
+    GL(glVertexAttribPointer)(7, 3, GL_FLOAT, GL_FALSE, sizeof(GVert), (void *)offsetof(GVert, wgt));
+}
+
 static void upload(Scene &s) {
     Model &m = *s.model;
     std::vector<GVert> v;
@@ -42,6 +64,8 @@ static void upload(Scene &s) {
     s.count.assign(m.bones.size(), 0);
     s.hidden.assign(m.bones.size(), false);
     blend_build(m, s.blend);
+    std::vector<std::vector<GVert>> cap(m.bones.size()); /* a mesh vertex's first GVert, for the bridge */
+    std::vector<std::vector<char>> has(m.bones.size());
     for (size_t b = 1; b < m.bones.size(); b++) {
         const Mesh &mesh = m.meshes[m.bones[b].mesh];
         s.first[b] = (int)v.size();
@@ -73,6 +97,10 @@ static void upload(Scene &s) {
                     g.mode = (p.textured ? 1 : 0) | (p.lit ? 2 : 0) | (tpage_depth(p.tpage) & 3) << 2 |
                              (p.abr ? 16 : 0) | ((p.abr ? p.abr - 1 : 0) & 3) << 5;
                     v.push_back(g);
+                    if (g_blendBridge) {
+                        if (cap[b].empty()) cap[b].resize(mesh.verts.size()), has[b].assign(mesh.verts.size(), 0);
+                        if (!has[b][p.idx[k]]) cap[b][p.idx[k]] = g, has[b][p.idx[k]] = 1;
+                    }
                 }
             }
         }
@@ -138,6 +166,21 @@ static void upload(Scene &s) {
         }
         s.count[b] = (int)v.size() - s.first[b];
     }
+    s.bridges.clear();
+    if (g_blendBridge)
+        for (const BlendPair &bp : s.blend.pairs) {
+            if (strcmp(bp.state, "enabled") || bp.matched.size() < 3 || cap[bp.a].empty() || cap[bp.b].empty()) continue;
+            Bridge br = {bp.a, bp.b, {}, {}, {}, {}, {}, {}};
+            memcpy(br.axA, bp.axA, sizeof br.axA), memcpy(br.axB, bp.axB, sizeof br.axB);
+            bool ok = true;
+            for (int i : bp.ringOrder) {
+                int ia = bp.matched[i].first, ib = bp.matched[i].second;
+                if (!has[bp.a][ia] || !has[bp.b][ib]) { ok = false; break; }
+                br.ga.push_back(cap[bp.a][ia]), br.gb.push_back(cap[bp.b][ib]);
+                br.va.push_back(m.meshes[m.bones[bp.a].mesh].verts[ia]), br.vb.push_back(m.meshes[m.bones[bp.b].mesh].verts[ib]);
+            }
+            if (ok) s.bridges.push_back(std::move(br));
+        }
     if (!s.vao) {
         GL(glGenVertexArrays)(1, &s.vao);
         GL(glGenBuffers)(1, &s.vbo);
@@ -146,15 +189,7 @@ static void upload(Scene &s) {
     GL(glBindVertexArray)(s.vao);
     GL(glBindBuffer)(GL_ARRAY_BUFFER, s.vbo);
     GL(glBufferData)(GL_ARRAY_BUFFER, v.size() * sizeof(GVert), v.data(), GL_STATIC_DRAW);
-    for (int i = 0; i < 8; i++) GL(glEnableVertexAttribArray)(i);
-    GL(glVertexAttribPointer)(0, 3, GL_FLOAT, GL_FALSE, sizeof(GVert), (void *)offsetof(GVert, pos));
-    GL(glVertexAttribPointer)(1, 3, GL_FLOAT, GL_FALSE, sizeof(GVert), (void *)offsetof(GVert, nrm));
-    GL(glVertexAttribPointer)(2, 2, GL_FLOAT, GL_FALSE, sizeof(GVert), (void *)offsetof(GVert, uv));
-    GL(glVertexAttribPointer)(3, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(GVert), (void *)offsetof(GVert, color));
-    GL(glVertexAttribIPointer)(4, 4, GL_UNSIGNED_SHORT, sizeof(GVert), (void *)offsetof(GVert, tex));
-    GL(glVertexAttribIPointer)(5, 4, GL_UNSIGNED_SHORT, sizeof(GVert), (void *)offsetof(GVert, limits));
-    GL(glVertexAttribIPointer)(6, 1, GL_UNSIGNED_INT, sizeof(GVert), (void *)offsetof(GVert, mode));
-    GL(glVertexAttribPointer)(7, 3, GL_FLOAT, GL_FALSE, sizeof(GVert), (void *)offsetof(GVert, wgt));
+    gvert_attribs();
     upload_vram(s);
 
     /* the camera's target: the posed model's box */

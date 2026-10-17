@@ -183,7 +183,7 @@ static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vec
                 float mvpO[3][16], worldO[3][16];
                 for (int k = 0; k < 3; k++) memcpy(mvpO[k], mvp.m, sizeof mvpO[k]), memcpy(worldO[k], pose.m, sizeof worldO[k]);
                 const BoneBlend &bb = sc.blend.bone[b];
-                if (v.blendJoints && bb.n) {
+                if (v.blendJoints && bb.n && !g_blendBridge) { /* the bridge stands in for the weld */
                     on = 1;
                     for (int k = 0; k < bb.n; k++) {
                         if (!m.pose[bb.partner[k]].visible) continue;
@@ -206,6 +206,67 @@ static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vec
         GL(glUniform1i)(loc_abr, -1);
         GL(glDepthMask)(GL_TRUE);
         draw_bones();
+        if (v.blendJoints && g_blendBridge && !sc.bridges.empty()) {
+            /* --weld-bridge: per pair, a sleeve from ring a to ring b along a Hermite curve that leaves a and enters b along the joint's axis; the first
+               half takes a's ring's attributes, the second b's. Built in the model's space, so the bones' own matrices are the identity here. */
+            const int SEG = 8;
+            std::vector<GVert> out;
+            for (const Bridge &br : sc.bridges) {
+                if (!m.pose[br.a].visible || !m.pose[br.b].visible || sc.hidden[br.a] || sc.hidden[br.b]) continue;
+                M4 pa = mul(pre, bone_pose(sc, br.a)), pb = mul(pre, bone_pose(sc, br.b));
+                auto dir = [](const M4 &p, const float *a, float *o) {
+                    float l = 0;
+                    for (int i = 0; i < 3; i++) o[i] = p.m[i] * a[0] + p.m[4 + i] * a[1] + p.m[8 + i] * a[2], l += o[i] * o[i];
+                    l = std::max(sqrtf(l), 1e-6f);
+                    for (int i = 0; i < 3; i++) o[i] /= l;
+                };
+                float tA[3], tB[3];
+                dir(pa, br.axA, tA), dir(pb, br.axB, tB);
+                size_t n = br.va.size();
+                std::vector<std::vector<GVert>> col(n); /* each ring vertex's column of SEG+1 points */
+                for (size_t i = 0; i < n; i++) {
+                    float A[3], B[3], nA[3], nB[3];
+                    blend_point(pa.m, br.va[i], A), blend_point(pb.m, br.vb[i], B);
+                    dir(pa, br.ga[i].nrm, nA), dir(pb, br.gb[i].nrm, nB);
+                    float L = sqrtf((B[0] - A[0]) * (B[0] - A[0]) + (B[1] - A[1]) * (B[1] - A[1]) + (B[2] - A[2]) * (B[2] - A[2]));
+                    for (int s = 0; s <= SEG; s++) {
+                        float t = (float)s / SEG, t2 = t * t, t3 = t2 * t;
+                        float h00 = 2 * t3 - 3 * t2 + 1, h10 = t3 - 2 * t2 + t, h01 = -2 * t3 + 3 * t2, h11 = t3 - t2;
+                        GVert g = s * 2 <= SEG ? br.ga[i] : br.gb[i];
+                        for (int k = 0; k < 3; k++) g.pos[k] = h00 * A[k] + h10 * L * tA[k] + h01 * B[k] + h11 * L * tB[k], g.nrm[k] = (1 - t) * nA[k] + t * nB[k];
+                        g.mode &= ~16u; /* opaque */
+                        g.wgt[0] = g.wgt[1] = g.wgt[2] = 0;
+                        col[i].push_back(g);
+                    }
+                }
+                for (size_t i = 0; i < n; i++) {
+                    size_t j = (i + 1) % n;
+                    if (!col[i].size()) continue;
+                    for (int s = 0; s < SEG; s++) {
+                        out.push_back(col[i][s]), out.push_back(col[j][s]), out.push_back(col[i][s + 1]);
+                        out.push_back(col[j][s]), out.push_back(col[j][s + 1]), out.push_back(col[i][s + 1]);
+                    }
+                }
+            }
+            if (!out.empty()) {
+                if (!sc.bvao) GL(glGenVertexArrays)(1, &sc.bvao), GL(glGenBuffers)(1, &sc.bvbo);
+                GL(glBindVertexArray)(sc.bvao);
+                GL(glBindBuffer)(GL_ARRAY_BUFFER, sc.bvbo);
+                GL(glBufferData)(GL_ARRAY_BUFFER, out.size() * sizeof(GVert), out.data(), GL_STREAM_DRAW);
+                gvert_attribs();
+                M4 I = {{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}}, mvp = mul(vp, PSX_TO_GL);
+                float on = 0, fade[3] = {1, 1, 1};
+                GL(glUniformMatrix4fv)(loc_mvp, 1, GL_FALSE, mvp.m);
+                GL(glUniformMatrix4fv)(loc_world, 1, GL_FALSE, I.m);
+                GL(glUniform1f)(loc_blend, on);
+                GL(glUniform3fv)(loc_fade, 1, fade);
+                GL(glUniform4f)(loc_tint, 0, 0, 0, 0);
+                GL(glDisable)(GL_CULL_FACE);
+                GL(glDrawArrays)(GL_TRIANGLES, 0, (GLsizei)out.size());
+                if (v.cull) GL(glEnable)(GL_CULL_FACE);
+                GL(glBindVertexArray)(sc.vao);
+            }
+        }
         GL(glEnable)(GL_BLEND);
         GL(glDepthMask)(GL_FALSE);
         GL(glUniform1i)(loc_pass, 1);

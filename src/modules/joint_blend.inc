@@ -31,7 +31,8 @@ static float blend_fall(float t) {
     if (g_blendSoft) return (1 - t) * (1 - t) * (1 - t) * (1 - t) * (4 * t + 1);
     return 1 - t * t * (3 - 2 * t);
 }
-static bool g_blendBandAuto = false;                 /* --weld-band-auto: a pair's band is at least BLEND_BAND_RING times its ring's radius */
+static bool g_blendBridge = false;                   /* --weld-bridge: a sleeve drawn between each enabled pair's rings, instead of the weld (which is off) */
+static bool g_blendBandAuto = false;                /* --weld-band-auto: a pair's band is at least BLEND_BAND_RING times its ring's radius */
 static const float BLEND_BAND_RING = 1.2f;           /* the two rings of a pose are often as far apart as the ring is wide, and that gap is taken up over the band */
 static std::vector<std::pair<int, int>> g_blendExtra; /* pairs asked for on the command line, on any model */
 static std::vector<std::pair<int, int>> g_blendSkip;  /* pairs left out on the command line */
@@ -311,6 +312,8 @@ struct BlendPair {
     float tol = 0, ring = 0, ringMax = 0;
     float band = 60;                    /* the game units over which this pair's weights fade (BLEND_BAND_RING with --weld-band-auto) */
     std::vector<std::pair<int, int>> matched;
+    std::vector<int> ringOrder;         /* indices into matched, in order around the ring (--weld-bridge) */
+    float axA[3] = {}, axB[3] = {};     /* the joint's axis, from a toward b, in each bone's own space */
     int nearA = 0, nearB = 0;
     /* what the pair was given, once its weights are built */
     int weightedA = 0, weightedB = 0, contactA = 0, contactB = 0, vertsA = 0, vertsB = 0;
@@ -463,6 +466,33 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
         for (float x : w.wa) bp.weightedA += x > 0;
         for (float x : w.wb) bp.weightedB += x > 0;
         for (const auto &pr : bp.matched) bp.sharedMatched += w.wa[pr.first] > 0 && fabsf(w.wa[pr.first] - w.wb[pr.second]) < 1e-4f;
+        {   /* the ring in order, and the axis: the way from a's middle to b's, which the sleeve leaves a along and enters b along */
+            BlendPt ca = {}, cb = {}, c = {};
+            for (const BlendPt &p : pa) for (int i = 0; i < 3; i++) ca[i] += p[i] / pa.size();
+            for (const BlendPt &p : pb) for (int i = 0; i < 3; i++) cb[i] += p[i] / pb.size();
+            for (const auto &pr : bp.matched) for (int i = 0; i < 3; i++) c[i] += pa[pr.first][i] / bp.matched.size();
+            float ax[3], l = 0;
+            for (int i = 0; i < 3; i++) ax[i] = cb[i] - ca[i], l += ax[i] * ax[i];
+            l = std::max(sqrtf(l), 1e-6f);
+            for (float &x : ax) x /= l;
+            float u[3] = {1, 0, 0};
+            if (fabsf(ax[0]) > 0.9f) u[0] = 0, u[1] = 1;
+            float dd = u[0] * ax[0] + u[1] * ax[1] + u[2] * ax[2];
+            for (int i = 0; i < 3; i++) u[i] -= dd * ax[i];
+            float ul = std::max(sqrtf(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]), 1e-6f);
+            for (float &x : u) x /= ul;
+            float vv[3] = {ax[1] * u[2] - ax[2] * u[1], ax[2] * u[0] - ax[0] * u[2], ax[0] * u[1] - ax[1] * u[0]};
+            std::vector<std::pair<float, int>> ang;
+            for (size_t i = 0; i < bp.matched.size(); i++) {
+                const BlendPt &p = pa[bp.matched[i].first];
+                float d[3] = {p[0] - c[0], p[1] - c[1], p[2] - c[2]};
+                ang.push_back({atan2f(d[0] * vv[0] + d[1] * vv[1] + d[2] * vv[2], d[0] * u[0] + d[1] * u[1] + d[2] * u[2]), (int)i});
+            }
+            std::sort(ang.begin(), ang.end());
+            for (auto &x : ang) bp.ringOrder.push_back(x.second);
+            for (int i = 0; i < 3; i++)
+                bp.axA[i] = Rai[i] * ax[0] + Rai[4 + i] * ax[1] + Rai[8 + i] * ax[2], bp.axB[i] = Rbi[i] * ax[0] + Rbi[4 + i] * ax[1] + Rbi[8 + i] * ax[2];
+        }
         M4 ab = mul(from(Rbi), from(Ra)), ba = mul(from(Rai), from(Rb));
         memcpy(w.ab, ab.m, sizeof w.ab), memcpy(w.ba, ba.m, sizeof w.ba);
         judge.push_back((int)pw.size());
