@@ -10,16 +10,42 @@
    vertices carry weight from another pair too (the bands overlap there) the pieces no longer stay exactly on one
    another, and that is reported as a conflict, never settled by which pair came last.
 
-   Four steps, kept apart: DETECTION (a pair is ELIGIBLE when 3 or more of one bone's vertices are on the other's at
-   rest), ACTIVATION (only the pairs asked for: --weld, --weld-all, a model's built-in ones), EXCLUSION (pairs
-   left out: --weld-skip, BLEND_SKIP), and the blending itself. "Rest" is the bind pose if the pair meets there,
-   else the model's idle pose (its first motion's first keyframe), where the pieces are modelled to fit. */
+   Five things, kept apart:
+   MATCHING  which of a pair's vertices are the same point. Path A: vertices that coincide in the bind pose, within
+             BLEND_TOL. Path B, only when path A finds fewer than 3: the idle pose, within BLEND_RING_TOL of the
+             ring's own radius (never a share of the whole model). A pair needs 3 matched vertices to be ELIGIBLE.
+   VERDICT   the deformation audit, built in: the pair alone is run over the model's motions. It is VALIDATED if its
+             matched vertices never end up farther apart blended than they were at rest, and nothing moves farther than
+             what a ring turned about its own middle could carry it; else REJECTED, with the reason. It is run for every pair about to be drawn.
+   ACTIVATION only the pairs asked for (--weld, --weld-all, a model's built-in ones) AND validated are drawn.
+   EXCLUSION pairs left out whatever their verdict (--weld-skip, BLEND_SKIP), which wins over activation.
+   "Rest" is the bind pose for path A and the model's idle pose (first motion, first keyframe) for path B. */
 
-static float g_blendEps = 0;                          /* how near two vertices are to be "the same point" at rest; 0: 1% of the model's size */
 static float g_blendBand = 60;                       /* game units over which the blending fades out */
 static std::vector<std::pair<int, int>> g_blendExtra; /* pairs asked for on the command line, on any model */
 static std::vector<std::pair<int, int>> g_blendSkip;  /* pairs left out on the command line */
-static bool g_blendAll = false;                       /* --weld-all: every eligible pair (but the excluded) */
+static bool g_blendAll = false;                       /* --weld-all: every eligible pair that validates (but the excluded) */
+static bool g_blendValidateAll = false;               /* --blend-audit: run the verdict for every eligible pair, drawn or not */
+
+/* The tolerances. Units are the game's: a model's vertices are int16, and 100 of them are 1 unit of the OBJ. */
+static const float BLEND_TOL = 1.5f;       /* path A: two vertices of the bind pose are the same point within this. The data is integers; the bind
+                                              pose is rotations (4096 to the turn) in float, whose rounding moves a vertex by under one unit. */
+static const float BLEND_RING_TOL = 0.05f; /* path B: the same point within this share of the ring's radius: a ring modelled to meet is off by a
+                                              few percent of its own size at most, and the blend keeps whatever gap it had at rest */
+static const float BLEND_RING_MIN = 10;    /* a ring smaller than this (a tenth of an OBJ unit) has no scale to judge by: rounding is a tenth of it */
+static const int BLEND_RING_K = 8;         /* path B finds the ring among each piece's K vertices nearest the other piece */
+static const float BLEND_SEARCH = 0.25f;   /* ... and only within this share of the smaller piece's size */
+/* Pinch: the average of two matrices that differ by a turn of THETA about an axis through the ring shrinks the ring by cos(THETA/2) across the
+   axis (all across, for a twist about the ring's own axis, which at 180 degrees collapses it). So the blended ring's radius over its rest radius
+   says how much twist or bend a pair carries. BLEND_PINCH_MIN is how much it may shrink: 15%, a twist of about 60 degrees or a bend of about 100;
+   past that the joint reads as pinched. (Derived before measuring; it was set aside once on poses that turned out to be artifacts of jumping
+   to keyframes, and put back when the motions were played properly.) */
+static const float BLEND_PINCH_MIN = 0.85f;
+static const float BLEND_SEP_SLACK = 1.0f; /* blended, matched vertices may be this much (rounding) farther apart than at rest */
+/* Displacement: a vertex follows its partner bone by w (at most 0.5) of the way, so it moves at most w times the two bones' offset, and for a
+   ring turned about its own middle that offset is at most twice the vertex's distance L from the middle: displacement <= L. A weighted vertex is
+   within the band of the ring, so L <= (the ring's farthest vertex from its middle) + the band. More than that means the pieces don't turn about
+   the ring: they slide or swing about a far point, and blending would drag one across the other. */
 
 /* Pairs left out for good, by model: hinges and the like that are meant to show their gap. Bones are the file's numbers. */
 struct BlendSkip {
@@ -29,6 +55,7 @@ struct BlendSkip {
 };
 static const BlendSkip BLEND_SKIP[] = {
     {"M126BRAK.BIN", 16, 17, "Brachiomon's jaw: a hinge, its opening is meant to show"},
+    {"M366GIRU.BIN", 6, 7, "Guilmon's jaw: a hinge; blended, the jaw and teeth distort"},
 };
 
 /* the inverse of an affine matrix (column-major) */
@@ -51,11 +78,10 @@ static void blend_point(const float *w, const Vec3s &v, float out[3]) {
     for (int i = 0; i < 3; i++) out[i] = w[i] * v.x + w[4 + i] * v.y + w[8 + i] * v.z + w[12 + i];
 }
 
-/* the model at rest, two ways: the bind pose (each bone's keys' first frame, as the OBJ has it), where pieces that were
-   modelled to meet do so exactly, and its idle pose (its first motion's first keyframe), where they meet near enough */
+/* the model at rest, two ways: the bind pose (each bone's keys' first frame, as the OBJ has it), and its idle pose
+   (its first motion's first keyframe) */
 struct BlendRest {
     std::vector<std::array<float, 16>> bind, idle;
-    float epsBind = 1.5f, epsIdle = 1.5f; /* the nearness that counts as the same point in each */
 };
 
 static BlendRest blend_rest(const Model &m) {
@@ -63,59 +89,131 @@ static BlendRest blend_rest(const Model &m) {
     Model pose = m; /* the idle pose, without moving the model on show */
     if (!pose.motions.empty()) pose.setMotion(1);
     r.bind.resize(m.bones.size()), r.idle.resize(m.bones.size());
-    float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
     for (size_t b = 0; b < m.bones.size(); b++) {
         bind_world(m, (int)b, r.bind[b].data());
         if (pose.motions.empty()) r.idle[b] = r.bind[b];
         else memcpy(r.idle[b].data(), pose.pose[b].world, 16 * sizeof(float));
-        if (b == 0 || m.bones[b].mesh < 0) continue;
-        for (const Vec3s &v : m.meshes[m.bones[b].mesh].verts) {
-            float p[3];
-            blend_point(r.idle[b].data(), v, p);
-            for (int i = 0; i < 3; i++) lo[i] = std::min(lo[i], p[i]), hi[i] = std::max(hi[i], p[i]);
-        }
     }
-    float d = sqrtf((hi[0] - lo[0]) * (hi[0] - lo[0]) + (hi[1] - lo[1]) * (hi[1] - lo[1]) + (hi[2] - lo[2]) * (hi[2] - lo[2]));
-    r.epsIdle = g_blendEps > 0 ? g_blendEps : std::max(1.5f, d * 0.01f);
-    r.epsBind = g_blendEps > 0 ? g_blendEps : 1.5f;
     return r;
 }
 
-/* how many of A's vertices are on one of B's with the bones at WORLD, EPS apart at most */
-static int blend_count(const Model &m, const std::vector<std::array<float, 16>> &world, float eps, int a, int b) {
-    if (a < 1 || b < 1 || a >= (int)m.bones.size() || b >= (int)m.bones.size() || m.bones[a].mesh < 0 || m.bones[b].mesh < 0) return 0;
+typedef std::array<float, 3> BlendPt;
+static float blend_dist(const BlendPt &p, const BlendPt &q) {
+    return sqrtf((p[0] - q[0]) * (p[0] - q[0]) + (p[1] - q[1]) * (p[1] - q[1]) + (p[2] - q[2]) * (p[2] - q[2]));
+}
+static std::vector<BlendPt> blend_pts(const Mesh &me, const float *world) {
+    std::vector<BlendPt> out(me.verts.size());
+    for (size_t i = 0; i < me.verts.size(); i++) blend_point(world, me.verts[i], out[i].data());
+    return out;
+}
+
+/* How two bones' meshes match: which vertices of A (the lower bone) are the same point as which of B's, by what path and
+   tolerance, at what ring radius */
+struct BlendMatch {
+    bool candidate = false;           /* 3 or more vertices matched (or a ring found but with no scale: why says) */
+    char path = 0;                    /* 'A' bind pose, exact; 'B' idle pose, by the ring's own scale */
+    const std::vector<std::array<float, 16>> *world = nullptr;
+    float tol = 0, ring = 0, ringMax = 0; /* the nearness used, the ring's rms radius and its farthest vertex from the middle, in units */
+    std::vector<std::pair<int, int>> pairs; /* A's vertex, the B vertex it is on */
+    int nearA = 0, nearB = 0;         /* vertices of each within half a ring radius of the other piece: what coverage is of */
+    std::string why;                  /* set when the ring has no usable scale */
+    std::string miss;                 /* when not a candidate: how near path B came (for the diagnostic of a pair asked for) */
+};
+
+static float blend_ring(const std::vector<BlendPt> &p) { /* the radius of a ring of points: their rms distance from their middle */
+    if (p.size() < 3) return 0;
+    BlendPt c = {0, 0, 0};
+    for (const auto &q : p) c[0] += q[0], c[1] += q[1], c[2] += q[2];
+    for (float &x : c) x /= (float)p.size();
+    double s = 0;
+    for (const auto &q : p) s += (double)blend_dist(q, c) * blend_dist(q, c);
+    return (float)sqrt(s / p.size());
+}
+
+static float blend_ring_max(const std::vector<BlendPt> &p) { /* the farthest of a ring's points from their middle */
+    if (p.size() < 3) return 0;
+    BlendPt c = {0, 0, 0};
+    for (const auto &q : p) c[0] += q[0], c[1] += q[1], c[2] += q[2];
+    for (float &x : c) x /= (float)p.size();
+    float m = 0;
+    for (const auto &q : p) m = std::max(m, blend_dist(q, c));
+    return m;
+}
+
+static float blend_size(const std::vector<BlendPt> &p) { /* a piece's size: its box's diagonal */
+    if (p.empty()) return 0;
+    BlendPt lo = p[0], hi = p[0];
+    for (const auto &q : p)
+        for (int i = 0; i < 3; i++) lo[i] = std::min(lo[i], q[i]), hi[i] = std::max(hi[i], q[i]);
+    return blend_dist(lo, hi);
+}
+
+static BlendMatch blend_match(const Model &m, const BlendRest &r, int a, int b) {
+    BlendMatch mt;
+    if (a < 1 || b < 1 || a >= (int)m.bones.size() || b >= (int)m.bones.size() || m.bones[a].mesh < 0 || m.bones[b].mesh < 0) return mt;
     const Mesh &ma = m.meshes[m.bones[a].mesh], &mb = m.meshes[m.bones[b].mesh];
-    std::vector<std::array<float, 3>> pb(mb.verts.size());
-    for (size_t i = 0; i < mb.verts.size(); i++) blend_point(world[b].data(), mb.verts[i], pb[i].data());
-    int n = 0;
-    for (const Vec3s &va : ma.verts) {
-        float p[3];
-        blend_point(world[a].data(), va, p);
-        for (const auto &q : pb)
-            if (sqrtf((p[0] - q[0]) * (p[0] - q[0]) + (p[1] - q[1]) * (p[1] - q[1]) + (p[2] - q[2]) * (p[2] - q[2])) <= eps) {
-                n++;
-                break;
+    for (int path = 0; path < 2; path++) {
+        const auto &world = path ? r.idle : r.bind;
+        std::vector<BlendPt> pa = blend_pts(ma, world[a].data()), pb = blend_pts(mb, world[b].data());
+        std::vector<float> d(pa.size(), 1e30f);
+        std::vector<int> nearest(pa.size(), -1);
+        for (size_t i = 0; i < pa.size(); i++)
+            for (size_t k = 0; k < pb.size(); k++) {
+                float x = blend_dist(pa[i], pb[k]);
+                if (x < d[i]) d[i] = x, nearest[i] = (int)k;
             }
+        float tol = BLEND_TOL, ring = 0;
+        std::vector<int> pick;
+        if (path == 0) {
+            for (size_t i = 0; i < pa.size(); i++)
+                if (d[i] <= tol) pick.push_back((int)i);
+            if (pick.size() < 3) continue;
+        } else {
+            /* the ring: the K vertices of A nearest B, if near enough; its radius is the scale the tolerance comes from */
+            std::vector<int> order(pa.size());
+            for (size_t i = 0; i < order.size(); i++) order[i] = (int)i;
+            std::sort(order.begin(), order.end(), [&](int x, int y) { return d[x] < d[y] || (d[x] == d[y] && x < y); });
+            float search = BLEND_SEARCH * std::min(blend_size(pa), blend_size(pb));
+            std::vector<BlendPt> cand;
+            for (size_t i = 0; i < order.size() && (int)i < BLEND_RING_K; i++)
+                if (d[order[i]] <= search) cand.push_back(pa[order[i]]);
+            if (cand.size() < 3) continue;
+            ring = blend_ring(cand);
+            if (ring < BLEND_RING_MIN) {
+                mt.candidate = true, mt.path = 'B', mt.world = &world, mt.ring = ring;
+                mt.why = "no robust local scale: the ring is " + std::to_string((int)ring) + " units across, under " + std::to_string((int)BLEND_RING_MIN);
+                return mt;
+            }
+            tol = std::max(BLEND_TOL, BLEND_RING_TOL * ring);
+            for (size_t i = 0; i < pa.size(); i++)
+                if (d[i] <= tol) pick.push_back((int)i);
+            if (pick.size() < 3) {
+                char buf[200];
+                snprintf(buf, sizeof buf, "the 3 nearest vertices are up to %.0f units apart in the idle pose; path B allows %.1f (%.0f%% of the ring's %.0f)", d[order[2]], tol,
+                         100 * BLEND_RING_TOL, ring);
+                mt.miss = buf;
+                continue;
+            }
+        }
+        mt.candidate = true, mt.path = path ? 'B' : 'A', mt.world = &world, mt.tol = tol;
+        for (int i : pick) mt.pairs.push_back({i, nearest[i]});
+        std::vector<BlendPt> pm;
+        for (int i : pick) pm.push_back(pa[i]);
+        mt.ring = blend_ring(pm), mt.ringMax = blend_ring_max(pm);
+        if (mt.ring < BLEND_RING_MIN) {
+            mt.why = "no robust local scale: the ring is " + std::to_string((int)mt.ring) + " units across, under " + std::to_string((int)BLEND_RING_MIN);
+            return mt;
+        }
+        float half = 0.5f * mt.ring;
+        for (size_t i = 0; i < pa.size(); i++) mt.nearA += d[i] <= half;
+        for (size_t k = 0; k < pb.size(); k++) {
+            float x = 1e30f;
+            for (const auto &q : pa) x = std::min(x, blend_dist(pb[k], q));
+            mt.nearB += x <= half;
+        }
+        return mt;
     }
-    return n;
-}
-
-/* the rest a pair meets in: the one with more of its vertices on one another (the bind pose if they tie) */
-static const std::vector<std::array<float, 16>> &blend_pick(const Model &m, const BlendRest &r, int a, int b, float &eps, int &count,
-                                                           int *nBind = nullptr, int *nIdle = nullptr) {
-    int nb = blend_count(m, r.bind, r.epsBind, a, b), ni = blend_count(m, r.idle, r.epsIdle, a, b);
-    if (nBind) *nBind = nb;
-    if (nIdle) *nIdle = ni;
-    if (nb >= ni) return count = nb, eps = r.epsBind, r.bind;
-    return count = ni, eps = r.epsIdle, r.idle;
-}
-
-/* DETECTION: how many of A's vertices are on one of B's at rest; a pair needs 3 to be eligible */
-static int blend_meets(const Model &m, const BlendRest &r, int a, int b) {
-    float eps;
-    int n;
-    blend_pick(m, r, a, b, eps, n);
-    return n;
+    return mt;
 }
 
 /* A bone's blending: up to 3 partners, and for each vertex of its mesh the weight of each */
@@ -127,16 +225,23 @@ struct BoneBlend {
 };
 
 struct BlendPair {
-    int a = 0, b = 0, meets = 0;        /* a < b */
-    const char *state = "eligible";     /* eligible (found, not asked for), enabled, excluded */
-    /* what the detection saw, for the audit */
-    int meetsBind = 0, meetsIdle = 0;   /* vertices of a on b's in each rest pose */
-    const char *rest = "";              /* the pose chosen: bind, or idle */
-    float eps = 0;                      /* the nearness used in it */
-    std::vector<std::pair<int, int>> matched; /* a's vertices on b's at rest, with the vertex of b they are on (enabled pairs) */
-    int weightedA = 0, weightedB = 0;   /* vertices that follow the other bone at all */
-    int contactA = 0, contactB = 0;     /* ... and those on the meeting points (weight 0.5) */
-    int vertsA = 0, vertsB = 0;
+    int a = 0, b = 0;                   /* a < b */
+    int meets = 0;                      /* matched vertices */
+    /* the state: eligible (matched, no verdict yet), validated, rejected (why), enabled (asked for and validated), excluded */
+    const char *state = "eligible";
+    std::string why;                    /* the reason, for rejected */
+    /* matching */
+    char path = 0;
+    float tol = 0, ring = 0, ringMax = 0;
+    std::vector<std::pair<int, int>> matched;
+    int nearA = 0, nearB = 0;
+    /* what the pair was given, once its weights are built */
+    int weightedA = 0, weightedB = 0, contactA = 0, contactB = 0, vertsA = 0, vertsB = 0;
+    int sharedMatched = 0;              /* matched pairs whose two vertices both follow the other bone, with the same weight */
+    /* the verdict, over the motions, in units */
+    bool judged = false;
+    float sepRigid = 0, sepBlended = 0, disp = 0, pinch = 1; int pinchMo = 0, pinchKey = 0; /* pinch: the smallest the blended ring gets, as a share of its rest radius */
+    int dispMo = 0, dispKey = 0;
 };
 
 struct BlendSet {
@@ -162,16 +267,16 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
     out = BlendSet();
     out.bone.resize(m.bones.size());
     BlendRest rest = blend_rest(m);
-    /* DETECTION: every parent and child that have meshes and meet */
-    std::set<std::pair<int, int>> eligible;
-    std::map<std::pair<int, int>, int> meets;
+    /* MATCHING: every parent and child that have meshes */
+    std::map<std::pair<int, int>, BlendMatch> match;
+    std::map<std::pair<int, int>, std::string> missed; /* near misses of path B, for the notes */
     for (size_t b = 1; b < m.bones.size(); b++) {
         int p = m.bones[b].parent;
         if (p < 1) continue;
-        float eps;
-        int n, nb, ni;
-        blend_pick(m, rest, (int)b, p, eps, n, &nb, &ni);
-        if (n >= 3) eligible.insert(blend_key((int)b, p)), meets[blend_key((int)b, p)] = n;
+        auto key = blend_key((int)b, p);
+        BlendMatch mt = blend_match(m, rest, key.first, key.second);
+        if (mt.candidate) match[key] = std::move(mt);
+        else if (!mt.miss.empty()) missed[key] = mt.miss;
     }
     /* ACTIVATION and EXCLUSION */
     std::set<std::pair<int, int>> want, skip;
@@ -180,78 +285,65 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
     } else {
         for (const auto &p : g_blendExtra) want.insert(blend_key(p.first, p.second));
         if (m.name == "M366GIRU.BIN") want.insert({3, 4}); /* Guilmon's wrist, the prototype's */
-        if (g_blendAll) want.insert(eligible.begin(), eligible.end());
-        for (const auto &p : g_blendSkip) skip.insert(blend_key(p.first, p.second));
-        for (const BlendSkip &s : BLEND_SKIP)
-            if (m.name == s.model) skip.insert(blend_key(s.a, s.b));
+        if (g_blendAll)
+            for (const auto &kv : match) want.insert(kv.first);
     }
-    for (const auto &p : eligible) {
+    for (const auto &p : g_blendSkip) skip.insert(blend_key(p.first, p.second));
+    for (const BlendSkip &s : BLEND_SKIP)
+        if (m.name == s.model) skip.insert(blend_key(s.a, s.b));
+    for (const auto &kv : match) {
+        const BlendMatch &mt = kv.second;
         BlendPair bp;
-        bp.a = p.first, bp.b = p.second, bp.meets = meets[p];
-        {
-            float e2;
-            int c2;
-            blend_pick(m, rest, bp.a, bp.b, e2, c2, &bp.meetsBind, &bp.meetsIdle);
-            bp.rest = bp.meetsBind >= bp.meetsIdle ? "bind" : "idle";
-            bp.eps = e2;
-        }
-        bp.state = skip.count(p) ? "excluded" : want.count(p) ? "enabled" : "eligible";
-        out.pairs.push_back(bp);
+        bp.a = kv.first.first, bp.b = kv.first.second, bp.meets = (int)mt.pairs.size();
+        bp.path = mt.path, bp.tol = mt.tol, bp.ring = mt.ring, bp.ringMax = mt.ringMax, bp.matched = mt.pairs, bp.nearA = mt.nearA, bp.nearB = mt.nearB;
+        bp.why = mt.why;
+        if (!mt.why.empty()) bp.state = "rejected";
+        out.pairs.push_back(std::move(bp));
     }
     for (const auto &p : want)
-        if (!eligible.count(p) && !skip.count(p))
-            out.notes.push_back("pair " + std::to_string(p.first) + "," + std::to_string(p.second) + " was asked for but isn't eligible (fewer than 3 vertices meet)");
+        if (!match.count(p) && !skip.count(p))
+            out.notes.push_back("pair " + std::to_string(p.first) + "," + std::to_string(p.second) + " was asked for but isn't eligible (fewer than 3 vertices match" +
+                                (missed.count(p) ? ": " + missed[p] : std::string()) + ")");
 
-    /* each enabled pair's weights, its two bones' vertices */
+    /* each pair's weights, and its verdict: needed for the pairs about to be drawn, and for all with --blend-audit */
     struct PairW {
-        int a, b;
+        int pair; /* index in out.pairs */
         std::vector<float> wa, wb;
         std::vector<int> contactA, contactB; /* the vertices on the pieces' meeting points */
         float ab[16], ba[16];                /* A's rest space to B's, and back */
     };
     std::vector<PairW> pw;
-    for (BlendPair &bp : out.pairs) {
-        if (strcmp(bp.state, "enabled")) continue;
-        int a = bp.a, b = bp.b;
-        float EPS;
-        int count;
-        const std::vector<std::array<float, 16>> &world = blend_pick(m, rest, a, b, EPS, count);
-        const float *Ra = world[a].data(), *Rb = world[b].data();
-        float Rai[16], Rbi[16];
-        if (!blend_inverse(Ra, Rai) || !blend_inverse(Rb, Rbi)) continue;
-        const Mesh &ma = m.meshes[m.bones[a].mesh], &mb = m.meshes[m.bones[b].mesh];
-        std::vector<std::array<float, 3>> pa(ma.verts.size()), pb(mb.verts.size());
-        for (size_t i = 0; i < ma.verts.size(); i++) blend_point(Ra, ma.verts[i], pa[i].data());
-        for (size_t i = 0; i < mb.verts.size(); i++) blend_point(Rb, mb.verts[i], pb[i].data());
-        auto dist = [](const std::array<float, 3> &p, const std::array<float, 3> &q) {
-            return sqrtf((p[0] - q[0]) * (p[0] - q[0]) + (p[1] - q[1]) * (p[1] - q[1]) + (p[2] - q[2]) * (p[2] - q[2]));
-        };
-        PairW w;
-        w.a = a, w.b = b;
-        std::vector<std::array<float, 3>> meet; /* where the pieces meet */
-        for (size_t i = 0; i < pa.size(); i++)
-            for (size_t k = 0; k < pb.size(); k++)
-                if (dist(pa[i], pb[k]) <= EPS) {
-                    meet.push_back(pa[i]);
-                    break;
-                }
-        if (meet.size() < 3) continue;
-        for (size_t i = 0; i < pa.size(); i++) { /* a's vertices on b's, and the vertex of b each is on */
-            int best = -1;
-            float bd = 1e30f;
-            for (size_t k = 0; k < pb.size(); k++) {
-                float d = dist(pa[i], pb[k]);
-                if (d <= EPS && d < bd) bd = d, best = (int)k;
-            }
-            if (best >= 0) bp.matched.push_back({(int)i, best});
+    std::vector<int> judge; /* indices into pw to give a verdict */
+    for (size_t k = 0; k < out.pairs.size(); k++) {
+        BlendPair &bp = out.pairs[k];
+        auto key = blend_key(bp.a, bp.b);
+        bool wanted = want.count(key) && !skip.count(key);
+        if (!bp.why.empty()) {
+            if (wanted) out.notes.push_back("pair " + std::to_string(bp.a) + "," + std::to_string(bp.b) + " was asked for but is rejected: " + bp.why);
+            continue;
         }
+        if (!wanted && !g_blendValidateAll && !only) continue;
+        const BlendMatch &mt = match[key];
+        const std::vector<std::array<float, 16>> &world = *mt.world;
+        const float *Ra = world[bp.a].data(), *Rb = world[bp.b].data();
+        float Rai[16], Rbi[16];
+        if (!blend_inverse(Ra, Rai) || !blend_inverse(Rb, Rbi)) {
+            bp.state = "rejected", bp.why = "a bone's matrix can't be inverted";
+            continue;
+        }
+        const Mesh &ma = m.meshes[m.bones[bp.a].mesh], &mb = m.meshes[m.bones[bp.b].mesh];
+        std::vector<BlendPt> pa = blend_pts(ma, Ra), pb = blend_pts(mb, Rb);
+        PairW w;
+        w.pair = (int)k;
+        std::vector<BlendPt> meet; /* where the pieces meet */
+        for (const auto &pr : bp.matched) meet.push_back(pa[pr.first]);
         /* a vertex's w: 0.5 on the meeting points, a smooth fall to 0 at the band's end */
-        auto weights = [&](const std::vector<std::array<float, 3>> &p, std::vector<float> &wt, std::vector<int> &contact) {
+        auto weights = [&](const std::vector<BlendPt> &p, std::vector<float> &wt, std::vector<int> &contact) {
             wt.assign(p.size(), 0);
             for (size_t i = 0; i < p.size(); i++) {
                 float d = 1e30f;
-                for (const auto &q : meet) d = std::min(d, dist(p[i], q));
-                if (d <= EPS) {
+                for (const auto &q : meet) d = std::min(d, blend_dist(p[i], q));
+                if (d <= mt.tol) {
                     wt[i] = 0.5f;
                     contact.push_back((int)i);
                 } else {
@@ -265,20 +357,98 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
         bp.contactA = (int)w.contactA.size(), bp.contactB = (int)w.contactB.size();
         for (float x : w.wa) bp.weightedA += x > 0;
         for (float x : w.wb) bp.weightedB += x > 0;
+        for (const auto &pr : bp.matched) bp.sharedMatched += w.wa[pr.first] > 0 && fabsf(w.wa[pr.first] - w.wb[pr.second]) < 1e-4f;
         M4 ab = mul(from(Rbi), from(Ra)), ba = mul(from(Rai), from(Rb));
         memcpy(w.ab, ab.m, sizeof w.ab), memcpy(w.ba, ba.m, sizeof w.ba);
+        judge.push_back((int)pw.size());
         pw.push_back(std::move(w));
     }
+    /* VERDICT: each of those pairs alone, over every motion, played from its start as the game plays it: a keyframe that blends two frames
+       needs the one before it, so poses reached by jumping would be poses the game never shows. Every 4th keyframe is measured. */
+    if (!judge.empty()) {
+        Model pm = m;
+        for (size_t mo = 1; mo <= pm.motions.size(); mo++) {
+            pm.setMotion((int)mo);
+            int n = pm.keyframeCount;
+            for (int key = 0; key < std::max(n, 1) && !pm.motionDone; key++, pm.advance(1)) {
+                pm.evaluate();
+                if (key % 4) continue;
+                for (int ji : judge) {
+                    const PairW &w = pw[ji];
+                    BlendPair &bp = out.pairs[w.pair];
+                    if (!pm.pose[bp.a].visible || !pm.pose[bp.b].visible) continue;
+                    const Mesh &ma = m.meshes[m.bones[bp.a].mesh], &mb = m.meshes[m.bones[bp.b].mesh];
+                    M4 mab = mul(from(pm.pose[bp.b].world), from(w.ab)), mba = mul(from(pm.pose[bp.a].world), from(w.ba));
+                    auto place = [&](const Vec3s &v, const float *own, const M4 &other, float wt, BlendPt &rigid) {
+                        BlendPt p, q, r;
+                        blend_point(own, v, p.data()), blend_point(other.m, v, q.data());
+                        for (int i = 0; i < 3; i++) r[i] = p[i] + (q[i] - p[i]) * wt;
+                        rigid = p;
+                        return r;
+                    };
+                    std::vector<BlendPt> ring;
+                    for (const auto &pr : bp.matched) {
+                        BlendPt ra, rb;
+                        BlendPt xa = place(ma.verts[pr.first], pm.pose[bp.a].world, mab, w.wa[pr.first], ra);
+                        BlendPt xb = place(mb.verts[pr.second], pm.pose[bp.b].world, mba, w.wb[pr.second], rb);
+                        bp.sepRigid = std::max(bp.sepRigid, blend_dist(ra, rb)), bp.sepBlended = std::max(bp.sepBlended, blend_dist(xa, xb));
+                        ring.push_back(xa);
+                    }
+                    if (bp.ring > 0 && blend_ring(ring) / bp.ring < bp.pinch) bp.pinch = blend_ring(ring) / bp.ring, bp.pinchMo = (int)mo, bp.pinchKey = key;
+                    for (int side = 0; side < 2; side++) {
+                        const Mesh &me = side ? mb : ma;
+                        const std::vector<float> &wt = side ? w.wb : w.wa;
+                        for (size_t i = 0; i < wt.size(); i++) {
+                            if (wt[i] <= 0) continue;
+                            BlendPt rg;
+                            BlendPt bl = place(me.verts[i], pm.pose[side ? bp.b : bp.a].world, side ? mba : mab, wt[i], rg);
+                            float d = blend_dist(rg, bl);
+                            if (d > bp.disp) bp.disp = d, bp.dispMo = (int)mo, bp.dispKey = key;
+                        }
+                    }
+                }
+            }
+        }
+        for (int ji : judge) {
+            BlendPair &bp = out.pairs[pw[ji].pair];
+            bp.judged = true;
+            char buf[200];
+            if (bp.sepBlended > bp.tol + BLEND_SEP_SLACK) {
+                snprintf(buf, sizeof buf, "matched vertices end up %.0f units apart blended, more than their %.1f at rest (+%.0f rounding)", bp.sepBlended, bp.tol, BLEND_SEP_SLACK);
+                bp.state = "rejected", bp.why = buf;
+            } else if (bp.pinch < BLEND_PINCH_MIN) {
+                snprintf(buf, sizeof buf, "the ring pinches to %.0f%% of its radius (a twist or bend an average of two matrices can't carry; the least allowed is %.0f%%)", 100 * bp.pinch,
+                         100 * BLEND_PINCH_MIN);
+                bp.state = "rejected", bp.why = buf;
+            } else if (bp.disp > bp.ringMax + std::max(g_blendBand, 1.0f) + BLEND_SEP_SLACK) {
+                snprintf(buf, sizeof buf, "a vertex moves %.0f units, more than a ring turned about its middle could carry it (%.0f: its radius %.0f plus the band)", bp.disp,
+                         bp.ringMax + std::max(g_blendBand, 1.0f), bp.ringMax);
+                bp.state = "rejected", bp.why = buf;
+            } else {
+                bp.state = "validated";
+            }
+        }
+    }
+    /* ACTIVATION again: only what was asked for and validated; EXCLUSION wins */
+    for (BlendPair &bp : out.pairs) {
+        auto key = blend_key(bp.a, bp.b);
+        if (skip.count(key)) bp.state = "excluded";
+        else if (!strcmp(bp.state, "validated") && want.count(key)) bp.state = "enabled";
+        else if (!strcmp(bp.state, "rejected") && want.count(key) && bp.judged)
+            out.notes.push_back("pair " + std::to_string(bp.a) + "," + std::to_string(bp.b) + " was asked for but is rejected: " + bp.why);
+    }
 
-    /* each bone's partners, in bone order: the same however the pairs were asked for */
+    /* each enabled pair's partners, in bone order: the same however the pairs were asked for */
     struct Slot {
         int partner, pair;
         bool isA;
     };
     std::vector<std::vector<Slot>> slots(m.bones.size());
     for (size_t k = 0; k < pw.size(); k++) {
-        slots[pw[k].a].push_back({pw[k].b, (int)k, true});
-        slots[pw[k].b].push_back({pw[k].a, (int)k, false});
+        const BlendPair &bp = out.pairs[pw[k].pair];
+        if (strcmp(bp.state, "enabled")) continue;
+        slots[bp.a].push_back({bp.b, (int)k, true});
+        slots[bp.b].push_back({bp.a, (int)k, false});
     }
     for (size_t b = 1; b < m.bones.size(); b++) {
         std::vector<Slot> &sl = slots[b];
@@ -312,24 +482,27 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
         }
     }
 
-    /* CONFLICTS: a pair's meeting vertices that also carry another pair's weight */
-    for (size_t k = 0; k < pw.size(); k++)
+    /* CONFLICTS: an enabled pair's meeting vertices that also carry another pair's weight */
+    for (size_t k = 0; k < pw.size(); k++) {
+        const BlendPair &bp = out.pairs[pw[k].pair];
+        if (strcmp(bp.state, "enabled")) continue;
         for (int side = 0; side < 2; side++) {
-            int bone = side ? pw[k].b : pw[k].a;
+            int bone = side ? bp.b : bp.a;
             const std::vector<int> &contact = side ? pw[k].contactB : pw[k].contactA;
             const BoneBlend &bb = out.bone[bone];
             for (int s = 0; s < bb.n; s++) {
-                if (bb.partner[s] == (side ? pw[k].a : pw[k].b)) continue; /* this pair's own slot */
+                if (bb.partner[s] == (side ? bp.a : bp.b)) continue; /* this pair's own slot */
                 int hit = 0;
                 for (int i : contact)
                     if (bb.w[i][s] > 1e-3f) hit++;
                 if (hit)
-                    out.notes.push_back("conflict: pair " + std::to_string(pw[k].a) + "," + std::to_string(pw[k].b) + " has " + std::to_string(hit) +
+                    out.notes.push_back("conflict: pair " + std::to_string(bp.a) + "," + std::to_string(bp.b) + " has " + std::to_string(hit) +
                                         " meeting vertices of bone " + std::to_string(bone) + " that also follow bone " + std::to_string(bb.partner[s]) +
                                         " (pair " + std::to_string(std::min(bone, bb.partner[s])) + "," + std::to_string(std::max(bone, bb.partner[s])) +
                                         "): they won't stay exactly on one another");
             }
         }
+    }
     if (out.scaled) out.notes.push_back(std::to_string(out.scaled) + " vertices' weights came to more than 1 and were scaled");
     std::sort(out.notes.begin(), out.notes.end());
 }

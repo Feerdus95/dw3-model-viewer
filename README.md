@@ -298,11 +298,10 @@ with changes you haven't saved, quitting, or reverting a stage asks first.
                                           motion's keyframe, through a fighter's
                                           camera, with a stage's lights
           [--frame A,B] [--only A,B] [--zoom F] [--yaw DEG] [--wire]
-          [--blend] [--weld A,B] [--weld-band R] [--weld-eps E]
+          [--blend] [--weld A,B] [--weld-all] [--weld-skip A,B] [--weld-band R]
                                           draws the joints that can be blended (see below)
                                           blended; --weld asks for bones A and B on any model,
-                                          R is the band in game units (60), E how near
-                                          two vertices are to be the same point (1% of the model)
+                                          R is the band in game units (60)
                                           a close-up: frames bones A and B (--only
                                           draws just those), zoomed F times, seen from
                                           DEG degrees around, as a wireframe
@@ -330,24 +329,28 @@ together in every pose. Vertices on the meeting points weigh 0.5 for each bone, 
 It only changes how the viewer draws; the model's data is the game's; `--seams --blend` measures it (`--blend` places those
 vertices blended).
 
-Four things are kept apart, and nothing is blended unless asked for:
+Five things are kept apart, and nothing is blended unless asked for (the details and the tolerances, with their reasons, are at the top of
+`src/modules/joint_blend.inc`):
 
-- **Eligible**: a parent and child bone with 3 or more of one's vertices on the other's at rest (the bind pose, or the idle pose
-  within 1% of the model's size). `--seams` lists them in its `blend` column.
-- **Enabled**: only the pairs asked for: `--weld A,B` (repeat it), `--weld-all` (every eligible pair), and Guilmon's wrist (4,3),
-  built in. Asking for a pair that isn't eligible is reported, not forced.
-- **Excluded**: pairs left out, which wins over enabled: `--weld-skip A,B` (repeat it), and `BLEND_SKIP` in
-  `src/modules/joint_blend.inc` for good (Brachiomon's jaw, 16 and 17, a hinge whose opening is meant to show). Bones are the
-  file's numbers; `--seams` shows each pair's state: eligible, enabled or excluded.
-- **Validated or rejected** (`--blend-audit` only; it never decides what is drawn): a pair built alone whose matched vertices stay
-  within 0.5% of the model's size of one another blended, whose weights agree across each match, and whose largest displacement is
-  under 15%; otherwise rejected, with the reason. Pairs whose vertices meet exactly at the bind pose validate (290 of 291 in the
-  game's character models); pairs matched only loosely at the idle pose mostly don't (307 of 1,509), so being eligible is not a
-  reason to enable one.
-- **Conflicts**: a bone can be in up to 3 pairs. Each vertex keeps one weight per partner bone (partners in bone order, so asking
-  for the pairs in another order changes nothing), the weights are added and scaled to 1 if they pass it. Where one pair's meeting
-  vertices carry another pair's weight too the pieces stop staying exactly on one another; that is printed (`--seams`, the
-  tooltip of Blend joint), never settled by which pair came last. More than 3 pairs on a bone: the first 3 by partner are used, and it says so.
+- **Matching**: which vertices of a parent and child bone are the same point. *Path A*: vertices that coincide in the bind pose, within
+  1.5 units (the data is integers; the rotations' float rounding moves a vertex by under one). *Path B*, only when A finds fewer than 3:
+  the idle pose, within 5% of the ring's own radius (never a share of the whole model; a ring under 10 units across is rejected as having no
+  scale). A pair with 3 matched vertices is **eligible**. `--seams` lists them in its `blend` column.
+- **Verdict** (built in; `--blend-audit` prints it): the pair alone is run over every motion, played from its start as the game plays it.
+  It is **validated** if its matched vertices never end up farther apart blended than at rest, no vertex moves farther than a ring turned
+  about its middle could carry it, and the blended ring never shrinks below 85% of its radius (a twist of about 60 degrees); otherwise
+  **rejected**, with the reason. A pair that is not validated is never drawn blended.
+- **Activation**: only the pairs asked for, and validated: `--weld A,B` (repeat it), `--weld-all` (every validated pair), and Guilmon's wrist
+  (4,3), built in. Asking for a pair that isn't eligible or is rejected is reported with why, not forced.
+- **Exclusion**, which wins over everything: `--weld-skip A,B` (repeat it), and `BLEND_SKIP` in `joint_blend.inc` for good (the jaws of
+  Brachiomon and Guilmon: hinges whose opening is meant to show). Bones are the file's numbers; `--seams` and `--blend-audit` show each
+  pair's state: eligible, validated, rejected, enabled or excluded.
+- **Conflicts**: a bone can be in up to 3 pairs. Each vertex keeps one weight per partner bone (partners in bone order, so asking for the
+  pairs in another order changes nothing), the weights are added and scaled to 1 if they pass it. Where one pair's meeting vertices carry
+  another pair's weight too the pieces stop staying exactly on one another; that is printed, never settled by which pair came last.
+
+The report's `legacy-drift` is the separation of the 64 nearest vertex pairs at the idle pose, which are not always the vertices blending
+matched; `--blend-audit` measures the matched ones, and says how many of the legacy ones they are.
 
 By default `data/` is the one picked with **File > Change the data folder...** (kept in `data_dir.txt`), or next to the exe, or next to its `build` folder.
 
