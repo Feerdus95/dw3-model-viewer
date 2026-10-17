@@ -307,7 +307,7 @@ with changes you haven't saved, quitting, or reverting a stage asks first.
 
 **`--seams`** is a diagnostic: it reads the models and changes nothing. For every joint it classes how the two pieces meet at rest
 (coincident, overlapping, a gap, floating) and how far they drift over every motion, and it measures the **open rims**: edges only
-one polygon uses, near the other piece, and how far outside the other piece's surface they end up in each pose, as a share of the
+one polygon uses, near the other piece, and how far outside the other piece they end up in each pose (a point inside its closed volume is hidden, and where its mesh isn't closed the answer is kept apart as "unsure"), as a share of the
 model's size, with the motion and keyframe of the worst pose. These numbers find *candidates*: a rim that leaves the other piece's
 surface isn't necessarily a visible defect (an end meant to be open, an effect's pieces, a rim hidden by the camera), so look at the
 pose before believing it. Guilmon's wrist (bone 3, the forearm, and bone 4, the glove) is the reference case:

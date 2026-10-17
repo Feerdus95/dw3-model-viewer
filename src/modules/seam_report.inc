@@ -37,6 +37,32 @@ static SeamPt seam_closest(const SeamPt &p, const SeamPt &a, const SeamPt &b, co
     return seam_mad(seam_mad(a, ab, vb * den), ac, vc * den);
 }
 
+/* how many of three rays from P (almost along x, y and z) cross the triangles an odd number of times: 3 inside the
+   volume they close, 0 outside it, between them the mesh isn't closed there or P is on its skin (Moller-Trumbore) */
+static int seam_inside(const SeamPt &p, const std::vector<std::array<int, 3>> &tris, const std::vector<SeamPt> &w) {
+    static const SeamPt dirs[3] = {{1, 0.0137f, 0.0071f}, {0.0093f, 1, 0.0151f}, {0.0121f, 0.0057f, 1}};
+    int votes = 0;
+    for (const SeamPt &d : dirs) {
+        int hits = 0;
+        for (const auto &t : tris) {
+            const SeamPt &a = w[t[0]];
+            SeamPt e1 = seam_sub(w[t[1]], a), e2 = seam_sub(w[t[2]], a);
+            SeamPt h{d.y * e2.z - d.z * e2.y, d.z * e2.x - d.x * e2.z, d.x * e2.y - d.y * e2.x};
+            float det = seam_dot(e1, h);
+            if (fabsf(det) < 1e-9f) continue;
+            SeamPt s = seam_sub(p, a);
+            float u = seam_dot(s, h) / det;
+            if (u < 0 || u > 1) continue;
+            SeamPt q{s.y * e1.z - s.z * e1.y, s.z * e1.x - s.x * e1.z, s.x * e1.y - s.y * e1.x};
+            float v = seam_dot(d, q) / det;
+            if (v < 0 || u + v > 1) continue;
+            hits += seam_dot(e2, q) / det > 0;
+        }
+        votes += hits & 1;
+    }
+    return votes;
+}
+
 /* a mesh's triangles, and which of its vertices lie on an open rim (an edge only one polygon uses; vertices at the same
    place count as one, so a split along a UV seam isn't a rim) */
 struct SeamMesh {
@@ -72,7 +98,7 @@ struct SeamJoint {
     /* open-rim vertices of one piece (0 the child's, 1 the parent's) near the other's surface at rest: how far outside that
        surface they get over the poses, as part of the model's size */
     std::vector<int> rimV[2];
-    float rimExp[2] = {0, 0};
+    float rimExp[2] = {0, 0}, rimAmb[2] = {0, 0}; /* outside the other piece / unsure (its mesh isn't closed there) */
     int rimMotion = 0, rimKey = 0;
     std::string model;
     const char *cls = "";
@@ -224,28 +250,17 @@ static int check_seams(const std::string &only) {
                         if (j.rimV[s].empty() || !m.pose[A].visible || !m.pose[B].visible) continue;
                         const std::vector<SeamPt> &wa = wvOf(A), &wb = wvOf(B);
                         const SeamMesh &mb = seam_mesh(m.bones[B].mesh);
-                        const Mesh &bm = m.meshes[m.bones[B].mesh];
-                        const float *bw = m.pose[B].world;
                         for (int i : j.rimV[s]) {
                             float best = 1e30f;
-                            int bt = 0;
-                            SeamPt bc{};
                             for (size_t t = 0; t < mb.tris.size(); t++) {
                                 SeamPt c = seam_closest(wa[i], wb[mb.tris[t][0]], wb[mb.tris[t][1]], wb[mb.tris[t][2]]);
                                 float d = seam_dist(wa[i], c);
-                                if (d < best) best = d, bt = (int)t, bc = c;
+                                if (d < best) best = d;
                             }
-                            float out = best; /* without normals, apart in any direction counts */
-                            if (bm.normals.size() == bm.verts.size()) { /* only outside the surface shows */
-                                SeamPt n{0, 0, 0};
-                                for (int k = 0; k < 3; k++) {
-                                    const Vec3s &v = bm.normals[mb.tris[bt][k]];
-                                    n.x += bw[0] * v.x + bw[4] * v.y + bw[8] * v.z, n.y += bw[1] * v.x + bw[5] * v.y + bw[9] * v.z,
-                                    n.z += bw[2] * v.x + bw[6] * v.y + bw[10] * v.z;
-                                }
-                                out = seam_dot(seam_sub(wa[i], bc), n) > 0 ? best : 0;
-                            }
-                            if (out / D > j.rimExp[s]) j.rimExp[s] = out / D, j.rimMotion = (int)mo, j.rimKey = k;
+                            int in = seam_inside(wa[i], mb.tris, wb); /* hidden inside the other piece: no exposure */
+                            if (in == 3) continue;
+                            if (in == 0 && best / D > j.rimExp[s]) j.rimExp[s] = best / D, j.rimMotion = (int)mo, j.rimKey = k;
+                            if (in != 0) j.rimAmb[s] = std::max(j.rimAmb[s], best / D);
                         }
                     }
                     if (m.pose[j.bone].visible && m.pose[j.parent].visible) {
@@ -271,10 +286,10 @@ static int check_seams(const std::string &only) {
         for (SeamJoint &j : js) all.push_back(std::move(j));
     }
     for (const SeamJoint &j : all)
-        printf("%04d %-13s b%-3d <- b%-3d %-4s pairs %3d/%-3d cover %3.0f%% gap %5.2f%% drift %6.2f%% normals %5.1f deg  apart %3d%% of poses, up to %5.1f%% (motion %d key %d)  rim child %2d: %5.2f%% parent %2d: %5.2f%% (motion %d key %d)\n", j.fid,
+        printf("%04d %-13s b%-3d <- b%-3d %-4s pairs %3d/%-3d cover %3.0f%% gap %5.2f%% drift %6.2f%% normals %5.1f deg  apart %3d%% of poses, up to %5.1f%% (motion %d key %d)  rim child %2d: %5.2f%% parent %2d: %5.2f%% (motion %d key %d) unsure %4.2f%% %4.2f%%\n", j.fid,
                j.model.c_str(), j.bone, j.parent, j.cls, j.pairs, j.verts, j.cover * 100, j.minGap * 100, j.drift * 100, j.normalDeg,
                j.poses ? j.apart * 100 / j.poses : 0, j.maxSep * 100, j.sepMotion, j.sepKey, (int)j.rimV[0].size(), j.rimExp[0] * 100,
-               (int)j.rimV[1].size(), j.rimExp[1] * 100, j.rimMotion, j.rimKey);
+               (int)j.rimV[1].size(), j.rimExp[1] * 100, j.rimMotion, j.rimKey, j.rimAmb[0] * 100, j.rimAmb[1] * 100);
     /* the summary */
     const char *names[] = {"COIN", "OVER", "GAP", "FAR"};
     printf("\n%d models (%d skipped), %d joints\n", models, skipped, (int)all.size());
