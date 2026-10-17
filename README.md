@@ -297,6 +297,23 @@ with changes you haven't saved, quitting, or reverting a stage asks first.
                                           draws one frame to a BMP and exits: at a
                                           motion's keyframe, through a fighter's
                                           camera, with a stage's lights
+          [--frame A,B] [--only A,B] [--zoom F] [--yaw DEG] [--wire]
+                                          a close-up: frames bones A and B (--only
+                                          draws just those), zoomed F times, seen from
+                                          DEG degrees around, as a wireframe
+    dw3mv --seams [file.bin]              a read-only report of how each bone's mesh
+                                          meets its parent's (see below); with a file,
+                                          just that one, for a mod's
+
+**`--seams`** is a diagnostic: it reads the models and changes nothing. For every joint it classes how the two pieces meet at rest
+(coincident, overlapping, a gap, floating) and how far they drift over every motion, and it measures the **open rims**: edges only
+one polygon uses, near the other piece, and how far outside the other piece's surface they end up in each pose, as a share of the
+model's size, with the motion and keyframe of the worst pose. These numbers find *candidates*: a rim that leaves the other piece's
+surface isn't necessarily a visible defect (an end meant to be open, an effect's pieces, a rim hidden by the camera), so look at the
+pose before believing it. Guilmon's wrist (bone 3, the forearm, and bone 4, the glove) is the reference case:
+
+    dw3mv --seams | findstr "M366GIRU"
+    dw3mv --shot wrist.bmp --motion 17 --key 42 --only 3,4 --yaw 30 --zoom 1.5 data/files/356.bin
 
 By default `data/` is the one picked with **File > Change the data folder...** (kept in `data_dir.txt`), or next to the exe, or next to its `build` folder.
 

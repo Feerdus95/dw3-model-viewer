@@ -2,6 +2,11 @@ int main(int argc, char **argv) {
     std::string shot, open_path, data;
     std::string start_obj; /* an OBJ to import once the model is open */
     int shot_motion = 1, shot_key = 0, shot_cam = -1, shot_stage = 0, shot_fighter = 0;
+    std::vector<int> shot_frame; /* bones the picture is framed on */
+    std::vector<int> shot_only;  /* the only bones drawn */
+    float shot_zoom = 1;
+    bool shot_wire = false;
+    float shot_yaw = 1e9f;       /* degrees, around the model */
     bool check = false, users = false, stages = false, seams = false;
     int effect = -1;
     for (int i = 1; i < argc; i++) {
@@ -10,6 +15,13 @@ int main(int argc, char **argv) {
         else if (a == "--motion" && i + 1 < argc) shot_motion = atoi(argv[++i]);
         else if (a == "--key" && i + 1 < argc) shot_key = atoi(argv[++i]);
         else if (a == "--cam" && i + 1 < argc) shot_cam = atoi(argv[++i]);
+        else if (a == "--frame" && i + 1 < argc)
+            for (const char *c = argv[++i]; *c; c += *c == ',') shot_frame.push_back(atoi(c)), c += strspn(c, "0123456789");
+        else if (a == "--only" && i + 1 < argc)
+            for (const char *c = argv[++i]; *c; c += *c == ',') shot_only.push_back(atoi(c)), c += strspn(c, "0123456789");
+        else if (a == "--wire") shot_wire = true;
+        else if (a == "--zoom" && i + 1 < argc) shot_zoom = (float)atof(argv[++i]);
+        else if (a == "--yaw" && i + 1 < argc) shot_yaw = (float)atof(argv[++i]);
         else if (a == "--stage" && i + 1 < argc) shot_stage = atoi(argv[++i]);
         else if (a == "--fighter" && i + 1 < argc) shot_fighter = atoi(argv[++i]);
         else if (a == "--import-obj" && i + 1 < argc) start_obj = argv[++i];
@@ -27,7 +39,7 @@ int main(int argc, char **argv) {
 
     if (check || users || stages || seams || !shot.empty() || effect >= 0) attach_console();
     if (stages) return check_stages();
-    if (seams) return check_seams();
+    if (seams) return check_seams(open_path);
     if (users) {
         std::map<int, std::set<std::string>> by = effect_users();
         for (int id : effect_ids()) {
@@ -428,6 +440,14 @@ int main(int argc, char **argv) {
         view.stage = shot_stage;
         if (shot_cam >= 0 && !scene.fighters.empty() && shot_cam < (int)scene.fighters[scene.fighter]->cameras.size())
             apply_camera(view, *scene.fighters[scene.fighter], shot_cam);
+        if (!shot_only.empty()) {
+            for (size_t b = 0; b < scene.hidden.size(); b++) scene.hidden[b] = std::find(shot_only.begin(), shot_only.end(), (int)b) == shot_only.end();
+            if (shot_frame.empty()) shot_frame = shot_only;
+        }
+        if (!shot_frame.empty()) frame_bones(scene, view, shot_frame);
+        view.cam.dist /= shot_zoom;
+        view.wireframe = shot_wire;
+        if (shot_yaw < 1e8f) view.cam.yaw = shot_yaw * 3.14159265f / 180;
         render(scene, view, 0, 0, W, H);
         std::vector<uint32_t> px(W * H), flipped(W * H);
         GL(glReadPixels)(0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, px.data());

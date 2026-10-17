@@ -12,8 +12,68 @@ static float seam_dist(const SeamPt &a, const SeamPt &b) {
     return sqrtf((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z));
 }
 
+static SeamPt seam_sub(const SeamPt &a, const SeamPt &b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
+static float seam_dot(const SeamPt &a, const SeamPt &b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+static SeamPt seam_mad(const SeamPt &a, const SeamPt &d, float s) { return {a.x + d.x * s, a.y + d.y * s, a.z + d.z * s}; }
+
+/* the closest point of the triangle ABC to P (Ericson, Real-Time Collision Detection 5.1.5) */
+static SeamPt seam_closest(const SeamPt &p, const SeamPt &a, const SeamPt &b, const SeamPt &c) {
+    SeamPt ab = seam_sub(b, a), ac = seam_sub(c, a), ap = seam_sub(p, a);
+    float d1 = seam_dot(ab, ap), d2 = seam_dot(ac, ap);
+    if (d1 <= 0 && d2 <= 0) return a;
+    SeamPt bp = seam_sub(p, b);
+    float d3 = seam_dot(ab, bp), d4 = seam_dot(ac, bp);
+    if (d3 >= 0 && d4 <= d3) return b;
+    float vc = d1 * d4 - d3 * d2;
+    if (vc <= 0 && d1 >= 0 && d3 <= 0) return seam_mad(a, ab, d1 / (d1 - d3));
+    SeamPt cp = seam_sub(p, c);
+    float d5 = seam_dot(ab, cp), d6 = seam_dot(ac, cp);
+    if (d6 >= 0 && d5 <= d6) return c;
+    float vb = d5 * d2 - d1 * d6;
+    if (vb <= 0 && d2 >= 0 && d6 <= 0) return seam_mad(a, ac, d2 / (d2 - d6));
+    float va = d3 * d6 - d5 * d4;
+    if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) return seam_mad(b, seam_sub(c, b), (d4 - d3) / ((d4 - d3) + (d5 - d6)));
+    float den = 1 / (va + vb + vc);
+    return seam_mad(seam_mad(a, ab, vb * den), ac, vc * den);
+}
+
+/* a mesh's triangles, and which of its vertices lie on an open rim (an edge only one polygon uses; vertices at the same
+   place count as one, so a split along a UV seam isn't a rim) */
+struct SeamMesh {
+    std::vector<std::array<int, 3>> tris;
+    std::vector<char> rim;
+};
+static void seam_build(const Mesh &me, SeamMesh &out) {
+    std::map<std::tuple<int, int, int>, int> at;
+    std::vector<int> canon(me.verts.size());
+    for (size_t i = 0; i < me.verts.size(); i++)
+        canon[i] = at.emplace(std::make_tuple((int)me.verts[i].x, (int)me.verts[i].y, (int)me.verts[i].z), (int)i).first->second;
+    std::map<std::pair<int, int>, int> edges;
+    for (const Poly &p : me.polys) {
+        int n = p.quad ? 4 : 3;
+        static const int tri[3] = {0, 2, 1}, quad[4] = {0, 2, 3, 1}; /* the PSX vertex order walked around the polygon */
+        const int *o = p.quad ? quad : tri;
+        for (int k = 0; k < n; k++) {
+            int a = canon[p.idx[o[k]]], b = canon[p.idx[o[(k + 1) % n]]];
+            if (a != b) edges[{std::min(a, b), std::max(a, b)}]++;
+        }
+        out.tris.push_back({p.idx[o[0]], p.idx[o[1]], p.idx[o[2]]});
+        if (p.quad) out.tris.push_back({p.idx[o[0]], p.idx[o[2]], p.idx[o[3]]});
+    }
+    std::vector<char> open(me.verts.size(), 0);
+    for (const auto &e : edges)
+        if (e.second == 1) open[e.first.first] = open[e.first.second] = 1;
+    out.rim.assign(me.verts.size(), 0);
+    for (size_t i = 0; i < me.verts.size(); i++) out.rim[i] = open[canon[i]];
+}
+
 struct SeamJoint {
     int fid = 0, bone = 0, parent = 0;
+    /* open-rim vertices of one piece (0 the child's, 1 the parent's) near the other's surface at rest: how far outside that
+       surface they get over the poses, as part of the model's size */
+    std::vector<int> rimV[2];
+    float rimExp[2] = {0, 0};
+    int rimMotion = 0, rimKey = 0;
     std::string model;
     const char *cls = "";
     int pairs = 0, verts = 0;
@@ -22,12 +82,15 @@ struct SeamJoint {
     std::vector<std::pair<int, int>> pv; /* child vertex, parent vertex */
 };
 
-static int check_seams() {
+/* ONLY, when given, is one model file (a mod's, say): just the disc model with its number is analysed, from that file */
+static int check_seams(const std::string &only) {
+    int onlyFid = only.empty() ? -1 : atoi(std::filesystem::path(only).stem().string().c_str());
     std::vector<SeamJoint> all;
     int models = 0, skipped = 0;
     for (const Entry &e : scan_models()) {
+        if (onlyFid >= 0 && e.fid != onlyFid) continue;
         std::vector<uint8_t> bytes;
-        read_file(fid_path(e.fid), bytes);
+        read_file(only.empty() ? fid_path(e.fid) : only, bytes);
         std::vector<const Fighter *> fs = g_game.forFile(e.fid);
         Model m;
         if (!m.load(e.name, std::move(bytes), fs.empty() ? nullptr : fs[0]) || m.motions.empty()) {
@@ -56,7 +119,13 @@ static int check_seams() {
         }
         float D = sqrtf((hi[0] - lo[0]) * (hi[0] - lo[0]) + (hi[1] - lo[1]) * (hi[1] - lo[1]) + (hi[2] - lo[2]) * (hi[2] - lo[2]));
         if (D < 1) continue;
-        float eps = D * 0.01f, closeD = D * 0.06f;
+        float eps = D * 0.01f, closeD = D * 0.06f, rimNear = D * 0.03f;
+        std::vector<SeamMesh> sm(m.meshes.size());
+        std::vector<char> smOk(m.meshes.size(), 0);
+        auto seam_mesh = [&](int k) -> const SeamMesh & {
+            if (!smOk[k]) smOk[k] = 1, seam_build(m.meshes[k], sm[k]);
+            return sm[k];
+        };
         std::vector<SeamJoint> js;
         for (size_t b = 1; b < nb; b++) {
             int p = m.bones[b].parent;
@@ -100,9 +169,25 @@ static int check_seams() {
                 }
                 j.normalDeg = n ? (float)(sum / n) : 0;
             }
+            /* each piece's open-rim vertices that sit near the other's surface at rest (the 16 closest) */
+            for (int s = 0; s < 2; s++) {
+                int A = s ? (int)p : (int)b, B = s ? (int)b : (int)p;
+                const SeamMesh &ma = seam_mesh(m.bones[A].mesh), &mb = seam_mesh(m.bones[B].mesh);
+                std::vector<std::pair<float, int>> cand;
+                for (size_t i = 0; i < rest[A].size(); i++) {
+                    if (!ma.rim[i]) continue;
+                    float best = 1e30f;
+                    for (const auto &t : mb.tris)
+                        best = std::min(best, seam_dist(rest[A][i], seam_closest(rest[A][i], rest[B][t[0]], rest[B][t[1]], rest[B][t[2]])));
+                    if (best <= rimNear) cand.emplace_back(best, (int)i);
+                }
+                std::sort(cand.begin(), cand.end());
+                for (size_t i = 0; i < cand.size() && i < 16; i++) j.rimV[s].push_back(cand[i].second);
+            }
             j.minGap /= D;
             js.push_back(std::move(j));
         }
+        int poseCount = 0;
         /* every motion's poses (at most ~30 keyframes of each) */
         for (size_t mo = 1; mo <= m.motions.size(); mo++) {
             m.setMotion((int)mo);
@@ -123,7 +208,46 @@ static int check_seams() {
                     }
                     return pb[b] = bx;
                 };
+                std::vector<std::vector<SeamPt>> wv(nb);
+                std::vector<char> wvOk(nb, 0);
+                auto wvOf = [&](int b) -> const std::vector<SeamPt> & {
+                    if (!wvOk[b]) {
+                        wvOk[b] = 1;
+                        for (const Vec3s &v : m.meshes[m.bones[b].mesh].verts) wv[b].push_back(seam_tf(m.pose[b].world, v));
+                    }
+                    return wv[b];
+                };
+                bool rimPose = (poseCount++ % 4) == 0; /* the rim costs more: every 4th pose */
                 for (SeamJoint &j : js) {
+                    for (int s = 0; s < 2 && rimPose; s++) {
+                        int A = s ? j.parent : j.bone, B = s ? j.bone : j.parent;
+                        if (j.rimV[s].empty() || !m.pose[A].visible || !m.pose[B].visible) continue;
+                        const std::vector<SeamPt> &wa = wvOf(A), &wb = wvOf(B);
+                        const SeamMesh &mb = seam_mesh(m.bones[B].mesh);
+                        const Mesh &bm = m.meshes[m.bones[B].mesh];
+                        const float *bw = m.pose[B].world;
+                        for (int i : j.rimV[s]) {
+                            float best = 1e30f;
+                            int bt = 0;
+                            SeamPt bc{};
+                            for (size_t t = 0; t < mb.tris.size(); t++) {
+                                SeamPt c = seam_closest(wa[i], wb[mb.tris[t][0]], wb[mb.tris[t][1]], wb[mb.tris[t][2]]);
+                                float d = seam_dist(wa[i], c);
+                                if (d < best) best = d, bt = (int)t, bc = c;
+                            }
+                            float out = best; /* without normals, apart in any direction counts */
+                            if (bm.normals.size() == bm.verts.size()) { /* only outside the surface shows */
+                                SeamPt n{0, 0, 0};
+                                for (int k = 0; k < 3; k++) {
+                                    const Vec3s &v = bm.normals[mb.tris[bt][k]];
+                                    n.x += bw[0] * v.x + bw[4] * v.y + bw[8] * v.z, n.y += bw[1] * v.x + bw[5] * v.y + bw[9] * v.z,
+                                    n.z += bw[2] * v.x + bw[6] * v.y + bw[10] * v.z;
+                                }
+                                out = seam_dot(seam_sub(wa[i], bc), n) > 0 ? best : 0;
+                            }
+                            if (out / D > j.rimExp[s]) j.rimExp[s] = out / D, j.rimMotion = (int)mo, j.rimKey = k;
+                        }
+                    }
                     if (m.pose[j.bone].visible && m.pose[j.parent].visible) {
                         const auto &a = boxOf(j.bone), &c = boxOf(j.parent);
                         float s2 = 0;
@@ -147,9 +271,10 @@ static int check_seams() {
         for (SeamJoint &j : js) all.push_back(std::move(j));
     }
     for (const SeamJoint &j : all)
-        printf("%04d %-13s b%-3d <- b%-3d %-4s pairs %3d/%-3d cover %3.0f%% gap %5.2f%% drift %6.2f%% normals %5.1f deg  apart %3d%% of poses, up to %5.1f%% (motion %d key %d)\n", j.fid,
+        printf("%04d %-13s b%-3d <- b%-3d %-4s pairs %3d/%-3d cover %3.0f%% gap %5.2f%% drift %6.2f%% normals %5.1f deg  apart %3d%% of poses, up to %5.1f%% (motion %d key %d)  rim child %2d: %5.2f%% parent %2d: %5.2f%% (motion %d key %d)\n", j.fid,
                j.model.c_str(), j.bone, j.parent, j.cls, j.pairs, j.verts, j.cover * 100, j.minGap * 100, j.drift * 100, j.normalDeg,
-               j.poses ? j.apart * 100 / j.poses : 0, j.maxSep * 100, j.sepMotion, j.sepKey);
+               j.poses ? j.apart * 100 / j.poses : 0, j.maxSep * 100, j.sepMotion, j.sepKey, (int)j.rimV[0].size(), j.rimExp[0] * 100,
+               (int)j.rimV[1].size(), j.rimExp[1] * 100, j.rimMotion, j.rimKey);
     /* the summary */
     const char *names[] = {"COIN", "OVER", "GAP", "FAR"};
     printf("\n%d models (%d skipped), %d joints\n", models, skipped, (int)all.size());
@@ -178,5 +303,22 @@ static int check_seams() {
     for (size_t i = 0; i < worst.size() && i < 25; i++)
         printf("  %04d %-13s b%d <- b%d drift %.2f%% cover %.0f%%\n", worst[i]->fid, worst[i]->model.c_str(), worst[i]->bone, worst[i]->parent,
                worst[i]->drift * 100, worst[i]->cover * 100);
+    /* the open rims that end up outside the other piece's surface */
+    std::vector<const SeamJoint *> rims;
+    int r1 = 0, r3 = 0, r6 = 0, withRim = 0;
+    for (const SeamJoint &j : all) {
+        float e = std::max(j.rimExp[0], j.rimExp[1]);
+        withRim += !j.rimV[0].empty() || !j.rimV[1].empty();
+        r1 += e > 0.01f, r3 += e > 0.03f, r6 += e > 0.06f;
+        if (e > 0.01f) rims.push_back(&j);
+    }
+    std::sort(rims.begin(), rims.end(), [](const SeamJoint *a, const SeamJoint *b) {
+        return std::max(a->rimExp[0], a->rimExp[1]) > std::max(b->rimExp[0], b->rimExp[1]);
+    });
+    printf("\nopen rims near the other piece at rest: %d joints; outside its surface by over 1%% of the model: %d, over 3%%: %d, over 6%%: %d\n",
+           withRim, r1, r3, r6);
+    for (size_t i = 0; i < rims.size() && i < 40; i++)
+        printf("  %04d %-13s b%d <- b%d  child's rim %.2f%%  parent's rim %.2f%%  (motion %d key %d)\n", rims[i]->fid, rims[i]->model.c_str(),
+               rims[i]->bone, rims[i]->parent, rims[i]->rimExp[0] * 100, rims[i]->rimExp[1] * 100, rims[i]->rimMotion, rims[i]->rimKey);
     return 0;
 }
