@@ -104,6 +104,7 @@ struct SeamJoint {
     const char *cls = "";
     int pairs = 0, verts = 0;
     float cover = 0, minGap = 0, drift = 0, normalDeg = 0, maxSep = 0;
+    const char *blendState = "-"; /* eligible, enabled or excluded: what became of the pair (blend.h) */
     int blendMeet = 0; /* vertices on one another at the bind pose: the joint can be blended with 3 or more */
     int poses = 0, apart = 0, sepMotion = 0, sepKey = 0; /* poses seen, and those where the two pieces' boxes are 1% of the model apart */
     std::vector<std::pair<int, int>> pv; /* child vertex, parent vertex */
@@ -156,33 +157,35 @@ static int check_seams(const std::string &only) {
         };
         std::vector<SeamJoint> js;
         BlendRest blendRest = blend_rest(m);
-        std::vector<JointBlend> blends;
-        if (g_seamsBlend) blend_build(m, blends);
+        BlendSet blends;
+        blend_build(m, blends); /* the pairs and what became of them, whether or not they're drawn blended here */
         int curMo = 0, curKey = 0, moveMo = 0, moveKey = 0; /* the pose being placed, and where the blended vertices moved most */
         float blendMove = 0; /* the farthest a blended vertex is from where its bone alone puts it, over the poses */
-        /* where a bone's vertex I is in the pose now: its bone's, or blended with the other of its pair */
-        std::vector<std::array<float, 16>> m2(nb);
+        /* where a bone's vertex I is in the pose now: its bone's, or blended with its partners */
+        std::vector<std::array<std::array<float, 16>, 3>> m2(nb);
         std::vector<char> m2Ok(nb, 0);
         auto placed = [&](int b, int i) -> SeamPt {
             const Vec3s &v = m.meshes[m.bones[b].mesh].verts[i];
             SeamPt p = seam_tf(m.pose[b].world, v);
-            for (const JointBlend &j : blends) {
-                bool isA = j.a == b;
-                if (!isA && j.b != b) continue;
-                int other = isA ? j.b : j.a;
-                float w = (isA ? j.wa : j.wb)[i];
-                if (w <= 0 || !m.pose[other].visible) continue;
-                if (!m2Ok[b]) {
-                    m2Ok[b] = 1;
-                    M4 mm = mul(from(m.pose[other].world), from(isA ? j.ab : j.ba));
-                    memcpy(m2[b].data(), mm.m, sizeof(float) * 16);
+            const BoneBlend &bb = blends.bone[b];
+            if (!g_seamsBlend || !bb.n) return p;
+            if (!m2Ok[b]) {
+                m2Ok[b] = 1;
+                for (int k = 0; k < bb.n; k++) {
+                    M4 mm = mul(from(m.pose[bb.partner[k]].world), from(bb.rel[k]));
+                    memcpy(m2[b][k].data(), mm.m, sizeof(float) * 16);
                 }
-                SeamPt q = seam_tf(m2[b].data(), v);
-                SeamPt r{p.x + (q.x - p.x) * w, p.y + (q.y - p.y) * w, p.z + (q.z - p.z) * w};
-                if (seam_dist(p, r) > blendMove) blendMove = seam_dist(p, r), moveMo = curMo, moveKey = curKey;
-                return r;
             }
-            return p;
+            float home = 1 - bb.w[i][0] - bb.w[i][1] - bb.w[i][2];
+            SeamPt r{p.x * home, p.y * home, p.z * home};
+            for (int k = 0; k < bb.n; k++) {
+                float w = bb.w[i][k];
+                if (w <= 0) continue;
+                SeamPt q = m.pose[bb.partner[k]].visible ? seam_tf(m2[b][k].data(), v) : p;
+                r.x += q.x * w, r.y += q.y * w, r.z += q.z * w;
+            }
+            if (seam_dist(p, r) > blendMove) blendMove = seam_dist(p, r), moveMo = curMo, moveKey = curKey;
+            return r;
         };
         for (size_t b = 1; b < nb; b++) {
             int p = m.bones[b].parent;
@@ -242,6 +245,7 @@ static int check_seams(const std::string &only) {
                 for (size_t i = 0; i < cand.size() && i < 16; i++) j.rimV[s].push_back(cand[i].second);
             }
             j.blendMeet = blend_meets(m, blendRest, (int)b, p);
+            if (const BlendPair *bp = blends.find((int)b, p)) j.blendState = bp->state;
             j.minGap /= D;
             js.push_back(std::move(j));
         }
@@ -316,15 +320,19 @@ static int check_seams(const std::string &only) {
                 }
             }
         }
-        if (!blends.empty()) printf("%04d %-13s blended: %d joint(s); a vertex moves at most %.2f%% of the model's size from where its bone alone puts it (motion %d key %d)\n", e.fid,
-                                    e.name.c_str(), (int)blends.size(), blendMove / D * 100, moveMo, moveKey);
+        int enabled = 0;
+        for (const BlendPair &bp : blends.pairs) enabled += !strcmp(bp.state, "enabled");
+        if (enabled && g_seamsBlend)
+            printf("%04d %-13s blended: %d pair(s); a vertex moves at most %.2f%% of the model's size from where its bone alone puts it (motion %d key %d)\n", e.fid,
+                   e.name.c_str(), enabled, blendMove / D * 100, moveMo, moveKey);
+        for (const std::string &n : blends.notes) printf("%04d %-13s blend note: %s\n", e.fid, e.name.c_str(), n.c_str());
         for (SeamJoint &j : js) all.push_back(std::move(j));
     }
     for (const SeamJoint &j : all)
-        printf("%04d %-13s b%-3d <- b%-3d %-4s pairs %3d/%-3d cover %3.0f%% gap %5.2f%% drift %6.2f%% normals %5.1f deg  apart %3d%% of poses, up to %5.1f%% (motion %d key %d)  rim child %2d: %5.2f%% parent %2d: %5.2f%% (motion %d key %d) unsure %4.2f%% %4.2f%% blend %d\n", j.fid,
+        printf("%04d %-13s b%-3d <- b%-3d %-4s pairs %3d/%-3d cover %3.0f%% gap %5.2f%% drift %6.2f%% normals %5.1f deg  apart %3d%% of poses, up to %5.1f%% (motion %d key %d)  rim child %2d: %5.2f%% parent %2d: %5.2f%% (motion %d key %d) unsure %4.2f%% %4.2f%% blend %d %s\n", j.fid,
                j.model.c_str(), j.bone, j.parent, j.cls, j.pairs, j.verts, j.cover * 100, j.minGap * 100, j.drift * 100, j.normalDeg,
                j.poses ? j.apart * 100 / j.poses : 0, j.maxSep * 100, j.sepMotion, j.sepKey, (int)j.rimV[0].size(), j.rimExp[0] * 100,
-               (int)j.rimV[1].size(), j.rimExp[1] * 100, j.rimMotion, j.rimKey, j.rimAmb[0] * 100, j.rimAmb[1] * 100, j.blendMeet);
+               (int)j.rimV[1].size(), j.rimExp[1] * 100, j.rimMotion, j.rimKey, j.rimAmb[0] * 100, j.rimAmb[1] * 100, j.blendMeet, j.blendState);
     /* the summary */
     const char *names[] = {"COIN", "OVER", "GAP", "FAR"};
     printf("\n%d models (%d skipped), %d joints\n", models, skipped, (int)all.size());

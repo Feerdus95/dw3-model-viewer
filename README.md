@@ -323,8 +323,22 @@ pose before believing it. Guilmon's wrist (bone 3, the forearm, and bone 4, the 
 **Blend joint** (Model > Display, only where a model has a pair) is an experiment: where two bones' meshes meet at rest (their
 vertices are the same points), the vertices near the joint follow both bones, as a skinned model does, so the two pieces stay
 together in every pose. Vertices on the meeting points weigh 0.5 for each bone, the weight fading to 0 over a band around them.
-It only changes how the viewer draws; the model's data is the game's. Only Guilmon's wrist (bones 3 and 4) has a pair for now;
-`--seams --blend` measures it (`--blend` places those vertices blended).
+It only changes how the viewer draws; the model's data is the game's; `--seams --blend` measures it (`--blend` places those
+vertices blended).
+
+Four things are kept apart, and nothing is blended unless asked for:
+
+- **Eligible**: a parent and child bone with 3 or more of one's vertices on the other's at rest (the bind pose, or the idle pose
+  within 1% of the model's size). `--seams` lists them in its `blend` column.
+- **Enabled**: only the pairs asked for: `--weld A,B` (repeat it), `--weld-all` (every eligible pair), and Guilmon's wrist (4,3),
+  built in. Asking for a pair that isn't eligible is reported, not forced.
+- **Excluded**: pairs left out, which wins over enabled: `--weld-skip A,B` (repeat it), and `BLEND_SKIP` in
+  `src/modules/joint_blend.inc` for good (Brachiomon's jaw, 16 and 17, a hinge whose opening is meant to show). Bones are the
+  file's numbers; `--seams` shows each pair's state: eligible, enabled or excluded.
+- **Conflicts**: a bone can be in up to 3 pairs. Each vertex keeps one weight per partner bone (partners in bone order, so asking
+  for the pairs in another order changes nothing), the weights are added and scaled to 1 if they pass it. Where one pair's meeting
+  vertices carry another pair's weight too the pieces stop staying exactly on one another; that is printed (`--seams`, the
+  tooltip of Blend joint), never settled by which pair came last. More than 3 pairs on a bone: the first 3 by partner are used, and it says so.
 
 By default `data/` is the one picked with **File > Change the data folder...** (kept in `data_dir.txt`), or next to the exe, or next to its `build` folder.
 

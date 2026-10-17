@@ -26,6 +26,11 @@ int main(int argc, char **argv) {
             if (sscanf(argv[++i], "%d,%d", &p, &q) == 2) g_blendExtra.push_back({p, q});
         } else if (a == "--weld-band" && i + 1 < argc) g_blendBand = (float)atof(argv[++i]);
         else if (a == "--weld-eps" && i + 1 < argc) g_blendEps = (float)atof(argv[++i]);
+        else if (a == "--weld-all") g_blendAll = true;
+        else if (a == "--weld-skip" && i + 1 < argc) {
+            int p = 0, q = 0;
+            if (sscanf(argv[++i], "%d,%d", &p, &q) == 2) g_blendSkip.push_back({p, q});
+        }
         else if (a == "--zoom" && i + 1 < argc) shot_zoom = (float)atof(argv[++i]);
         else if (a == "--yaw" && i + 1 < argc) shot_yaw = (float)atof(argv[++i]);
         else if (a == "--stage" && i + 1 < argc) shot_stage = atoi(argv[++i]);

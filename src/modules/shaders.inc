@@ -9,9 +9,9 @@ layout(location = 3) in vec4 color;
 layout(location = 4) in uvec4 tex;    /* CLUT x, y, page x, y */
 layout(location = 5) in uvec4 limits; /* u, v min, max */
 layout(location = 6) in uint mode;
-layout(location = 7) in float wgt;   /* how much it follows the second bone */
+layout(location = 7) in vec3 wgt;     /* how much it follows each partner of its bone */
 uniform mat4 mvp, world;
-uniform mat4 mvp2, world2;           /* the second bone's, for the vertices with a weight */
+uniform mat4 mvpO[3], worldO[3];     /* the partners', for the vertices with a weight */
 uniform float blendOn;
 uniform vec3 light;
 uniform int lighting; /* 0 none, 1 the viewer's light, 2 the stage's (the GTE's NCS) */
@@ -21,9 +21,11 @@ out vec3 col;
 flat out uvec4 t, lim;
 flat out uint md;
 void main() {
-    float k = wgt * blendOn;
-    gl_Position = mix(mvp * vec4(pos, 1.0), mvp2 * vec4(pos, 1.0), k);
-    vec3 nw = mix(mat3(world) * nrm, mat3(world2) * nrm, k);
+    vec3 wk = wgt * blendOn;
+    float home = 1.0 - (wk.x + wk.y + wk.z);
+    vec4 p4 = vec4(pos, 1.0);
+    gl_Position = home * (mvp * p4) + wk.x * (mvpO[0] * p4) + wk.y * (mvpO[1] * p4) + wk.z * (mvpO[2] * p4);
+    vec3 nw = home * (mat3(world) * nrm) + wk.x * (mat3(worldO[0]) * nrm) + wk.y * (mat3(worldO[1]) * nrm) + wk.z * (mat3(worldO[2]) * nrm);
     uv = uv_in; t = tex; lim = limits; md = mode;
     col = color.rgb * 255.0;
     if ((mode & 2u) != 0u) {

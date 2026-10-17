@@ -5,14 +5,14 @@ struct GVert {
     uint8_t color[4];
     uint16_t tex[4], limits[4];
     uint32_t mode;
-    float wgt; /* how much it follows a second bone (JointBlend) */
+    float wgt[3]; /* how much it follows each of its bone's partners (BoneBlend) */
 };
 
 struct Scene {
     std::unique_ptr<Model> model;
     std::vector<int> first, count; /* each bone's vertices */
     std::vector<bool> hidden;
-    std::vector<JointBlend> blends; /* the joints that can be drawn blended */
+    BlendSet blend;                 /* the joints that can be drawn blended */
     int selected = -1;
     std::vector<uint8_t> mark; /* each bone's highlight: 1 under the mouse, 2 selected */
     /* an edit in progress, drawn before it's built: bones previewFirst up
@@ -41,16 +41,11 @@ static void upload(Scene &s) {
     s.first.assign(m.bones.size(), 0);
     s.count.assign(m.bones.size(), 0);
     s.hidden.assign(m.bones.size(), false);
-    s.blends.clear();
-    blend_build(m, s.blends);
+    blend_build(m, s.blend);
     for (size_t b = 1; b < m.bones.size(); b++) {
         const Mesh &mesh = m.meshes[m.bones[b].mesh];
         s.first[b] = (int)v.size();
-        const std::vector<float> *bw = nullptr; /* this bone's vertices' blend weights, if it is in a pair */
-        for (const JointBlend &j : s.blends) {
-            if (j.a == (int)b) bw = &j.wa;
-            if (j.b == (int)b) bw = &j.wb;
-        }
+        const BoneBlend *bw = s.blend.bone[b].n ? &s.blend.bone[b] : nullptr; /* this bone's vertices' blend weights, if it is in a pair */
         for (const Poly &p : mesh.polys) {
             int umin = 255, vmin = 255, umax = 0, vmax = 0;
             int n = p.quad ? 4 : 3;
@@ -73,7 +68,8 @@ static void upload(Scene &s) {
                     g.tex[0] = (uint16_t)clut_x(p.clut), g.tex[1] = (uint16_t)clut_y(p.clut);
                     g.tex[2] = (uint16_t)tpage_x(p.tpage), g.tex[3] = (uint16_t)tpage_y(p.tpage);
                     g.limits[0] = (uint16_t)umin, g.limits[1] = (uint16_t)vmin, g.limits[2] = (uint16_t)umax, g.limits[3] = (uint16_t)vmax;
-                    g.wgt = bw ? (*bw)[p.idx[k]] : 0;
+                    if (bw)
+                        for (int j = 0; j < 3; j++) g.wgt[j] = bw->w[p.idx[k]][j];
                     g.mode = (p.textured ? 1 : 0) | (p.lit ? 2 : 0) | (tpage_depth(p.tpage) & 3) << 2 |
                              (p.abr ? 16 : 0) | ((p.abr ? p.abr - 1 : 0) & 3) << 5;
                     v.push_back(g);
@@ -98,7 +94,7 @@ static void upload(Scene &s) {
     GL(glVertexAttribIPointer)(4, 4, GL_UNSIGNED_SHORT, sizeof(GVert), (void *)offsetof(GVert, tex));
     GL(glVertexAttribIPointer)(5, 4, GL_UNSIGNED_SHORT, sizeof(GVert), (void *)offsetof(GVert, limits));
     GL(glVertexAttribIPointer)(6, 1, GL_UNSIGNED_INT, sizeof(GVert), (void *)offsetof(GVert, mode));
-    GL(glVertexAttribPointer)(7, 1, GL_FLOAT, GL_FALSE, sizeof(GVert), (void *)offsetof(GVert, wgt));
+    GL(glVertexAttribPointer)(7, 3, GL_FLOAT, GL_FALSE, sizeof(GVert), (void *)offsetof(GVert, wgt));
     upload_vram(s);
 
     /* the camera's target: the posed model's box */

@@ -1,23 +1,35 @@
 /* --- joints blended (experimental, opt in) ---
    Two bones' meshes that meet at rest (their vertices on each other's) can follow both bones near the joint, as a
-   skinned model does: a vertex of A is drawn as (1 - w) * (A's matrix * v) + w * (B's matrix * B's rest inverse * A's
-   rest * v), w 0.5 where the pieces meet and fading to 0 over a band around it. Both pieces' vertices that meet get
-   the same w and the same two matrices, so they stay on one another in every pose. The model's data isn't changed.
+   skinned model does: a vertex is drawn as (1 - sum of w) * (its bone's matrix * v) + sum of w_k * (partner k's matrix *
+   partner k's rest inverse * its bone's rest * v), a pair's w 0.5 where the pieces meet and fading to 0 over a band
+   around it. Both pieces' vertices that meet get the same w and the same two matrices, so they stay on one another in
+   every pose. The model's data isn't changed.
 
-   Three steps, kept apart: DETECTION (blend_meets: how many of A's vertices are on B's at rest), ELIGIBILITY (3 or
-   more), and ACTIVATION (blend_build: only the pairs asked for, never every joint found). "Rest" is the model's idle
-   pose (its first motion's first keyframe), where the pieces are modelled to fit. */
+   A bone can be in up to 3 pairs: each vertex keeps one weight per partner, partners in bone order (never the order the
+   pairs were asked for), the weights added and, if they come to more than 1, scaled to 1. Where one pair's meeting
+   vertices carry weight from another pair too (the bands overlap there) the pieces no longer stay exactly on one
+   another, and that is reported as a conflict, never settled by which pair came last.
 
-struct JointBlend {
-    int a = 0, b = 0;           /* the two bones */
-    std::vector<float> wa, wb;  /* each one's mesh vertices: how much each follows the other bone */
-    float ab[16], ba[16];       /* A's rest space to B's (R_b^-1 R_a), and the other way */
-    int contact = 0;            /* A's vertices that are on one of B's at rest */
-};
+   Four steps, kept apart: DETECTION (a pair is ELIGIBLE when 3 or more of one bone's vertices are on the other's at
+   rest), ACTIVATION (only the pairs asked for: --weld, --weld-all, a model's built-in ones), EXCLUSION (pairs
+   left out: --weld-skip, BLEND_SKIP), and the blending itself. "Rest" is the bind pose if the pair meets there,
+   else the model's idle pose (its first motion's first keyframe), where the pieces are modelled to fit. */
 
 static float g_blendEps = 0;                          /* how near two vertices are to be "the same point" at rest; 0: 1% of the model's size */
 static float g_blendBand = 60;                       /* game units over which the blending fades out */
 static std::vector<std::pair<int, int>> g_blendExtra; /* pairs asked for on the command line, on any model */
+static std::vector<std::pair<int, int>> g_blendSkip;  /* pairs left out on the command line */
+static bool g_blendAll = false;                       /* --weld-all: every eligible pair (but the excluded) */
+
+/* Pairs left out for good, by model: hinges and the like that are meant to show their gap. Bones are the file's numbers. */
+struct BlendSkip {
+    const char *model;
+    int a, b;
+    const char *why;
+};
+static const BlendSkip BLEND_SKIP[] = {
+    {"M126BRAK.BIN", 16, 17, "Brachiomon's jaw: a hinge, its opening is meant to show"},
+};
 
 /* the inverse of an affine matrix (column-major) */
 static bool blend_inverse(const float m[16], float out[16]) {
@@ -88,15 +100,14 @@ static int blend_count(const Model &m, const std::vector<std::array<float, 16>> 
     return n;
 }
 
-/* the rest a pair meets in: the bind pose if its vertices are on one another there, else the idle pose */
+/* the rest a pair meets in: the one with more of its vertices on one another (the bind pose if they tie) */
 static const std::vector<std::array<float, 16>> &blend_pick(const Model &m, const BlendRest &r, int a, int b, float &eps, int &count) {
-    count = blend_count(m, r.bind, r.epsBind, a, b);
-    if (count >= 3) return eps = r.epsBind, r.bind;
-    count = blend_count(m, r.idle, r.epsIdle, a, b);
-    return eps = r.epsIdle, r.idle;
+    int nb = blend_count(m, r.bind, r.epsBind, a, b), ni = blend_count(m, r.idle, r.epsIdle, a, b);
+    if (nb >= ni) return count = nb, eps = r.epsBind, r.bind;
+    return count = ni, eps = r.epsIdle, r.idle;
 }
 
-/* DETECTION: how many of A's vertices are on one of B's at rest; a pair needs 3 to be blended */
+/* DETECTION: how many of A's vertices are on one of B's at rest; a pair needs 3 to be eligible */
 static int blend_meets(const Model &m, const BlendRest &r, int a, int b) {
     float eps;
     int n;
@@ -104,19 +115,82 @@ static int blend_meets(const Model &m, const BlendRest &r, int a, int b) {
     return n;
 }
 
-/* the pairs a model gets: the ones asked for, and Guilmon's wrist (bones 3 and 4) */
-static void blend_build(const Model &m, std::vector<JointBlend> &out) {
-    std::vector<std::pair<int, int>> pairs = g_blendExtra;
-    if (m.name == "M366GIRU.BIN") pairs.push_back({3, 4});
-    if (pairs.empty()) return;
+/* A bone's blending: up to 3 partners, and for each vertex of its mesh the weight of each */
+struct BoneBlend {
+    int n = 0;
+    int partner[3] = {0, 0, 0};
+    float rel[3][16];                   /* partner's rest inverse * this bone's rest: this bone's space to the partner's */
+    std::vector<std::array<float, 3>> w; /* by mesh vertex */
+};
+
+struct BlendPair {
+    int a = 0, b = 0, meets = 0;        /* a < b */
+    const char *state = "eligible";     /* eligible (found, not asked for), enabled, excluded */
+};
+
+struct BlendSet {
+    std::vector<BoneBlend> bone;        /* by bone; n == 0: drawn rigid */
+    std::vector<BlendPair> pairs;       /* every eligible pair, with what became of it */
+    std::vector<std::string> notes;     /* conflicts between pairs and pairs that couldn't be used */
+    bool any() const {
+        for (const BoneBlend &b : bone)
+            if (b.n) return true;
+        return false;
+    }
+    const BlendPair *find(int x, int y) const {
+        for (const BlendPair &p : pairs)
+            if (p.a == std::min(x, y) && p.b == std::max(x, y)) return &p;
+        return nullptr;
+    }
+};
+
+static std::pair<int, int> blend_key(int a, int b) { return {std::min(a, b), std::max(a, b)}; }
+
+static void blend_build(const Model &m, BlendSet &out) {
+    out = BlendSet();
+    out.bone.resize(m.bones.size());
     BlendRest rest = blend_rest(m);
-    for (const auto &pr : pairs) {
-        int a = pr.first, b = pr.second;
-        if (a < 1 || b < 1 || a >= (int)m.bones.size() || b >= (int)m.bones.size() || a == b) continue;
-        if (m.bones[a].mesh < 0 || m.bones[b].mesh < 0) continue;
+    /* DETECTION: every parent and child that have meshes and meet */
+    std::set<std::pair<int, int>> eligible;
+    std::map<std::pair<int, int>, int> meets;
+    for (size_t b = 1; b < m.bones.size(); b++) {
+        int p = m.bones[b].parent;
+        if (p < 1) continue;
+        int n = blend_meets(m, rest, (int)b, p);
+        if (n >= 3) eligible.insert(blend_key((int)b, p)), meets[blend_key((int)b, p)] = n;
+    }
+    /* ACTIVATION and EXCLUSION */
+    std::set<std::pair<int, int>> want, skip;
+    for (const auto &p : g_blendExtra) want.insert(blend_key(p.first, p.second));
+    if (m.name == "M366GIRU.BIN") want.insert({3, 4}); /* Guilmon's wrist, the prototype's */
+    if (g_blendAll) want.insert(eligible.begin(), eligible.end());
+    for (const auto &p : g_blendSkip) skip.insert(blend_key(p.first, p.second));
+    for (const BlendSkip &s : BLEND_SKIP)
+        if (m.name == s.model) skip.insert(blend_key(s.a, s.b));
+    for (const auto &p : eligible) {
+        BlendPair bp;
+        bp.a = p.first, bp.b = p.second, bp.meets = meets[p];
+        bp.state = skip.count(p) ? "excluded" : want.count(p) ? "enabled" : "eligible";
+        out.pairs.push_back(bp);
+    }
+    for (const auto &p : want)
+        if (!eligible.count(p) && !skip.count(p))
+            out.notes.push_back("pair " + std::to_string(p.first) + "," + std::to_string(p.second) + " was asked for but isn't eligible (fewer than 3 vertices meet)");
+
+    /* each enabled pair's weights, its two bones' vertices */
+    struct PairW {
+        int a, b;
+        std::vector<float> wa, wb;
+        std::vector<int> contactA, contactB; /* the vertices on the pieces' meeting points */
+        float ab[16], ba[16];                /* A's rest space to B's, and back */
+    };
+    std::vector<PairW> pw;
+    for (const BlendPair &bp : out.pairs) {
+        if (strcmp(bp.state, "enabled")) continue;
+        int a = bp.a, b = bp.b;
         float EPS;
-        int meets;
-        const std::vector<std::array<float, 16>> &world = blend_pick(m, rest, a, b, EPS, meets);
+        int count;
+        const std::vector<std::array<float, 16>> &world = blend_pick(m, rest, a, b, EPS, count);
         const float *Ra = world[a].data(), *Rb = world[b].data();
         float Rai[16], Rbi[16];
         if (!blend_inverse(Ra, Rai) || !blend_inverse(Rb, Rbi)) continue;
@@ -127,33 +201,89 @@ static void blend_build(const Model &m, std::vector<JointBlend> &out) {
         auto dist = [](const std::array<float, 3> &p, const std::array<float, 3> &q) {
             return sqrtf((p[0] - q[0]) * (p[0] - q[0]) + (p[1] - q[1]) * (p[1] - q[1]) + (p[2] - q[2]) * (p[2] - q[2]));
         };
+        PairW w;
+        w.a = a, w.b = b;
         std::vector<std::array<float, 3>> meet; /* where the pieces meet */
-        JointBlend j;
-        j.a = a, j.b = b;
         for (size_t i = 0; i < pa.size(); i++)
             for (size_t k = 0; k < pb.size(); k++)
                 if (dist(pa[i], pb[k]) <= EPS) {
-                    meet.push_back(pa[i]), j.contact++;
+                    meet.push_back(pa[i]);
                     break;
                 }
         if (meet.size() < 3) continue;
         /* a vertex's w: 0.5 on the meeting points, a smooth fall to 0 at the band's end */
-        auto weights = [&](const std::vector<std::array<float, 3>> &p, std::vector<float> &w) {
-            w.assign(p.size(), 0);
+        auto weights = [&](const std::vector<std::array<float, 3>> &p, std::vector<float> &wt, std::vector<int> &contact) {
+            wt.assign(p.size(), 0);
             for (size_t i = 0; i < p.size(); i++) {
                 float d = 1e30f;
                 for (const auto &q : meet) d = std::min(d, dist(p[i], q));
                 if (d <= EPS) {
-                    w[i] = 0.5f;
+                    wt[i] = 0.5f;
+                    contact.push_back((int)i);
                 } else {
                     float s = std::min(d / std::max(g_blendBand, 1.0f), 1.0f);
-                    w[i] = 0.5f * (1 - s * s * (3 - 2 * s));
+                    wt[i] = 0.5f * (1 - s * s * (3 - 2 * s));
                 }
             }
         };
-        weights(pa, j.wa), weights(pb, j.wb);
+        weights(pa, w.wa, w.contactA), weights(pb, w.wb, w.contactB);
         M4 ab = mul(from(Rbi), from(Ra)), ba = mul(from(Rai), from(Rb));
-        memcpy(j.ab, ab.m, sizeof j.ab), memcpy(j.ba, ba.m, sizeof j.ba);
-        out.push_back(std::move(j));
+        memcpy(w.ab, ab.m, sizeof w.ab), memcpy(w.ba, ba.m, sizeof w.ba);
+        pw.push_back(std::move(w));
     }
+
+    /* each bone's partners, in bone order: the same however the pairs were asked for */
+    struct Slot {
+        int partner, pair;
+        bool isA;
+    };
+    std::vector<std::vector<Slot>> slots(m.bones.size());
+    for (size_t k = 0; k < pw.size(); k++) {
+        slots[pw[k].a].push_back({pw[k].b, (int)k, true});
+        slots[pw[k].b].push_back({pw[k].a, (int)k, false});
+    }
+    for (size_t b = 1; b < m.bones.size(); b++) {
+        std::vector<Slot> &sl = slots[b];
+        if (sl.empty()) continue;
+        std::sort(sl.begin(), sl.end(), [](const Slot &x, const Slot &y) { return x.partner < y.partner; });
+        if (sl.size() > 3) {
+            out.notes.push_back("bone " + std::to_string(b) + " is in " + std::to_string(sl.size()) + " pairs; only the 3 with the lowest partner bones are used");
+            sl.resize(3);
+        }
+        BoneBlend &bb = out.bone[b];
+        bb.n = (int)sl.size();
+        size_t nv = m.meshes[m.bones[b].mesh].verts.size();
+        bb.w.assign(nv, {0, 0, 0});
+        for (int s = 0; s < bb.n; s++) {
+            const PairW &w = pw[sl[s].pair];
+            bb.partner[s] = sl[s].partner;
+            memcpy(bb.rel[s], sl[s].isA ? w.ab : w.ba, sizeof bb.rel[s]);
+            const std::vector<float> &wt = sl[s].isA ? w.wa : w.wb;
+            for (size_t i = 0; i < nv; i++) bb.w[i][s] = wt[i];
+        }
+        for (auto &v : bb.w) { /* weights that come to more than 1 are scaled to 1 */
+            float sum = v[0] + v[1] + v[2];
+            if (sum > 1) v[0] /= sum, v[1] /= sum, v[2] /= sum;
+        }
+    }
+
+    /* CONFLICTS: a pair's meeting vertices that also carry another pair's weight */
+    for (size_t k = 0; k < pw.size(); k++)
+        for (int side = 0; side < 2; side++) {
+            int bone = side ? pw[k].b : pw[k].a;
+            const std::vector<int> &contact = side ? pw[k].contactB : pw[k].contactA;
+            const BoneBlend &bb = out.bone[bone];
+            for (int s = 0; s < bb.n; s++) {
+                if (bb.partner[s] == (side ? pw[k].a : pw[k].b)) continue; /* this pair's own slot */
+                int hit = 0;
+                for (int i : contact)
+                    if (bb.w[i][s] > 1e-3f) hit++;
+                if (hit)
+                    out.notes.push_back("conflict: pair " + std::to_string(pw[k].a) + "," + std::to_string(pw[k].b) + " has " + std::to_string(hit) +
+                                        " meeting vertices of bone " + std::to_string(bone) + " that also follow bone " + std::to_string(bb.partner[s]) +
+                                        " (pair " + std::to_string(std::min(bone, bb.partner[s])) + "," + std::to_string(std::max(bone, bb.partner[s])) +
+                                        "): they won't stay exactly on one another");
+            }
+        }
+    std::sort(out.notes.begin(), out.notes.end());
 }

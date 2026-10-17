@@ -896,10 +896,13 @@
             ImGui::Checkbox("Wireframe", &view.wireframe);
             ImGui::TableNextColumn();
             ImGui::Checkbox("Skeleton", &view.skeleton);
-            if (!scene.blends.empty()) {
+            if (scene.blend.any()) {
                 ImGui::TableNextColumn();
                 ImGui::Checkbox("Blend joint", &view.blendJoints);
-                tip("Experimental: the pieces at this joint follow both bones near it, so they stay together (this model's wrist)");
+                std::string blendTip = "Experimental: the pieces at the blended joints follow both bones near them, so they stay together";
+                for (const std::string &n : scene.blend.notes) blendTip += "
+" + n;
+                tip("%s", blendTip.c_str());
             }
             ImGui::TableNextColumn();
             ImGui::Checkbox("Grid", &view.grid);
