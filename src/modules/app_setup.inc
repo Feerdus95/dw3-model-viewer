@@ -127,7 +127,8 @@ int main(int argc, char **argv) {
     g_mesh = compile(MESH_VS, MESH_FS);
     g_line = compile(LINE_VS, LINE_FS);
     g_sprite = compile(SPRITE_VS, SPRITE_FS);
-    if (!g_mesh || !g_line || !g_sprite) return 1;
+    g_prop = compile(PROP_VS, PROP_FS);
+    if (!g_mesh || !g_line || !g_sprite || !g_prop) return 1;
     GL(glGenVertexArrays)(1, &g_lineVao);
     GL(glGenBuffers)(1, &g_lineVbo);
     GL(glBindVertexArray)(g_lineVao);
@@ -136,6 +137,14 @@ int main(int argc, char **argv) {
     GL(glEnableVertexAttribArray)(1);
     GL(glVertexAttribPointer)(0, 3, GL_FLOAT, GL_FALSE, 28, (void *)0);
     GL(glVertexAttribPointer)(1, 4, GL_FLOAT, GL_FALSE, 28, (void *)12);
+    GL(glGenVertexArrays)(1, &g_propVao);
+    GL(glGenBuffers)(1, &g_propVbo);
+    GL(glBindVertexArray)(g_propVao);
+    GL(glBindBuffer)(GL_ARRAY_BUFFER, g_propVbo);
+    for (int i = 0; i < 3; i++) GL(glEnableVertexAttribArray)(i);
+    GL(glVertexAttribPointer)(0, 3, GL_FLOAT, GL_FALSE, 32, (void *)0);
+    GL(glVertexAttribPointer)(1, 2, GL_FLOAT, GL_FALSE, 32, (void *)12);
+    GL(glVertexAttribPointer)(2, 3, GL_FLOAT, GL_FALSE, 32, (void *)20);
 
     Scene scene;
     View view;
@@ -190,7 +199,7 @@ int main(int argc, char **argv) {
     struct Picked { /* what the file dialogs gave, maybe from another thread */
         std::mutex m;
         std::vector<std::string> files;
-        std::string folder, data, obj, bin;
+        std::string folder, data, obj, bin, prop;
     } picked;
     picked.obj = start_obj;
     std::set<int> ownIds = own_effects(ownRoot); /* the effects with own images in ownRoot */
@@ -208,6 +217,16 @@ int main(int argc, char **argv) {
     std::vector<uint8_t> stageDisc; /* its file on the disc, what builds start from */
     bool stageDirty = false;
     std::string stageDir; /* the last export's folder */
+    /* its props for the port (custom.h), in <mods>/fightstages/<id>/: the list, the one picked, the PNGs as textures */
+    std::vector<StageProp> props;
+    int propSel = -1;
+    struct PropImg {
+        GLuint tex = 0;
+        float w = 1, h = 1;
+    };
+    std::map<std::string, PropImg> propImgs; /* by path */
+    bool propMoving = false, propEmitterWanted = false; /* a gizmo drag on a prop; what the PNG dialog is for */
+    StageProp propBefore;                               /* the prop as that drag found it */
     auto mods_root = [&]() {
         size_t e = ownRoot.find_last_of("/\\");
         return e == std::string::npos ? ownRoot : ownRoot.substr(0, e);
@@ -216,6 +235,30 @@ int main(int argc, char **argv) {
         char b[16];
         snprintf(b, sizeof b, "/%04d.bin", fid);
         return mods_root() + b;
+    };
+    auto props_dir = [&](int id) { return mods_root() + "/fightstages/" + std::to_string(id); };
+    /* a prop's PNG as a texture (0 when it can't be read), kept by its path */
+    auto prop_img = [&](const std::string &name) -> const PropImg & {
+        std::string path = props_dir(stageId) + "/" + name;
+        auto it = propImgs.find(path);
+        if (it != propImgs.end()) return it->second;
+        PropImg &pi = propImgs[path];
+        SDL_Surface *png = SDL_LoadPNG(path.c_str());
+        SDL_Surface *rgba = png ? SDL_ConvertSurface(png, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        if (png) SDL_DestroySurface(png);
+        if (!rgba) return pi;
+        GL(glGenTextures)(1, &pi.tex);
+        GL(glBindTexture)(GL_TEXTURE_2D, pi.tex);
+        GL(glPixelStorei)(GL_UNPACK_ALIGNMENT, 4);
+        GL(glPixelStorei)(0x0CF2 /* GL_UNPACK_ROW_LENGTH */, rgba->pitch / 4);
+        GL(glTexImage2D)(GL_TEXTURE_2D, 0, GL_RGBA8, rgba->w, rgba->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba->pixels);
+        GL(glPixelStorei)(0x0CF2, 0);
+        GL(glGenerateMipmap)(GL_TEXTURE_2D);
+        GL(glTexParameteri)(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        GL(glTexParameteri)(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        pi.w = (float)rgba->w, pi.h = (float)rgba->h;
+        SDL_DestroySurface(rgba);
+        return pi;
     };
     auto stage_tables = [&]() {
         std::vector<uint8_t> t;
@@ -345,6 +388,9 @@ int main(int argc, char **argv) {
         if (!stage_load(id, stageEdit, stageInfo, bytes)) return;
         read_file(fid_path(stageInfo.fid), stageDisc);
         stageId = id, stagePart = -1, stageDirty = false, stageMade = StageBuild();
+        props_load(props_dir(id), props), propSel = -1;
+        for (auto &it : propImgs) GL(glDeleteTextures)(1, &it.second.tex);
+        propImgs.clear();
         for (int k = 0; k < (int)stageEdit.parts.size(); k++) stageMade.firstBone.push_back(k + 1);
         status.clear();
         stage_show(std::move(bytes), true);
@@ -384,11 +430,13 @@ int main(int argc, char **argv) {
         std::ofstream(mod_path(459), std::ios::binary).write((const char *)table.data(), (std::streamsize)table.size());
         stageDirty = false;
         stageMods.insert(stageInfo.fid);
+        if (!props_save(props_dir(stageId), props)) note(NOTE_ERROR, "Can't write " + props_dir(stageId) + "/props.json");
         note(NOTE_OK, "Saved stage " + std::to_string(stageId) + " to " + mod_path(stageInfo.fid) + ": the game reads it when it starts");
     };
     /* back to the disc's: the mod's model gone, its table entries the disc's */
     auto stage_revert = [&]() {
         SDL_RemovePath(mod_path(stageInfo.fid).c_str());
+        SDL_RemovePath((props_dir(stageId) + "/props.json").c_str());
         stageMods.erase(stageInfo.fid);
         std::vector<uint8_t> table, disc;
         if (read_file(mod_path(459), table) && read_file(fid_path(459), disc)) {

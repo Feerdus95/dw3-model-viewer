@@ -85,6 +85,7 @@
                 }
                 picked.obj.clear();
             }
+            if (!picked.prop.empty()) prop_add(picked.prop, propEmitterWanted), picked.prop.clear();
             if (!picked.bin.empty()) open_dropped(picked.bin), picked.bin.clear();
             if (!picked.data.empty()) { /* another data folder: everything read again from it */
                 std::string dir = picked.data;
@@ -304,6 +305,13 @@
                 gizmo_make(gz, view_proj(view, (int)vw, (int)vh), o, vw, vh, view.fov, dpi);
             }
         }
+        bool propGz = false;
+        if (section == STAGES && stage_on() && !mode2d && propSel >= 0 && propSel < (int)props.size()) { /* a prop's arrows: the view's y is up */
+            const StageProp &sp = props[propSel];
+            float o[3] = {sp.pos[0], sp.pos[1], -sp.pos[2]};
+            gz.up = 1, gz.rings = false;
+            propGz = gizmo_make(gz, view_proj(view, (int)vw, (int)vh), o, vw, vh, view.fov, dpi);
+        }
         bool charGz = false;
         if (section == MODEL && char_on() && !mode2d && scene.selected > 0) {
             std::vector<int> gb = {scene.selected};
@@ -315,7 +323,7 @@
                 charGz = gz.on;
             }
         }
-        if (!charGz) gz.up = -1, gz.rings = true;
+        if (!charGz && !propGz) gz.up = -1, gz.rings = true;
         if (gz.on) {
             gzHot = gzDrag >= 0 ? gzDrag : vpHover ? gizmo_hit(gz, ImVec2(mp.x - vx, mp.y - vy), dpi) : -1;
             if (gzHot >= 0) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
@@ -323,7 +331,11 @@
         for (int b = 0; b < 3; b++) {
             if (!ImGui::IsMouseClicked(b) || !vpHover) continue;
             vpDown[b] = true, vpUses++;
-            if (b == 0 && gzHot >= 0 && gz.on && charGz) {
+            if (b == 0 && gzHot >= 0 && gz.on && propGz) {
+                stage_mark();
+                propMoving = true, propBefore = props[propSel];
+                gzDrag = gzHot;
+            } else if (b == 0 && gzHot >= 0 && gz.on && charGz) {
                 char_mark();
                 vpMoving = charEditing = true, charMoved = false;
                 gzDrag = gzHot;
@@ -356,7 +368,24 @@
                 pan2[0] = (vc.x + px * zoom2 - mp.x) / zoom2, pan2[1] = (vc.y + py * zoom2 - mp.y) / zoom2;
             }
         } else if (scene.model) {
-            if (vpDown[0] && vpMoving && charEditing && gzDrag >= 0 && charGz) {
+            if (vpDown[0] && propMoving && propSel >= 0 && propSel < (int)props.size()) {
+                /* a prop: an arrow moves it along that axis of the view (the port's z is the view's -z), the box scales it */
+                StageProp &p = props[propSel];
+                if (gzDrag < 3) {
+                    ImVec2 s = gz.tip[gzDrag] - gz.c;
+                    float sl = s.x * s.x + s.y * s.y;
+                    if (sl > 1 && moved) {
+                        float k = (d.x * s.x + d.y * s.y) / sl * gz.len;
+                        p.pos[gzDrag] += gzDrag == 2 ? -k : k;
+                        stageDirty = true;
+                    }
+                } else if (moved) {
+                    float f = powf(1.01f, d.x - d.y);
+                    if (p.emitter) p.radius = std::clamp(p.radius * f, 50.0f, 40000.0f);
+                    else p.scale = std::clamp(p.scale * f, 0.05f, 20.0f);
+                    stageDirty = true;
+                }
+            } else if (vpDown[0] && vpMoving && charEditing && gzDrag >= 0 && charGz) {
                 /* a model's piece: an arrow moves it along that axis of the view, the box scales it */
                 int sb = scene.selected;
                 PieceEdit pe = charEdits.count(sb) ? charEdits[sb] : PieceEdit();
@@ -433,6 +462,13 @@
         for (int b = 0; b < 3; b++) {
             if (!vpDown[b] || ImGui::IsMouseDown(b)) continue;
             vpDown[b] = false;
+            if (b == 0 && propMoving) {
+                gzDrag = -1, propMoving = false;
+                const StageProp &n = props[propSel];
+                if (!memcmp(propBefore.pos, n.pos, 12) && propBefore.scale == n.scale && propBefore.radius == n.radius && !stageHist.undo.empty())
+                    stageHist.undo.pop_back();
+                continue;
+            }
             if (b == 0 && vpMoving && charEditing) {
                 gzDrag = -1, vpMoving = charEditing = false;
                 if (!charMoved && !charUndo.empty()) charUndo.pop_back();
@@ -447,7 +483,38 @@
             }
             if (io.MouseDragMaxDistanceSqr[b] > 25 * dpi * dpi || !inView) continue; /* a drag, not a click */
             int hit = section == TEXTURES ? texHover : mode2d || !scene.model ? -1 : pick_bone(scene, view, vw, vh, mp.x - vx, mp.y - vy);
-            if (b == 0 && (section == TEXTURES || !mode2d)) select_bone(hit), scrollToSel = hit > 0;
+            if (b == 0 && (section == TEXTURES || !mode2d)) {
+                /* a prop under the mouse wins over the stage's parts: the nearest of the quads it is on */
+                int ph = -1;
+                if (section == STAGES && stage_on()) {
+                    M4 pvp = view_proj(view, (int)vw, (int)vh);
+                    float best = 1e30f;
+                    for (int i = 0; i < (int)props.size(); i++) {
+                        const StageProp &p = props[i];
+                        float c[4][3], lo[2] = {1e30f, 1e30f}, hi[2] = {-1e30f, -1e30f};
+                        if (p.emitter) {
+                            float a[3] = {p.pos[0], p.pos[1], -p.pos[2]};
+                            for (int k = 0; k < 4; k++) memcpy(c[k], a, 12);
+                            c[0][1] += p.top;
+                        } else {
+                            prop_corners(p, view.cam.yaw, c);
+                        }
+                        bool all = true;
+                        for (int k = 0; k < (p.emitter ? 2 : 4); k++) {
+                            ImVec2 sp;
+                            if (!to_screen(pvp, c[k], vw, vh, sp)) all = false;
+                            else lo[0] = std::min(lo[0], sp.x), lo[1] = std::min(lo[1], sp.y), hi[0] = std::max(hi[0], sp.x), hi[1] = std::max(hi[1], sp.y);
+                        }
+                        float pad = (p.emitter ? 14 : 4) * dpi, mx = mp.x - vx, my = mp.y - vy;
+                        float area = (hi[0] - lo[0]) * (hi[1] - lo[1]);
+                        if (all && mx >= lo[0] - pad && mx <= hi[0] + pad && my >= lo[1] - pad && my <= hi[1] + pad && area < best) best = area, ph = i;
+                    }
+                }
+                propSel = ph;
+                if (ph >= 0) select_part(-1), propSel = ph;
+                else select_bone(hit);
+                scrollToSel = hit > 0 && ph < 0;
+            }
             if (b == 1) ctxBone = hit, openViewMenu = true;
         }
         if (hoverBone != lastHover || moved) lastHover = hoverBone, stillSince = ImGui::GetTime();
@@ -920,7 +987,11 @@
             GL(glClear)(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         } else {
             float sx = ww / std::max(ds.x, 1.0f), sy = wh / std::max(ds.y, 1.0f);
-            render(scene, view, (int)(vx * sx), (int)((ds.y - vy - vh) * sy), (int)(vw * sx), (int)(vh * sy), spriteDraws, extraModels);
+            std::vector<PropQuad> propQuads;
+            std::vector<float> propLines;
+            if (stage_on()) props_build(propQuads, propLines);
+            render(scene, view, (int)(vx * sx), (int)((ds.y - vy - vh) * sy), (int)(vw * sx), (int)(vh * sy), spriteDraws, extraModels, propQuads,
+                   propLines);
         }
         GL(glViewport)(0, 0, ww, wh);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());

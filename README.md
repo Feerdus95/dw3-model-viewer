@@ -122,6 +122,11 @@ trademark of its owners.
     edit in Blender, and import it back: each object is a part (keep their names to
     keep their keys), its textures repacked into the stage's three texture pages, 16
     colors a piece, shrunk only when they don't fit;
+  - **Props**: PNGs placed anywhere in the stage for the native port: billboards (grass, a flower,
+    a rock; upright facing the camera, or flat in the world) and emitters (petals, snow: a PNG
+    falling through an area). Click one in the view, drag its arrows and its box, set its size,
+    tint, sway and wind in the panel; undo covers it. Save to game writes them to
+    `data/mods/fightstages/<id>/props.json` beside their PNGs;
   - **Save to game** writes the stage in the game's own format to the native port's
     `data/mods/<file>.bin` (with the stages' table, `0459.bin`), which the port reads
     instead of the disc's when it starts; **Revert to the disc's** takes it back.

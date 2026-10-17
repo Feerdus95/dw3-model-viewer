@@ -214,3 +214,94 @@ void CustomEffect::draw(int tick, uint32_t *rgba, int w, int h, int ox, int oy) 
         }
     }
 }
+
+/* --- a stage's props --- */
+
+static void jvec(const Json &o, const char *key, float *out, size_t n) {
+    const Json *v = o.get(key);
+    if (v && v->type == '[')
+        for (size_t i = 0; i < n && i < v->items.size(); i++) out[i] = (float)v->items[i].second.num;
+}
+
+static float jnum(const Json &o, const char *key, float def) {
+    const Json *v = o.get(key);
+    return v && v->type == 'n' ? (float)v->num : def;
+}
+
+bool props_load(const std::string &dir, std::vector<StageProp> &props) {
+    props.clear();
+    std::ifstream f(dir + "/props.json", std::ios::binary);
+    if (!f) return false;
+    std::string text((std::istreambuf_iterator<char>(f)), {});
+    const char *p = text.c_str();
+    Json root;
+    if (!parse(p, root) || root.type != '{') return false;
+    for (int pass = 0; pass < 2; pass++) {
+        const Json *list = root.get(pass ? "emitters" : "props");
+        if (!list) continue;
+        for (const auto &it : list->items) {
+            const Json &o = it.second;
+            const Json *img = o.get("image");
+            if (!img || img->type != 's') continue;
+            StageProp s;
+            s.emitter = pass == 1;
+            s.image = img->str;
+            jvec(o, "pos", s.pos, 3), jvec(o, "size", s.size, 2), jvec(o, "tint", s.tint, 3);
+            if (s.emitter) {
+                s.count = (int)jnum(o, "count", 20), s.fall = jnum(o, "fall", 1), s.wind = jnum(o, "wind", 1);
+                if (const Json *a = o.get("area")) {
+                    jvec(*a, "center", s.pos, 3);
+                    s.radius = jnum(*a, "radius", s.radius), s.top = jnum(*a, "top", s.top);
+                }
+            } else {
+                s.scale = jnum(o, "scale", 1), s.sway = jnum(o, "sway", 0), s.rot = jnum(o, "rot", 0);
+                const Json *fc = o.get("facing");
+                s.fixed = fc && fc->str == "fixed";
+            }
+            props.push_back(s);
+        }
+    }
+    return !props.empty();
+}
+
+bool props_save(const std::string &dir, const std::vector<StageProp> &props) {
+    if (props.empty()) {
+        SDL_RemovePath((dir + "/props.json").c_str());
+        return true;
+    }
+    SDL_CreateDirectory(dir.c_str());
+    std::ofstream f(dir + "/props.json", std::ios::binary);
+    if (!f) return false;
+    char b[256];
+    auto name = [](const std::string &s) {
+        std::string out;
+        for (char c : s) out += c == '"' || c == '\\' ? std::string("\\") + c : std::string(1, c);
+        return out;
+    };
+    for (int pass = 0; pass < 2; pass++) {
+        f << (pass ? ",\n \"emitters\": [" : "{\n \"props\": [");
+        bool first = true;
+        for (const StageProp &s : props) {
+            if (s.emitter != (pass == 1)) continue;
+            f << (first ? "\n" : ",\n") << "  {\n   \"image\": \"" << name(s.image) << "\"";
+            first = false;
+            snprintf(b, sizeof b, ",\n   \"size\": [%g, %g]", s.size[0], s.size[1]);
+            f << b;
+            if (s.tint[0] != 255 || s.tint[1] != 255 || s.tint[2] != 255) {
+                snprintf(b, sizeof b, ",\n   \"tint\": [%g, %g, %g]", s.tint[0], s.tint[1], s.tint[2]);
+                f << b;
+            }
+            if (s.emitter) {
+                snprintf(b, sizeof b, ",\n   \"count\": %d,\n   \"area\": {\"center\": [%g, %g, %g], \"radius\": %g, \"top\": %g},\n   \"fall\": %g,\n   \"wind\": %g",
+                         s.count, s.pos[0], s.pos[1], s.pos[2], s.radius, s.top, s.fall, s.wind);
+            } else {
+                snprintf(b, sizeof b, ",\n   \"pos\": [%g, %g, %g],\n   \"scale\": %g,\n   \"sway\": %g,\n   \"rot\": %g,\n   \"facing\": \"%s\"",
+                         s.pos[0], s.pos[1], s.pos[2], s.scale, s.sway, s.rot, s.fixed ? "fixed" : "camera");
+            }
+            f << b << "\n  }";
+        }
+        f << "\n ]";
+    }
+    f << "\n}\n";
+    return (bool)f;
+}

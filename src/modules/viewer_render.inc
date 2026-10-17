@@ -19,7 +19,15 @@ struct View {
     float stageBg[3] = {0, 0, 0};
 };
 
-static GLuint g_mesh, g_line, g_lineVao, g_lineVbo, g_sprite;
+static GLuint g_mesh, g_line, g_lineVao, g_lineVbo, g_sprite, g_prop, g_propVao, g_propVbo;
+
+/* A stage prop on the view: its PNG's texture on a quad (top left, top right,
+   bottom left, bottom right corners, in the view's world), times a tint */
+struct PropQuad {
+    GLuint tex = 0;
+    float c[4][3] = {};
+    float tint[3] = {1, 1, 1};
+};
 
 /* A sprite effect's picture (the 320x240 screen around its point) as the
    battle draws it: at its point in the view's world, or at a screen position
@@ -38,6 +46,18 @@ struct ExtraModel {
     Scene *scene = nullptr;
     M4 pre;
 };
+
+/* A billboard's corners (top left, top right, bottom left, bottom right) in
+   the view's world. The port's props have y up and z as the game's, which the
+   view has the other way (-z); a billboard faces the camera (YAW) unless fixed */
+static void prop_corners(const StageProp &p, float yaw, float c[4][3]) {
+    float w = p.size[0] * p.scale, h = p.size[1] * p.scale, a = p.fixed ? p.rot * 0.017453293f : yaw;
+    float rx = cosf(a) * w * 0.5f, rz = -sinf(a) * w * 0.5f;
+    for (int k = 0; k < 4; k++) {
+        float side = k & 1 ? 1.0f : -1.0f;
+        c[k][0] = p.pos[0] + rx * side, c[k][1] = p.pos[1] + (k < 2 ? h : 0), c[k][2] = -p.pos[2] + rz * side;
+    }
+}
 
 static void draw_lines(const std::vector<float> &v, const M4 &mvp) {
     if (v.empty()) return;
@@ -114,7 +134,8 @@ static void draw_sprites(const std::vector<SpriteDraw> &sprites, const M4 &vp, i
 
 /* The scene in the view at X, Y (from the window's bottom left), W x H pixels */
 static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vector<SpriteDraw> &sprites = {},
-                   const std::vector<ExtraModel> &extras = {}) {
+                   const std::vector<ExtraModel> &extras = {}, const std::vector<PropQuad> &props = {},
+                   const std::vector<float> &propLines = {}) {
     if (v.stageView)
         GL(glClearColor)(v.stageBg[0], v.stageBg[1], v.stageBg[2], 1);
     else
@@ -207,6 +228,27 @@ static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vec
         if (e.scene && e.scene->model && e.scene->vao) draw_model(*e.scene, e.pre);
     GL(glDisable)(GL_CULL_FACE);
     GL(glPolygonMode)(GL_FRONT_AND_BACK, GL_FILL);
+    if (!props.empty()) {
+        static const int TRI[6] = {0, 1, 2, 1, 3, 2};
+        static const float UV[4][2] = {{0, 0}, {1, 0}, {0, 1}, {1, 1}};
+        GL(glUseProgram)(g_prop);
+        GL(glUniformMatrix4fv)(GL(glGetUniformLocation)(g_prop, "mvp"), 1, GL_FALSE, vp.m);
+        GL(glUniform1i)(GL(glGetUniformLocation)(g_prop, "tex"), 0);
+        GL(glActiveTexture)(GL_TEXTURE0);
+        GL(glBindVertexArray)(g_propVao);
+        GL(glBindBuffer)(GL_ARRAY_BUFFER, g_propVbo);
+        for (const PropQuad &q : props) {
+            float vb[6 * 8];
+            for (int j = 0; j < 6; j++) {
+                float *o = vb + j * 8;
+                int k = TRI[j];
+                memcpy(o, q.c[k], 12), o[3] = UV[k][0], o[4] = UV[k][1], memcpy(o + 5, q.tint, 12);
+            }
+            GL(glBufferData)(GL_ARRAY_BUFFER, sizeof vb, vb, GL_STREAM_DRAW);
+            GL(glBindTexture)(GL_TEXTURE_2D, q.tex);
+            GL(glDrawArrays)(GL_TRIANGLES, 0, 6);
+        }
+    }
     if (v.skeleton) {
         std::vector<float> l;
         for (size_t b = 1; b < m.bones.size(); b++) {
@@ -238,6 +280,10 @@ static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vec
         draw_lines(l, vp);
     }
     draw_sprites(sprites, vp, w, h);
+    if (!propLines.empty()) {
+        GL(glDisable)(GL_DEPTH_TEST);
+        draw_lines(propLines, vp);
+    }
 }
 
 /* A fight stage, from inside: the arena's middle, a little above the ground */

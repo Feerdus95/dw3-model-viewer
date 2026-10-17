@@ -44,3 +44,24 @@ struct CustomEffect {
     /* the frame at TICK over RGBA pixels (W x H), the effect's point at OX, OY */
     void draw(int tick, uint32_t *rgba, int w, int h, int ox, int oy) const;
 };
+
+/* A fight stage's props for the native port (its platform/stagefx.c): the
+   billboards (an upright PNG at a point) and emitters (a PNG falling through
+   an area, like the leaves) of data/mods/fightstages/<id>/props.json, with
+   their PNGs beside it. Positions are the port's world: y up, z as the game's. */
+struct StageProp {
+    bool emitter = false;
+    std::string image; /* a PNG's name in the folder */
+    float pos[3] = {0, 0, 0}; /* a billboard's base; an emitter's area centre */
+    float size[2] = {100, 100}; /* a billboard's width, height; an emitter's smallest, biggest */
+    float tint[3] = {255, 255, 255};
+    float scale = 1, sway = 0, rot = 0; /* billboards: size factor, wind sway, turn when fixed */
+    bool fixed = false;                 /* flat in the world instead of facing the camera */
+    int count = 20;                     /* emitters: particles */
+    float radius = 3000, top = 4000, fall = 1, wind = 1;
+};
+
+/* DIR's props.json; false (and PROPS empty) when there is none */
+bool props_load(const std::string &dir, std::vector<StageProp> &props);
+/* writes it, or deletes it when PROPS is empty */
+bool props_save(const std::string &dir, const std::vector<StageProp> &props);

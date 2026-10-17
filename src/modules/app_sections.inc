@@ -119,6 +119,7 @@
     };
     auto select_part = [&](int k) {
         stagePart = k >= 0 && k < (int)stageEdit.parts.size() ? k : -1;
+        if (stagePart >= 0) propSel = -1;
         scene.selected = stagePart >= 0 && stagePart < (int)stageMade.firstBone.size() ? stageMade.firstBone[stagePart] : -1;
     };
     auto select_bone = [&](int b) {
@@ -196,6 +197,7 @@
     };
     struct StageSnap {
         std::vector<StagePart> parts;
+        std::vector<StageProp> props;
         std::shared_ptr<const std::vector<StageImage>> images; /* shared by the steps that didn't change them */
         uint8_t bg[3];
         StageInfo info;
@@ -560,6 +562,7 @@
     auto stage_snap = [&]() {
         StageSnap s;
         s.parts = stageEdit.parts;
+        s.props = props;
         if (!stageImages || !same_images(*stageImages, stageEdit.images))
             stageImages = std::make_shared<const std::vector<StageImage>>(stageEdit.images);
         s.images = stageImages;
@@ -569,7 +572,8 @@
     };
     auto stage_mark = [&]() { stageHist.push(stage_snap()); }; /* before an edit */
     auto stage_restore = [&](const StageSnap &s) {
-        stageEdit.parts = s.parts, stageEdit.images = *s.images, stageInfo = s.info;
+        stageEdit.parts = s.parts, stageEdit.images = *s.images, stageInfo = s.info, props = s.props;
+        if (propSel >= (int)props.size()) propSel = -1;
         memcpy(stageEdit.bg, s.bg, 3);
         for (int k = 0; k < 3; k++) view.stageBg[k] = s.bg[k] / 255.0f;
         stagePart = s.part < (int)stageEdit.parts.size() ? s.part : -1;
@@ -805,8 +809,23 @@
         else std::swap(own.frames[i], own.frames[to]), ownFrame = to;
         ownDirty = true, fxDrawn = -1;
     };
+    auto prop_delete = [&](int i) {
+        if (i < 0 || i >= (int)props.size()) return;
+        stage_mark();
+        props.erase(props.begin() + i);
+        propSel = -1, stageDirty = true;
+        note(NOTE_INFO, "Removed the prop (Ctrl+Z brings it back)");
+    };
+    auto prop_duplicate = [&](int i) {
+        if (i < 0 || i >= (int)props.size()) return;
+        stage_mark();
+        StageProp c = props[i];
+        c.pos[0] += 300;
+        props.push_back(c);
+        propSel = (int)props.size() - 1, stageDirty = true;
+    };
     auto can_paste = [&]() { return section == EFFECTS ? !frameClip.empty() && fx.id >= 0 : stage_on() && !partClip.parts.empty(); };
-    auto can_edit_sel = [&]() { return section == EFFECTS ? frame_ok() : stage_on() && stagePart >= 0; };
+    auto can_edit_sel = [&]() { return section == EFFECTS ? frame_ok() : stage_on() && (stagePart >= 0 || propSel >= 0); };
     auto do_copy = [&]() {
         if (section == EFFECTS) {
             if (frame_ok()) {
@@ -828,8 +847,8 @@
         }
     };
     auto do_paste = [&]() { section == EFFECTS ? frame_paste() : part_paste(); };
-    auto do_duplicate = [&]() { section == EFFECTS ? frame_edit(ownFrame, 1) : part_duplicate(stagePart); };
-    auto do_delete = [&]() { section == EFFECTS ? frame_edit(ownFrame, 0) : part_delete(stagePart); };
+    auto do_duplicate = [&]() { section == EFFECTS ? frame_edit(ownFrame, 1) : propSel >= 0 ? prop_duplicate(propSel) : part_duplicate(stagePart); };
+    auto do_delete = [&]() { section == EFFECTS ? frame_edit(ownFrame, 0) : propSel >= 0 ? prop_delete(propSel) : part_delete(stagePart); };
     auto own_save = [&]() {
         if (own.save()) ownDirty = false, ownIds = own_effects(ownRoot), note(NOTE_OK, "Saved " + own.dir + "/effect.json");
         else note(NOTE_ERROR, own.error);
@@ -1320,6 +1339,178 @@
         if (addNow >= 0) cat_add(addNow);
         ImGui::End();
     };
+    /* ===== the stage's props: PNGs for the native port, placed anywhere in it ===== */
+    auto prop_add = [&](const std::string &path, bool emitter) {
+        if (!stage_on()) return;
+        size_t sl = path.find_last_of("/\\");
+        std::string name = sl == std::string::npos ? path : path.substr(sl + 1), dir = props_dir(stageId), to = dir + "/" + name;
+        if (name.find("..") != std::string::npos) return note(NOTE_ERROR, "The port can't read a name with \"..\" in it: rename " + name);
+        SDL_CreateDirectory((mods_root() + "/fightstages").c_str());
+        SDL_CreateDirectory(dir.c_str());
+        if (SDL_strcasecmp(path.c_str(), to.c_str()) != 0 && !SDL_CopyFile(path.c_str(), to.c_str()))
+            return note(NOTE_ERROR, to + ": " + SDL_GetError());
+        auto old = propImgs.find(to);
+        if (old != propImgs.end()) GL(glDeleteTextures)(1, &old->second.tex), propImgs.erase(old);
+        const PropImg &pi = prop_img(name);
+        if (!pi.tex) return note(NOTE_ERROR, "Can't read " + to);
+        stage_mark();
+        StageProp s;
+        s.emitter = emitter;
+        s.image = name;
+        s.pos[0] = view.cam.target[0], s.pos[2] = -view.cam.target[2]; /* on the ground where the camera looks */
+        if (emitter) s.size[0] = 60, s.size[1] = 110, s.count = 40;
+        else s.size[1] = 300, s.size[0] = std::max(10.0f, 300 * pi.w / pi.h);
+        props.push_back(s);
+        propSel = (int)props.size() - 1;
+        select_part(-1);
+        stageDirty = true;
+        note(NOTE_OK, "Added " + name + " to the stage's props");
+    };
+    auto pick_prop = [&](bool emitter) {
+        static const SDL_DialogFileFilter PNG = {"PNG images", "png"};
+        propEmitterWanted = emitter;
+        SDL_ShowOpenFileDialog(
+            [](void *u, const char *const *l, int) {
+                if (!l || !*l) return;
+                Picked *p = (Picked *)u;
+                std::lock_guard<std::mutex> lock(p->m);
+                p->prop = *l;
+            },
+            &picked, win, &PNG, 1, nullptr, false);
+    };
+    /* the props on the view: billboards as quads, emitters as their volume and a few of their particles, and the
+       outlines (the picked one yellow) */
+    auto props_build = [&](std::vector<PropQuad> &quads, std::vector<float> &lines) {
+        float yaw = view.cam.yaw, rt[3] = {cosf(yaw), 0, -sinf(yaw)};
+        for (int i = 0; i < (int)props.size(); i++) {
+            const StageProp &p = props[i];
+            bool sel = i == propSel;
+            float col[3] = {1.0f, 0.85f, 0.2f};
+            if (!sel) col[0] = p.emitter ? 0.3f : 0.6f, col[1] = p.emitter ? 0.8f : 0.6f, col[2] = p.emitter ? 1.0f : 0.6f;
+            PropQuad q;
+            for (int k = 0; k < 3; k++) q.tint[k] = p.tint[k] / 255.0f;
+            if (!p.emitter) {
+                prop_corners(p, yaw, q.c);
+                q.tex = prop_img(p.image).tex;
+                if (q.tex) quads.push_back(q);
+                static const int E[4][2] = {{0, 1}, {1, 3}, {3, 2}, {2, 0}};
+                for (const auto &e : E) line(lines, q.c[e[0]], q.c[e[1]], col[0], col[1], col[2]);
+                continue;
+            }
+            float cx = p.pos[0], cy = p.pos[1], cz = -p.pos[2];
+            for (int s = 0; s < 48; s++) {
+                float a = s * 6.2831853f / 48, b = (s + 1) * 6.2831853f / 48;
+                for (float y : {cy, cy + p.top}) {
+                    float u[3] = {cx + cosf(a) * p.radius, y, cz + sinf(a) * p.radius}, v[3] = {cx + cosf(b) * p.radius, y, cz + sinf(b) * p.radius};
+                    line(lines, u, v, col[0], col[1], col[2]);
+                }
+            }
+            for (int s = 0; s < 4; s++) {
+                float a = s * 1.5707963f, lo[3] = {cx + cosf(a) * p.radius, cy, cz + sinf(a) * p.radius}, hi[3] = {lo[0], cy + p.top, lo[2]};
+                line(lines, lo, hi, col[0], col[1], col[2]);
+            }
+            q.tex = prop_img(p.image).tex;
+            if (!q.tex) continue;
+            for (int k = 0; k < std::min(p.count, 60); k++) { /* where a few might be: fixed per particle, not moving */
+                uint32_t h = (uint32_t)(k + 1) * 2654435761u ^ (uint32_t)(i + 1) * 40503u;
+                auto rnd = [&]() { return (h = h * 1664525u + 1013904223u, (h >> 8) / 16777216.0f); };
+                float r = sqrtf(rnd()) * p.radius, a = rnd() * 6.2831853f, y = rnd() * p.top, sz = p.size[0] + rnd() * (p.size[1] - p.size[0]);
+                float at[3] = {cx + cosf(a) * r, cy + y, cz + sinf(a) * r};
+                for (int c = 0; c < 4; c++) {
+                    float side = c & 1 ? 0.5f : -0.5f, up = c < 2 ? 0.5f : -0.5f;
+                    for (int j = 0; j < 3; j++) q.c[c][j] = at[j] + rt[j] * sz * side + (j == 1 ? sz * up : 0);
+                }
+                quads.push_back(q);
+            }
+        }
+    };
+    auto props_panel = [&]() {
+        char head[48];
+        snprintf(head, sizeof head, "Props (%d)", (int)props.size());
+        heading(head);
+        if (button(IC_ADD "  Billboard...")) pick_prop(false);
+        tip("A PNG standing upright in the stage (grass, a flower, a rock), facing the camera. Its transparency cuts it out.");
+        same_line_if_fits(IC_ADD "  Emitter...");
+        if (button(IC_ADD "  Emitter...")) pick_prop(true);
+        tip("A PNG falling through an area, like the forest's leaves: petals, snow, embers");
+        if (!props.empty()) {
+            float lh = ImGui::GetTextLineHeightWithSpacing();
+            if (ImGui::BeginChild("##props", ImVec2(0, std::min((int)props.size(), 6) * lh + 8 * dpi), ImGuiChildFlags_Borders)) {
+                for (int i = 0; i < (int)props.size(); i++) {
+                    const StageProp &p = props[i];
+                    ImGui::PushID(i);
+                    std::string l = std::string(p.emitter ? "Emitter  " : "Billboard  ") + p.image;
+                    if (ImGui::Selectable(l.c_str(), i == propSel)) propSel = i, select_part(-1);
+                    ImGui::PopID();
+                }
+            }
+            ImGui::EndChild();
+        }
+        if (propSel < 0 || propSel >= (int)props.size()) {
+            hint("Click one in the view or in the list. Drag its arrows to place it anywhere; the box scales it. "
+                 "Save to game writes %s", nice_path(props_dir(stageId) + "/props.json").c_str());
+            return;
+        }
+        StageProp &p = props[propSel];
+        StageProp before = p;
+        ImGui::PushFont(g_fontBold);
+        ImGui::TextColored(C_SELECT, "%s", p.image.c_str());
+        ImGui::PopFont();
+        ImGui::SameLine();
+        ImGui::TextDisabled(p.emitter ? "emitter" : "billboard");
+        if (!prop_img(p.image).tex) chip(IC_WARN " PNG missing", C_WARN);
+        /* a field: undo gets the prop as it was when the drag or typing began */
+        auto pe = [&](bool changed) {
+            if (ImGui::IsItemActivated()) stage_mark(), stageHist.undo.back().props[propSel] = before;
+            if (changed) stageDirty = true;
+        };
+        ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.55f);
+        pe(ImGui::DragFloat("X", &p.pos[0], 10, -40000, 40000, "%.0f"));
+        tip("Left and right, in the game's units. In the view: drag the red arrow.");
+        pe(ImGui::DragFloat("Y", &p.pos[1], 10, -40000, 40000, "%.0f"));
+        tip("Up (0 is the ground). In the view: the green arrow.");
+        pe(ImGui::DragFloat("Z", &p.pos[2], 10, -40000, 40000, "%.0f"));
+        tip("Depth, as the port reads it (the view's blue arrow goes the other way). The arena's middle is 0, 0, 0.");
+        if (p.emitter) {
+            pe(ImGui::DragInt("Count", &p.count, 0.2f, 1, 300));
+            pe(ImGui::DragFloat("Radius", &p.radius, 10, 50, 40000, "%.0f"));
+            tip("The area's radius around the point. In the view: the box.");
+            pe(ImGui::DragFloat("Height", &p.top, 10, 50, 40000, "%.0f"));
+            pe(ImGui::DragFloat("Fall", &p.fall, 0.01f, 0, 5, "%.2f"));
+            tip("How fast they fall; 0 floats");
+            pe(ImGui::DragFloat("Wind", &p.wind, 0.01f, 0, 5, "%.2f"));
+            tip("How much the stage's wind carries them");
+            pe(ImGui::DragFloat("Smallest", &p.size[0], 1, 1, 2000, "%.0f"));
+            pe(ImGui::DragFloat("Biggest", &p.size[1], 1, 1, 2000, "%.0f"));
+        } else {
+            pe(ImGui::DragFloat("Width", &p.size[0], 5, 1, 20000, "%.0f"));
+            pe(ImGui::DragFloat("Height", &p.size[1], 5, 1, 20000, "%.0f"));
+            pe(ImGui::DragFloat("Scale", &p.scale, 0.01f, 0.05f, 20, "%.2f"));
+            tip("In the view: the box.");
+            pe(ImGui::DragFloat("Sway", &p.sway, 0.01f, 0, 3, "%.2f"));
+            tip("How much the wind bends it (only in the game); 0 stands still");
+            pe(ImGui::Checkbox("Flat in the world", &p.fixed));
+            tip("Instead of facing the camera, a plane turned about the vertical: a path, a puddle, a banner");
+            if (p.fixed) pe(ImGui::DragFloat("Turn", &p.rot, 0.5f, -180, 180, "%.1f deg"));
+        }
+        float t[3] = {p.tint[0] / 255, p.tint[1] / 255, p.tint[2] / 255};
+        bool tc = ImGui::ColorEdit3("Tint", t, ImGuiColorEditFlags_NoInputs);
+        pe(tc);
+        if (tc)
+            for (int k = 0; k < 3; k++) p.tint[k] = (float)lroundf(t[k] * 255);
+        ImGui::PopItemWidth();
+        if (ImGui::Button(IC_FIT "  Frame")) {
+            view.cam.target[0] = p.pos[0], view.cam.target[1] = p.pos[1] + (p.emitter ? 0 : p.size[1] * p.scale / 2), view.cam.target[2] = -p.pos[2];
+            view.gameCamera = -1;
+        }
+        same_line_if_fits(IC_ADD "  Duplicate");
+        if (ImGui::Button(IC_ADD "  Duplicate")) prop_duplicate(propSel);
+        tip("Ctrl+D");
+        same_line_if_fits(IC_DELETE "  Delete");
+        if (button(IC_DELETE "  Delete", 2)) prop_delete(propSel);
+        tip("Del; Ctrl+Z brings it back");
+    };
+
     auto stages_inspector = [&]() {
         if (!stage_on()) {
             title("No stage open");
@@ -1442,6 +1633,8 @@
         } else {
             hint("Click a part in the view or in the Parts list. Right-click one for its actions. Then drag its arrows to move it, the ring to turn it and the box to scale it.");
         }
+
+        props_panel();
 
         heading("Add parts from another stage");
         if (button(IC_ADD "  Open the catalog...")) catOpen = true;

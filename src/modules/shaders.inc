@@ -153,3 +153,26 @@ in vec2 uv;
 out vec4 frag;
 void main() { frag = texture(tex, uv); }
 )";
+
+/* A stage prop (a billboard's PNG), a quad in the world cut out by its alpha */
+static const char *PROP_VS = R"(#version 330 core
+layout(location = 0) in vec3 pos;
+layout(location = 1) in vec2 uv_in;
+layout(location = 2) in vec3 tint;
+uniform mat4 mvp;
+out vec2 uv;
+out vec3 col;
+void main() { gl_Position = mvp * vec4(pos, 1.0); uv = uv_in; col = tint; }
+)";
+
+static const char *PROP_FS = R"(#version 330 core
+uniform sampler2D tex;
+in vec2 uv;
+in vec3 col;
+out vec4 frag;
+void main() {
+    vec4 t = texture(tex, uv);
+    if (t.a < 0.5) discard;
+    frag = vec4(t.rgb * col, 1.0);
+}
+)";
