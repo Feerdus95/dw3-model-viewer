@@ -25,6 +25,8 @@ static float g_blendBand = 60;                       /* game units over which th
 static std::vector<std::pair<int, int>> g_blendExtra; /* pairs asked for on the command line, on any model */
 static std::vector<std::pair<int, int>> g_blendSkip;  /* pairs left out on the command line */
 static bool g_blendAll = false;                       /* --weld-all: every eligible pair that validates (but the excluded) */
+/* --weld-inspect: DRAW asked-for pairs even when rejected, to look at why. A diagnostic only; --weld-all ignores it */
+static bool g_blendInspect = false;
 static bool g_blendValidateAll = false;               /* --blend-audit: run the verdict for every eligible pair, drawn or not */
 
 /* The tolerances. Units are the game's: a model's vertices are int16, and 100 of them are 1 unit of the OBJ. */
@@ -240,7 +242,8 @@ struct BlendPair {
     int sharedMatched = 0;              /* matched pairs whose two vertices both follow the other bone, with the same weight */
     /* the verdict, over the motions, in units */
     bool judged = false;
-    float sepRigid = 0, sepBlended = 0, disp = 0, pinch = 1; int pinchMo = 0, pinchKey = 0; /* pinch: the smallest the blended ring gets, as a share of its rest radius */
+    float sepRigid = 0, sepBlended = 0, disp = 0, pinch = 1; float pinchVsRigid = 1; /* the same, against the ring the rigid pieces make in that pose (an animated scale shrinks both) */
+    int pinchMo = 0, pinchKey = 0; /* pinch: the smallest the blended ring gets, as a share of its rest radius */
     int dispMo = 0, dispKey = 0;
 };
 
@@ -386,15 +389,16 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
                         rigid = p;
                         return r;
                     };
-                    std::vector<BlendPt> ring;
+                    std::vector<BlendPt> ring, rring;
                     for (const auto &pr : bp.matched) {
                         BlendPt ra, rb;
                         BlendPt xa = place(ma.verts[pr.first], pm.pose[bp.a].world, mab, w.wa[pr.first], ra);
                         BlendPt xb = place(mb.verts[pr.second], pm.pose[bp.b].world, mba, w.wb[pr.second], rb);
                         bp.sepRigid = std::max(bp.sepRigid, blend_dist(ra, rb)), bp.sepBlended = std::max(bp.sepBlended, blend_dist(xa, xb));
-                        ring.push_back(xa);
+                        ring.push_back(xa), rring.push_back(ra);
                     }
                     if (bp.ring > 0 && blend_ring(ring) / bp.ring < bp.pinch) bp.pinch = blend_ring(ring) / bp.ring, bp.pinchMo = (int)mo, bp.pinchKey = key;
+                    if (float rr = blend_ring(rring); rr > 1e-3f) bp.pinchVsRigid = std::min(bp.pinchVsRigid, blend_ring(ring) / rr);
                     for (int side = 0; side < 2; side++) {
                         const Mesh &me = side ? mb : ma;
                         const std::vector<float> &wt = side ? w.wb : w.wa;
@@ -434,7 +438,10 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
         auto key = blend_key(bp.a, bp.b);
         if (skip.count(key)) bp.state = "excluded";
         else if (!strcmp(bp.state, "validated") && want.count(key)) bp.state = "enabled";
-        else if (!strcmp(bp.state, "rejected") && want.count(key) && bp.judged)
+        else if (!strcmp(bp.state, "rejected") && want.count(key) && bp.judged && g_blendInspect && !g_blendAll) {
+            bp.state = "enabled";
+            out.notes.push_back("pair " + std::to_string(bp.a) + "," + std::to_string(bp.b) + " is drawn for inspection although rejected: " + bp.why);
+        } else if (!strcmp(bp.state, "rejected") && want.count(key) && bp.judged)
             out.notes.push_back("pair " + std::to_string(bp.a) + "," + std::to_string(bp.b) + " was asked for but is rejected: " + bp.why);
     }
 
