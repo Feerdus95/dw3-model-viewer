@@ -24,6 +24,13 @@
    "Rest" is the bind pose for path A and the model's idle pose (first motion, first keyframe) for path B. */
 
 static float g_blendBand = 60;                       /* game units over which the blending fades out */
+/* the fall of a weight over the band, 1 at the meeting points to 0 at the band's end (T = distance / band): the smoothstep, or with --weld-soft the
+   Wendland C2 curve (1-t)^4 (4t+1), which also has no curvature at the end, so the last of the band fades into the rigid part without a visible edge */
+static bool g_blendSoft = false;
+static float blend_fall(float t) {
+    if (g_blendSoft) return (1 - t) * (1 - t) * (1 - t) * (1 - t) * (4 * t + 1);
+    return 1 - t * t * (3 - 2 * t);
+}
 static bool g_blendBandAuto = false;                 /* --weld-band-auto: a pair's band is at least BLEND_BAND_RING times its ring's radius */
 static const float BLEND_BAND_RING = 1.2f;           /* the two rings of a pose are often as far apart as the ring is wide, and that gap is taken up over the band */
 static std::vector<std::pair<int, int>> g_blendExtra; /* pairs asked for on the command line, on any model */
@@ -286,7 +293,7 @@ static void blend_weights_at(const BoneBlend &bb, const float *v, float out[3]) 
         if (d <= bb.tol[s]) out[s] = 0.5f;
         else {
             float t = std::min(d / std::max(bb.band[s], 1.0f), 1.0f);
-            out[s] = 0.5f * (1 - t * t * (3 - 2 * t));
+            out[s] = 0.5f * blend_fall(t);
         }
     }
     float sum = out[0] + out[1] + out[2];
@@ -443,7 +450,7 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
                     contact.push_back((int)i);
                 } else {
                     float s = std::min(d / std::max(bp.band, 1.0f), 1.0f);
-                    wt[i] = 0.5f * (1 - s * s * (3 - 2 * s));
+                    wt[i] = 0.5f * blend_fall(s);
                 }
             }
         };
