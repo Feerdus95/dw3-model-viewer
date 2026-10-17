@@ -50,6 +50,7 @@
 #include "modules/shaders.inc"
 #include "modules/math_camera.inc"
 #include "modules/disc_data.inc"
+#include "modules/blend_decisions.inc"
 #include "modules/joint_blend.inc"
 #include "modules/model_scene.inc"
 #include "modules/about_effects.inc"

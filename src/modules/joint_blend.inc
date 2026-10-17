@@ -258,6 +258,7 @@ struct BlendPair {
     float sepRigid = 0, sepBlended = 0, disp = 0, pinch = 1; float pinchVsRigid = 1; /* the smallest blended ring over the rigid ring of the SAME pose (an animated scale shrinks both): the metric the verdict uses */
     int pvMo = 0, pvKey = 0, pvPoses = 0, pvDegen = 0; /* where, and the poses measured and skipped (a rigid ring under BLEND_RING_MIN has no scale) */
     bool review = false;
+    const BlendDecision *decision = nullptr; /* what was decided by eye (blend_decisions.inc), if anyone looked */
     int pinchMo = 0, pinchKey = 0; /* pinch: the smallest the blended ring gets, as a share of its rest radius */
     int dispMo = 0, dispKey = 0;
 };
@@ -307,6 +308,17 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
         if (g_blendAll)
             for (const auto &kv : match) want.insert(kv.first);
     }
+    /* the per-pair decisions: approved are asked for by name, excluded are left out (over everything), pending are kept out of --weld-all */
+    std::map<std::pair<int, int>, const BlendDecision *> decided;
+    for (const BlendDecision &d : BLEND_DECISIONS)
+        if (m.name == d.model) {
+            auto k = blend_key(d.a, d.b);
+            decided[k] = &d;
+            if (only) continue; /* a diagnostic asking for these pairs: the decisions are shown, not applied */
+            if (d.kind == BLEND_APPROVED) want.insert(k), explicitAsk.insert(k);
+            else if (d.kind == BLEND_EXCLUDED) skip.insert(k);
+            else if (!explicitAsk.count(k)) want.erase(k);
+        }
     for (const auto &p : g_blendSkip) skip.insert(blend_key(p.first, p.second));
     for (const BlendSkip &s : BLEND_SKIP)
         if (m.name == s.model) skip.insert(blend_key(s.a, s.b));
@@ -316,6 +328,7 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
         bp.a = kv.first.first, bp.b = kv.first.second, bp.meets = (int)mt.pairs.size();
         bp.path = mt.path, bp.tol = mt.tol, bp.ring = mt.ring, bp.ringMax = mt.ringMax, bp.matched = mt.pairs, bp.nearA = mt.nearA, bp.nearB = mt.nearB;
         bp.why = mt.why;
+        if (decided.count(kv.first)) bp.decision = decided[kv.first];
         if (!mt.why.empty()) bp.state = "rejected";
         out.pairs.push_back(std::move(bp));
     }

@@ -153,6 +153,9 @@ static void blend_audit(Model &m, const Entry &e, const std::vector<SeamJoint> &
             }
         }
         printf("  legacy drift (the nearest vertex pairs at the idle pose) covers %d vertex pairs, %d of them among the matched\n", tracked, trackedOn);
+        if (bp.decision)
+            printf("  decision: %s (%s, inspected at motion %d key %d): %s\n", bp.decision->kind == BLEND_APPROVED ? "approved" : bp.decision->kind == BLEND_EXCLUDED ? "excluded" : "pending",
+                   bp.decision->verdict, bp.decision->motion, bp.decision->key, bp.decision->why);
         printf("  verdict: %s; state: %s\n", bp.why.empty() ? "validated" : (bp.review ? bp.why : "rejected: " + bp.why).c_str(), bp.state);
     }
 }
