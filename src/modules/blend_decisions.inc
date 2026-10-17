@@ -18,8 +18,8 @@ struct BlendDecision {
     const char *why;
 };
 static const BlendDecision BLEND_DECISIONS[] = {
-    {"M366GIRU.BIN", 3, 4, BLEND_PENDING, "improved", 3, 16, "seen from 4 angles at motion 3 key 16 and in 3 other poses: the lump is the forearm bending smoothly into the glove where the rigid view has a step; nothing crushed. Awaiting approval by a person"},
-    {"M126BRAK.BIN", 8, 9, BLEND_PENDING, "improved", 12, 8, "the TAIL (bones 8-10) crack closes with this pair alone, at motion 12 keys 8 and 28 (10<-9 alone leaves it). Awaiting approval by a person"},
+    {"M366GIRU.BIN", 3, 4, BLEND_APPROVED, "improved", 3, 16, "seen from 4 angles at motion 3 key 16 and in 3 other poses: the lump is the forearm bending smoothly into the glove where the rigid view has a step; nothing crushed. Approved after review of the sheets."},
+    {"M126BRAK.BIN", 8, 9, BLEND_APPROVED, "improved", 12, 8, "the TAIL (bones 8-10) crack closes with this pair alone, at motion 12 keys 8 and 28 (10<-9 alone leaves it). Approved after review of the sheets."},
     {"M126BRAK.BIN", 9, 10, BLEND_PENDING, "neutral", 12, 28, "alone it does not close the tail crack at motion 12 keys 8 and 28; no visible effect elsewhere"},
     {"M077REDV.BIN", 11, 12, BLEND_APPROVED, "improved", 6, 8, "the step between the two segments is gone: one smooth limb"},
     {"M025VEGI.BIN", 12, 13, BLEND_APPROVED, "improved", 6, 8, "the step between the two segments is gone: one smooth limb"},

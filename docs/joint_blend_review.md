@@ -14,8 +14,8 @@ Separation: the matched vertices, rigid -> blended, units. Disp: the largest dis
 
 | model | pair | state | pose | ratio | separation | disp | verdict | decision | reason |
 |---|---|---|---|---|---|---|---|---|---|
-| 0356 M366GIRU | b4<-b3 | validated | m3 k16 | 91% | 124.0 -> 1.0 | 62 | improved | **pending** | seen from 4 angles at m3 k16 and in 3 more poses: the lump is the forearm bending smoothly into the glove where the rigid view has a step; nothing crushed. Awaiting approval by a person |
-| 0502 M126BRAK | b9<-b8 | validated | m12 k8 | 96% | 324.0 -> 0.0 | 162 | improved | **pending** | the TAIL (bones 8-10) crack closes with this pair alone, at m12 k8 and k28 (10<-9 alone leaves it). Awaiting approval by a person |
+| 0356 M366GIRU | b4<-b3 | validated | m3 k16 | 91% | 124.0 -> 1.0 | 62 | improved | **approved** | seen from 4 angles at m3 k16 and in 3 more poses: the lump is the forearm bending smoothly into the glove where the rigid view has a step; nothing crushed. Approved after review of the sheets |
+| 0502 M126BRAK | b9<-b8 | validated | m12 k8 | 96% | 324.0 -> 0.0 | 162 | improved | **approved** | the TAIL (bones 8-10) crack closes with this pair alone, at m12 k8 and k28 (10<-9 alone leaves it). Approved after review of the sheets |
 | 0502 M126BRAK | b10<-b9 | validated | m12 k28 | 96% | 216.0 -> 1.0 | 108 | neutral | **pending** | alone it does not close the tail crack at m12 k8 and k28; no visible effect elsewhere |
 | 1381 M077REDV | b12<-b11 | validated | m6 k8 | 92% | 90.0 -> 0.0 | 45 | improved | **approved** | the step between the two segments is gone: one smooth limb |
 | 0736 M025VEGI | b13<-b12 | validated | m6 k8 | 92% | 90.0 -> 1.1 | 45 | improved | **approved** | the step between the two segments is gone: one smooth limb |
@@ -78,8 +78,7 @@ motion 11 key 24 for REDV and VEGI. `python tools/test_blend_policy.py` checks t
 
 ## Second look (after the first five sheets)
 
-Approved now: REDV 12<-11 and VEGI 13<-12 only. Brachiomon 9<-8 and Guilmon 4<-3 are *pending* with an `improved` verdict (a person has to approve them);
-Brachiomon 10<-9 is pending, `neutral`. Bones 8-10 of Brachiomon are its **tail**, not its neck.
+Approved: Guilmon 4<-3, Brachiomon 9<-8, REDV 12<-11 and VEGI 13<-12 (the first two after this second look). Brachiomon 10<-9 stays pending, `neutral`. Bones 8-10 of Brachiomon are its **tail**, not its neck.
 
 Per-pair tail check (the crack closes with 9<-8 alone, not with 10<-9 alone), motion 12 key 8 and key 28:
 
