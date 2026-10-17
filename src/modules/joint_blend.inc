@@ -24,6 +24,8 @@
    "Rest" is the bind pose for path A and the model's idle pose (first motion, first keyframe) for path B. */
 
 static float g_blendBand = 60;                       /* game units over which the blending fades out */
+static bool g_blendBandAuto = false;                 /* --weld-band-auto: a pair's band is at least BLEND_BAND_RING times its ring's radius */
+static const float BLEND_BAND_RING = 1.2f;           /* the two rings of a pose are often as far apart as the ring is wide, and that gap is taken up over the band */
 static std::vector<std::pair<int, int>> g_blendExtra; /* pairs asked for on the command line, on any model */
 static std::vector<std::pair<int, int>> g_blendSkip;  /* pairs left out on the command line */
 static bool g_blendUnreviewed = false;                /* --weld-unreviewed: EXPERIMENT. Also draws the pairs nobody has looked at, if they validate */
@@ -270,6 +272,7 @@ struct BoneBlend {
     std::vector<std::array<float, 3>> meet[3];
     float restW[3][16];
     float tol[3] = {0, 0, 0};
+    float band[3] = {60, 60, 60}; /* the pair's band */
 };
 
 static void blend_weights_at(const BoneBlend &bb, const float *v, float out[3]) {
@@ -282,7 +285,7 @@ static void blend_weights_at(const BoneBlend &bb, const float *v, float out[3]) 
         for (const BlendPt &q : bb.meet[s]) d = std::min(d, blend_dist(p, q));
         if (d <= bb.tol[s]) out[s] = 0.5f;
         else {
-            float t = std::min(d / std::max(g_blendBand, 1.0f), 1.0f);
+            float t = std::min(d / std::max(bb.band[s], 1.0f), 1.0f);
             out[s] = 0.5f * (1 - t * t * (3 - 2 * t));
         }
     }
@@ -299,6 +302,7 @@ struct BlendPair {
     /* matching */
     char path = 0;
     float tol = 0, ring = 0, ringMax = 0;
+    float band = 60;                    /* the game units over which this pair's weights fade (BLEND_BAND_RING with --weld-band-auto) */
     std::vector<std::pair<int, int>> matched;
     int nearA = 0, nearB = 0;
     /* what the pair was given, once its weights are built */
@@ -400,7 +404,7 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
         float ab[16], ba[16];                /* A's rest space to B's, and back */
         std::vector<BlendPt> meet;           /* the meeting points, in the pair's rest space */
         float Ra[16], Rb[16];                /* each bone's rest matrix to it */
-        float tol = 0;
+        float tol = 0, band = 60;
     };
     std::vector<PairW> pw;
     std::vector<int> judge; /* indices into pw to give a verdict */
@@ -425,6 +429,7 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
         std::vector<BlendPt> pa = blend_pts(ma, Ra), pb = blend_pts(mb, Rb);
         PairW w;
         w.pair = (int)k;
+        bp.band = g_blendBandAuto ? std::max(g_blendBand, BLEND_BAND_RING * mt.ring) : g_blendBand;
         std::vector<BlendPt> meet; /* where the pieces meet */
         for (const auto &pr : bp.matched) meet.push_back(pa[pr.first]);
         /* a vertex's w: 0.5 on the meeting points, a smooth fall to 0 at the band's end */
@@ -437,13 +442,14 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
                     wt[i] = 0.5f;
                     contact.push_back((int)i);
                 } else {
-                    float s = std::min(d / std::max(g_blendBand, 1.0f), 1.0f);
+                    float s = std::min(d / std::max(bp.band, 1.0f), 1.0f);
                     wt[i] = 0.5f * (1 - s * s * (3 - 2 * s));
                 }
             }
         };
         weights(pa, w.wa, w.contactA), weights(pb, w.wb, w.contactB);
         w.meet = meet, w.tol = mt.tol;
+        w.band = bp.band;
         memcpy(w.Ra, Ra, sizeof w.Ra), memcpy(w.Rb, Rb, sizeof w.Rb);
         bp.vertsA = (int)pa.size(), bp.vertsB = (int)pb.size();
         bp.contactA = (int)w.contactA.size(), bp.contactB = (int)w.contactB.size();
@@ -517,9 +523,9 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
             if (bp.sepBlended > bp.tol + BLEND_SEP_SLACK) {
                 snprintf(buf, sizeof buf, "matched vertices end up %.0f units apart blended, more than their %.1f at rest (+%.0f rounding)", bp.sepBlended, bp.tol, BLEND_SEP_SLACK);
                 bp.state = "rejected", bp.why = buf;
-            } else if (bp.disp > bp.ringMax + std::max(g_blendBand, 1.0f) + BLEND_SEP_SLACK) {
+            } else if (bp.disp > bp.ringMax + std::max(bp.band, 1.0f) + BLEND_SEP_SLACK) {
                 snprintf(buf, sizeof buf, "a vertex moves %.0f units, more than a ring turned about its middle could carry it (%.0f: its radius %.0f plus the band)", bp.disp,
-                         bp.ringMax + std::max(g_blendBand, 1.0f), bp.ringMax);
+                         bp.ringMax + std::max(bp.band, 1.0f), bp.ringMax);
                 bp.state = "rejected", bp.why = buf;
             } else if (bp.pvPoses == 0) {
                 bp.state = "review", bp.review = true;
@@ -590,7 +596,7 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
             for (size_t i = 0; i < nv; i++) bb.w[i][s] = wt[i];
             bb.meet[s].assign(w.meet.begin(), w.meet.end());
             memcpy(bb.restW[s], sl[s].isA ? w.Ra : w.Rb, sizeof bb.restW[s]);
-            bb.tol[s] = w.tol;
+            bb.tol[s] = w.tol, bb.band[s] = w.band;
         }
         for (auto &v : bb.w) { /* weights that come to more than 1 are scaled to 1 */
             float sum = v[0] + v[1] + v[2];

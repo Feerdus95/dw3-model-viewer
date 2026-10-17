@@ -370,7 +370,7 @@ Five things are kept apart, and nothing is blended unless asked for (the details
 - **Subdivision** (`--weld-subdiv`, an opt-in prototype): a tube between two rings has no vertex to round an elbow with, so at draw time the edges that reach into
   a pair's band and are longer than 20 units get a midpoint (the same for both triangles that share the edge, so no crack opens), a few passes, and the new
   vertices take the weight the same rule gives them. The model's own polygons are untouched. It rounds the bend; it needs a wider band (`--weld-band 120`
-  or more) because the pieces' rings are often 100+ units apart in a pose and that gap is absorbed over the band.
+  or more) because the pieces' rings are often 100+ units apart in a pose and that gap is absorbed over the band. `--weld-band-auto` makes each pair's band at least 1.2 times its ring's radius instead of a fixed 60.
 - **Decisions** (`src/modules/blend_decisions.inc`, with the evidence in `docs/joint_blend_review.md`): pairs looked at with `--inspect`, by eye,
   and what was decided. *Approved* pairs are drawn by default (Guilmon's wrist, Brachiomon's tail 9,8, REDV and VEGI; the geometry must still
   validate); *excluded* ones (BVND's jaws, which close blended) are never drawn, `--weld` included; *pending* ones (neutral,
