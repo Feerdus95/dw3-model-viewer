@@ -305,6 +305,20 @@ with changes you haven't saved, quitting, or reverting a stage asks first.
                                           a close-up: frames bones A and B (--only
                                           draws just those), zoomed F times, seen from
                                           DEG degrees around, as a wireframe
+    dw3mv --inspect A,B --shot out.bmp [--motion N --key K] [--margin F] [--min-extent U]
+          [--only A,B] [--yaw DEG] [--pitch DEG] [--wire] file.bin
+                                          the inspection sheet for one pair: rigid (left) and
+                                          blended (right) at the same pose, camera and lights,
+                                          with the model, pair, motion/key, state, same-pose ring
+                                          ratio, matched-vertex separation and largest displacement
+                                          on top. Without --motion/--key it takes the pose the
+                                          audit measured (the worst ring). The camera frames the
+                                          pair's own bounds, F is the margin (0.25), U a minimum
+                                          extent in game units for framing only (10): nothing is
+                                          scaled. A pair under 50 units is drawn alone (--only
+                                          for any other pair); a pair collapsed to a line or plane
+                                          is reported. A rejected or review pair is drawn for
+                                          inspection and labelled so. It changes presentation only.
     dw3mv --blend-audit [--weld A,B] [file.bin]
                                           for each pair (or the ones asked for), alone: what
                                           detection saw, which vertices matched, how far

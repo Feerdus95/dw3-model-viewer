@@ -5,15 +5,23 @@ int main(int argc, char **argv) {
     std::vector<int> shot_frame; /* bones the picture is framed on */
     std::vector<int> shot_only;  /* the only bones drawn */
     float shot_zoom = 1;
-    bool shot_wire = false, shot_blend = false;
+    bool shot_wire = false, shot_blend = false, shot_posed = false; /* shot_posed: --motion or --key was given */
+    std::vector<int> inspect; /* --inspect A,B: rigid and blended side by side on a pair, at its audited worst pose */
+    float inspect_margin = 0.25f, inspect_min = 10, inspect_pitch = 1e9f;
     float shot_yaw = 1e9f;       /* degrees, around the model */
     bool check = false, users = false, stages = false, seams = false;
     int effect = -1;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--shot" && i + 1 < argc) shot = argv[++i];
-        else if (a == "--motion" && i + 1 < argc) shot_motion = atoi(argv[++i]);
-        else if (a == "--key" && i + 1 < argc) shot_key = atoi(argv[++i]);
+        else if (a == "--motion" && i + 1 < argc) shot_motion = atoi(argv[++i]), shot_posed = true;
+        else if (a == "--key" && i + 1 < argc) shot_key = atoi(argv[++i]), shot_posed = true;
+        else if (a == "--inspect" && i + 1 < argc) {
+            for (const char *c = argv[++i]; *c; c += *c == ',') inspect.push_back(atoi(c)), c += strspn(c, "0123456789");
+            if (inspect.size() == 2) g_blendExtra.push_back({inspect[0], inspect[1]}), g_blendInspect = true;
+        } else if (a == "--margin" && i + 1 < argc) inspect_margin = (float)atof(argv[++i]);
+        else if (a == "--min-extent" && i + 1 < argc) inspect_min = (float)atof(argv[++i]);
+        else if (a == "--pitch" && i + 1 < argc) inspect_pitch = (float)atof(argv[++i]);
         else if (a == "--cam" && i + 1 < argc) shot_cam = atoi(argv[++i]);
         else if (a == "--frame" && i + 1 < argc)
             for (const char *c = argv[++i]; *c; c += *c == ',') shot_frame.push_back(atoi(c)), c += strspn(c, "0123456789");
@@ -429,6 +437,15 @@ int main(int argc, char **argv) {
             fprintf(stderr, "%s\n", status.c_str());
             return 1;
         }
+        const BlendPair *ip = inspect.size() == 2 ? scene.blend.find(inspect[0], inspect[1]) : nullptr;
+        if (inspect.size() == 2 && !ip) {
+            fprintf(stderr, "pair %d,%d is not eligible on %s\n", inspect[0], inspect[1], scene.model->name.c_str());
+            return 1;
+        }
+        if (ip && !shot_posed) { /* the pose the audit measured: the worst ring, else the largest displacement */
+            shot_motion = ip->pvPoses ? ip->pvMo : ip->dispMo ? ip->dispMo : 1;
+            shot_key = ip->pvPoses ? ip->pvKey : ip->dispKey;
+        }
         scene.model->setMotion(shot_motion);
         for (int i = 0; i < shot_key; i++) {
             scene.model->evaluate();
@@ -456,11 +473,77 @@ int main(int argc, char **argv) {
             for (size_t b = 0; b < scene.hidden.size(); b++) scene.hidden[b] = std::find(shot_only.begin(), shot_only.end(), (int)b) == shot_only.end();
             if (shot_frame.empty()) shot_frame = shot_only;
         }
-        if (!shot_frame.empty()) frame_bones(scene, view, shot_frame);
+        if (ip) {
+            /* the camera on the pair's own bounds (never the whole model), margin and a minimum extent for framing only: no geometry or transform is scaled */
+            float lo[3], hi[3];
+            bool vis = scene.model->pose[ip->a].visible && scene.model->pose[ip->b].visible;
+            M4 wa = bone_world(scene, ip->a), wb = bone_world(scene, ip->b);
+            for (int i = 0; i < 3; i++) lo[i] = 1e30f, hi[i] = -1e30f;
+            for (int side = 0; side < 2; side++) {
+                const M4 &w = side ? wb : wa;
+                for (const Vec3s &v : scene.model->meshes[scene.model->bones[side ? ip->b : ip->a].mesh].verts)
+                    for (int i = 0; i < 3; i++) {
+                        float c = w.m[i] * v.x + w.m[4 + i] * v.y + w.m[8 + i] * v.z + w.m[12 + i];
+                        lo[i] = std::min(lo[i], c), hi[i] = std::max(hi[i], c);
+                    }
+            }
+            float r = 0;
+            for (int i = 0; i < 3; i++) view.cam.target[i] = (lo[i] + hi[i]) / 2, r = std::max(r, hi[i] - lo[i]);
+            if (!std::isfinite(r)) r = 0, view.cam.target[0] = view.cam.target[1] = view.cam.target[2] = 0;
+            printf("pair bounds: %.2f x %.2f x %.2f units at (%.0f, %.0f, %.0f); framed on at least %.1f\n", hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], view.cam.target[0], view.cam.target[1], view.cam.target[2], inspect_min);
+            float rmin = 1e30f;
+            for (int i = 0; i < 3; i++) rmin = std::min(rmin, hi[i] - lo[i]);
+            if (r > 0 && rmin < 0.01f * r) printf("note: the pair is collapsed along an axis (flat or a line): edge-on it can't be seen\n");
+            if (r < 50 && shot_only.empty()) { /* a tiny pair: the rest of the model would hide it, so only the pair is drawn (both views) */
+                for (size_t b = 0; b < scene.hidden.size(); b++) scene.hidden[b] = (int)b != ip->a && (int)b != ip->b;
+                printf("note: tiny pair (%.1f units): drawn alone\n", r);
+            }
+            view.cam.dist = std::max(r, std::max(inspect_min, 1e-3f)) / 2 * 3.4f * (1 + 2 * std::max(inspect_margin, 0.0f));
+            view.gameCamera = -1;
+            if (!vis) fprintf(stderr, "note: a piece of the pair is hidden in this pose\n");
+        } else if (!shot_frame.empty()) frame_bones(scene, view, shot_frame);
         view.cam.dist /= shot_zoom;
         view.wireframe = shot_wire;
         view.blendJoints = shot_blend;
         if (shot_yaw < 1e8f) view.cam.yaw = shot_yaw * 3.14159265f / 180;
+        if (inspect_pitch < 1e8f) view.cam.pitch = inspect_pitch * 3.14159265f / 180;
+        if (ip) {
+            /* the same pose, camera, lights and settings twice; only blendJoints differs */
+            const int BAR = 58;
+            std::vector<uint32_t> sheet((size_t)2 * W * (H + BAR), 0xFF202020);
+            for (int half = 0; half < 2; half++) {
+                view.blendJoints = half == 1;
+                render(scene, view, 0, 0, W, H);
+                std::vector<uint32_t> px((size_t)W * H);
+                GL(glReadPixels)(0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+                for (int y = 0; y < H; y++) memcpy(&sheet[(size_t)(BAR + y) * 2 * W + half * W], &px[(size_t)(H - 1 - y) * W], W * 4);
+            }
+            const BlendPair &bp = *ip;
+            char l1[200], l2[300];
+            snprintf(l1, sizeof l1, "%s b%d<-b%d  motion %d key %d (%s)  state %s", scene.model->name.c_str(), bp.b, bp.a, shot_motion, shot_key, shot_posed ? "given" : "audited worst pose", bp.why.empty() ? bp.state : "DRAWN FOR INSPECTION (not validated)");
+            snprintf(l2, sizeof l2, "same-pose ratio %.0f%% (old %.0f%%)  matched separation %.1f rigid>%.1f blended  max displacement %.0f units  rigid ring %.0f", 100 * bp.pinchVsRigid, 100 * bp.pinch,
+                     bp.sepRigid, bp.sepBlended, bp.disp, bp.ring);
+            SDL_Surface *sf = SDL_CreateSurfaceFrom(2 * W, H + BAR, SDL_PIXELFORMAT_ABGR8888, sheet.data(), 2 * W * 4);
+            if (sf) {
+                if (SDL_Renderer *r = SDL_CreateSoftwareRenderer(sf)) {
+                    SDL_SetRenderDrawColor(r, 255, 255, 0, 255);
+                    SDL_RenderDebugText(r, 6, 6, l1);
+                    SDL_SetRenderDrawColor(r, 200, 200, 200, 255);
+                    SDL_RenderDebugText(r, 6, 20, l2);
+                    SDL_SetRenderDrawColor(r, 120, 200, 255, 255);
+                    SDL_RenderDebugText(r, 6, 44, "RIGID (the game's)");
+                    SDL_SetRenderDrawColor(r, 255, 160, 80, 255);
+                    SDL_RenderDebugText(r, W + 6, 44, "BLENDED");
+                    SDL_RenderPresent(r);
+                    SDL_DestroyRenderer(r);
+                }
+                SDL_DestroySurface(sf);
+            }
+            save_bmp(shot, sheet, 2 * W, H + BAR);
+            printf("%s b%d<-b%d: motion %d key %d state %s ratio %.0f%% sep %.1f->%.1f disp %.0f -> %s\n", scene.model->name.c_str(), bp.b, bp.a, shot_motion, shot_key, bp.state, 100 * bp.pinchVsRigid,
+                   bp.sepRigid, bp.sepBlended, bp.disp, shot.c_str());
+            return 0;
+        }
         render(scene, view, 0, 0, W, H);
         std::vector<uint32_t> px(W * H), flipped(W * H);
         GL(glReadPixels)(0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
