@@ -31,6 +31,7 @@ static float blend_fall(float t) {
     if (g_blendSoft) return (1 - t) * (1 - t) * (1 - t) * (1 - t) * (4 * t + 1);
     return 1 - t * t * (3 - 2 * t);
 }
+static bool g_blendNormals = false;                  /* --weld-normals: a matched seam vertex gets one normal, the mean of both pieces' (the lighting doesn't break at the joint) */
 static bool g_blendBridge = false;                   /* --weld-bridge: a sleeve drawn between each enabled pair's rings, instead of the weld (which is off) */
 static bool g_blendBandLimb = false;                 /* --weld-band-limb: a pair's band is at least half the distance between its two bones' origins (the whole limb bends) */
 static bool g_blendSkin = false;                     /* --weld-skin: every flag above, for every model */
@@ -352,6 +353,7 @@ struct BlendPair {
     float tol = 0, ring = 0, ringMax = 0;
     float band = 60;                    /* the game units over which this pair's weights fade (BLEND_BAND_RING with --weld-band-auto) */
     std::vector<std::pair<int, int>> matched;
+    float Ra[16] = {}, Rb[16] = {};     /* each bone's matrix in the pose the matching was done in */
     std::vector<int> ringOrder;         /* indices into matched, in order around the ring (--weld-bridge) */
     float axA[3] = {}, axB[3] = {};     /* the joint's axis, from a toward b, in each bone's own space */
     int nearA = 0, nearB = 0;
@@ -440,6 +442,7 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
         BlendPair bp;
         bp.a = kv.first.first, bp.b = kv.first.second, bp.meets = (int)mt.pairs.size();
         bp.path = mt.path, bp.tol = mt.tol, bp.ring = mt.ring, bp.ringMax = mt.ringMax, bp.matched = mt.pairs, bp.nearA = mt.nearA, bp.nearB = mt.nearB;
+        memcpy(bp.Ra, (*mt.world)[bp.a].data(), sizeof bp.Ra), memcpy(bp.Rb, (*mt.world)[bp.b].data(), sizeof bp.Rb);
         bp.why = mt.why;
         if (decided.count(kv.first)) bp.decision = decided[kv.first];
         if (!mt.why.empty()) bp.state = "rejected";

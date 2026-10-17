@@ -9,7 +9,7 @@ int main(int argc, char **argv) {
     std::vector<int> inspect; /* --inspect A,B: rigid and blended side by side on a pair, at its audited worst pose */
     float inspect_margin = 0.25f, inspect_min = 10, inspect_pitch = 1e9f;
     float shot_yaw = 1e9f;       /* degrees, around the model */
-    bool check = false, users = false, stages = false, seams = false;
+    bool check = false, users = false, stages = false, seams = false, dumpAnim = false;
     int effect = -1;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -39,6 +39,7 @@ int main(int argc, char **argv) {
         else if (a == "--weld-subdiv") g_blendSubdiv = true;
         else if (a == "--weld-soft") g_blendSoft = true;
         else if (a == "--weld-bridge") g_blendBridge = true;
+        else if (a == "--weld-normals") g_blendNormals = true;
         else if (a == "--weld-band-limb") g_blendBandLimb = true;
         else if (a == "--weld-skin") g_blendSkin = true;
         else if (a == "--weld-band-auto") g_blendBandAuto = true;
@@ -57,6 +58,7 @@ int main(int argc, char **argv) {
         else if (a == "--check") check = true;
         else if (a == "--stages") stages = true;
         else if (a == "--seams") seams = true;
+        else if (a == "--dump-anim") dumpAnim = true;
         else if (a == "--effect" && i + 1 < argc) effect = atoi(argv[++i]);
         else if (a == "--effect-users") users = true;
         else open_path = a;
@@ -65,9 +67,10 @@ int main(int argc, char **argv) {
     g_exe_dir = base ? base : "";
     find_data(data);
 
-    if (check || users || stages || seams || !shot.empty() || effect >= 0) attach_console();
+    if (check || users || stages || seams || dumpAnim || !shot.empty() || effect >= 0) attach_console();
     if (stages) return check_stages();
     if (seams) return check_seams(open_path);
+    if (dumpAnim) return dump_anim(open_path, shot_motion);
     if (users) {
         std::map<int, std::set<std::string>> by = effect_users();
         for (int id : effect_ids()) {

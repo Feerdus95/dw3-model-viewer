@@ -430,3 +430,45 @@ static int check_seams(const std::string &only) {
                rims[i]->bone, rims[i]->parent, rims[i]->rimExp[0] * 100, rims[i]->rimExp[1] * 100, rims[i]->rimMotion, rims[i]->rimKey);
     return 0;
 }
+
+/* --dump-anim [--motion N]: a model's bones and, played from the start, every keyframe of motion N (all when none), as text for other tools:
+   "bone B parent P mesh M lo x y z hi x y z" (the mesh's box, in the bone's own space) and "key MO K" followed by one line of 16 floats per bone (world, model units) */
+static int dump_anim(const std::string &only, int motion) {
+    int fid = atoi(std::filesystem::path(only).stem().string().c_str());
+    for (const Entry &e : scan_models()) {
+        if (e.fid != fid) continue;
+        std::vector<uint8_t> bytes;
+        read_file(only, bytes);
+        std::vector<const Fighter *> fs = g_game.forFile(e.fid);
+        Model m;
+        if (!m.load(e.name, std::move(bytes), fs.empty() ? nullptr : fs[0]) || m.motions.empty()) return 1;
+        printf("model %s bones %zu motions %zu\n", e.name.c_str(), m.bones.size(), m.motions.size());
+        for (size_t b = 0; b < m.bones.size(); b++) {
+            float lo[3] = {0, 0, 0}, hi[3] = {0, 0, 0};
+            int mesh = m.bones[b].mesh;
+            if (mesh >= 0 && !m.meshes[mesh].verts.empty()) {
+                const Vec3s &v0 = m.meshes[mesh].verts[0];
+                lo[0] = hi[0] = v0.x, lo[1] = hi[1] = v0.y, lo[2] = hi[2] = v0.z;
+                for (const Vec3s &v : m.meshes[mesh].verts) {
+                    float c[3] = {(float)v.x, (float)v.y, (float)v.z};
+                    for (int i = 0; i < 3; i++) lo[i] = std::min(lo[i], c[i]), hi[i] = std::max(hi[i], c[i]);
+                }
+            }
+            printf("bone %zu parent %d mesh %d lo %.0f %.0f %.0f hi %.0f %.0f %.0f\n", b, m.bones[b].parent, mesh, lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
+        }
+        for (int mo = motion > 0 ? motion : 1; mo <= (motion > 0 ? motion : (int)m.motions.size()); mo++) {
+            m.setMotion(mo);
+            for (int key = 0; key < std::max(m.keyframeCount, 1) && !m.motionDone; key++, m.advance(1)) {
+                m.evaluate();
+                printf("key %d %d\n", mo, key);
+                for (size_t b = 1; b < m.bones.size(); b++) {
+                    printf("%d", m.pose[b].visible ? 1 : 0);
+                    for (int i = 0; i < 16; i++) printf(" %.4f", m.pose[b].world[i]);
+                    printf("\n");
+                }
+            }
+        }
+        return 0;
+    }
+    return 1;
+}

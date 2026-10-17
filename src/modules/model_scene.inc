@@ -72,6 +72,46 @@ static void upload(Scene &s) {
     s.count.assign(m.bones.size(), 0);
     s.hidden.assign(m.bones.size(), false);
     blend_build(m, s.blend);
+    /* --weld-normals: a matched seam vertex gets the mean of both pieces' normals there, so the lighting doesn't break at the joint */
+    std::vector<std::vector<std::array<float, 3>>> snrm(m.bones.size());
+    std::vector<std::vector<char>> snHas(m.bones.size());
+    if (g_blendNormals) {
+        std::vector<std::vector<std::array<float, 3>>> mean(m.bones.size());
+        for (size_t b = 1; b < m.bones.size(); b++) {
+            const Mesh &me = m.meshes[m.bones[b].mesh];
+            mean[b].assign(me.verts.size(), {0, 0, 0});
+            for (const Poly &p : me.polys) {
+                if (!p.lit) continue;
+                for (int k = 0; k < (p.quad ? 4 : 3); k++) {
+                    const Vec3s &pn = me.normals[p.nrm[p.gouraud ? k : 0]];
+                    mean[b][p.idx[k]][0] += pn.x / 4096.0f, mean[b][p.idx[k]][1] += pn.y / 4096.0f, mean[b][p.idx[k]][2] += pn.z / 4096.0f;
+                }
+            }
+            snrm[b].assign(me.verts.size(), {0, 0, 0}), snHas[b].assign(me.verts.size(), 0);
+        }
+        auto rot = [](const float *M, const std::array<float, 3> &n) { /* a direction through a matrix's rotation (column-major, as the points use it) */
+            std::array<float, 3> o;
+            for (int i = 0; i < 3; i++) o[i] = M[i] * n[0] + M[4 + i] * n[1] + M[8 + i] * n[2];
+            return o;
+        };
+        auto unit = [](std::array<float, 3> v) {
+            float l = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+            if (l > 1e-6f) for (float &c : v) c /= l;
+            return v;
+        };
+        for (const BlendPair &bp : s.blend.pairs) {
+            float Rai[16], Rbi[16];
+            if (!bp.why.empty() || bp.matched.size() < 3 || !blend_inverse(bp.Ra, Rai) || !blend_inverse(bp.Rb, Rbi)) continue;
+            for (const auto &pr : bp.matched) {
+                auto wa = rot(bp.Ra, mean[bp.a][pr.first]), wb = rot(bp.Rb, mean[bp.b][pr.second]);
+                std::array<float, 3> sum = {wa[0] + wb[0], wa[1] + wb[1], wa[2] + wb[2]};
+                if (sum[0] * sum[0] + sum[1] * sum[1] + sum[2] * sum[2] < 1e-9f) continue;
+                sum = unit(sum);
+                snrm[bp.a][pr.first] = unit(rot(Rai, sum)), snHas[bp.a][pr.first] = 1;
+                snrm[bp.b][pr.second] = unit(rot(Rbi, sum)), snHas[bp.b][pr.second] = 1;
+            }
+        }
+    }
     std::vector<std::vector<GVert>> cap(m.bones.size()); /* a mesh vertex's first GVert, for the bridge */
     std::vector<std::vector<char>> has(m.bones.size());
     for (size_t b = 1; b < m.bones.size(); b++) {
@@ -95,6 +135,7 @@ static void upload(Scene &s) {
                         const Vec3s &pn = mesh.normals[p.nrm[p.gouraud ? k : 0]];
                         g.nrm[0] = pn.x / 4096.0f, g.nrm[1] = pn.y / 4096.0f, g.nrm[2] = pn.z / 4096.0f;
                     }
+                    if (g_blendNormals && p.lit && snHas[b][p.idx[k]]) g.nrm[0] = snrm[b][p.idx[k]][0], g.nrm[1] = snrm[b][p.idx[k]][1], g.nrm[2] = snrm[b][p.idx[k]][2];
                     g.uv[0] = p.uv[k][0] + 0.5f, g.uv[1] = p.uv[k][1] + 0.5f;
                     g.color[0] = p.color[0], g.color[1] = p.color[1], g.color[2] = p.color[2], g.color[3] = 255;
                     g.tex[0] = (uint16_t)clut_x(p.clut), g.tex[1] = (uint16_t)clut_y(p.clut);
