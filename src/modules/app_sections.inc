@@ -900,8 +900,7 @@
                 ImGui::TableNextColumn();
                 ImGui::Checkbox("Blend joint", &view.blendJoints);
                 std::string blendTip = "Experimental: the pieces at the blended joints follow both bones near them, so they stay together";
-                for (const std::string &n : scene.blend.notes) blendTip += "
-" + n;
+                for (const std::string &n : scene.blend.notes) blendTip += "\n" + n;
                 tip("%s", blendTip.c_str());
             }
             ImGui::TableNextColumn();
