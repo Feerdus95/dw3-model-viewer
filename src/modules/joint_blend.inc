@@ -59,6 +59,7 @@ static const float BLEND_SEARCH = 0.25f;   /* ... and only within this share of 
    says how much twist or bend a pair carries. BLEND_PINCH_MIN is how much it may shrink: 15%, a twist of about 60 degrees or a bend of about 100;
    past that the joint reads as pinched. (Derived before measuring; it was set aside once on poses that turned out to be artifacts of jumping
    to keyframes, and put back when the motions were played properly.) */
+static const float BLEND_OVERLAP_PINCH = 0.6f; /* --weld-overlap draws a pair flagged for review only if its ring keeps this share of the rigid one */
 static const float BLEND_PINCH_WARN = 0.85f; /* a WARNING, not a gate: the blended ring is under this share of the rigid ring of the same pose. The rigid ring is the right
                                                 reference (a scale animation shrinks both); 85% is the 15% of the derivation above, and where the visual inspection of the 40 pairs
                                                 below it found good, neutral and bad joints alike. It says "look", not "bad". */
@@ -114,6 +115,7 @@ struct BlendSkip {
 static const BlendSkip BLEND_SKIP[] = {
     {"M126BRAK.BIN", 16, 17, "Brachiomon's jaw: a hinge, its opening is meant to show"},
     {"M366GIRU.BIN", 6, 7, "Guilmon's jaw: a hinge; blended, the jaw and teeth distort"},
+    {"M145VMON.BIN", 20, 21, "Veemon's jaw: a hinge; blended, the mouth's inside is hidden"},
 };
 
 /* the inverse of an affine matrix (column-major) */
@@ -296,7 +298,7 @@ static BlendMatch blend_force(const BlendRest &r, const Mesh &ma, const Mesh &mb
     std::vector<BlendPt> mid;
     float gap = 0;
     /* overlap (K > 4, idle pose): every vertex within a tenth of the smaller piece of the other, at most K, and at least the 4 nearest */
-    float reach = K > 4 ? 0.1f * std::min(blend_size(pa), blend_size(pb)) : 0;
+    float reach = K > 4 ? 0.2f * std::min(blend_size(pa), blend_size(pb)) : 0;
     for (size_t i = 0; i < order.size() && i < K; i++) {
         int ia = order[i];
         if (i >= 4 && d[ia] > reach) break;
@@ -411,7 +413,7 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
         for (const char *n : BLEND_SKIN_MODELS) skinModel = skinModel || m.name == n;
         bool ovl = false;
         if (!mt.candidate && (skinModel || g_blendOverlap) && m.bones[key.first].mesh >= 0 && m.bones[key.second].mesh >= 0) {
-            mt = blend_force(rest, m.meshes[m.bones[key.first].mesh], m.meshes[m.bones[key.second].mesh], key.first, key.second, skinModel ? 4 : 64, !skinModel);
+            mt = blend_force(rest, m.meshes[m.bones[key.first].mesh], m.meshes[m.bones[key.second].mesh], key.first, key.second, skinModel ? 4 : 128, !skinModel);
             ovl = !skinModel && mt.candidate;
         }
         if (ovl) overlapKeys.insert(key);
@@ -426,7 +428,7 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
         for (const auto &p : g_blendExtra) want.insert(blend_key(p.first, p.second));
         explicitAsk = want;
     }
-    for (const auto &k : overlapKeys) want.insert(k), explicitAsk.insert(k);
+    for (const auto &k : overlapKeys) want.insert(k); /* not explicitAsk: an overlap pair flagged for review (it pinches) is left out */
     /* the per-pair decisions: approved are asked for by name, excluded are left out (over everything), pending are drawn only by name */
     std::map<std::pair<int, int>, const BlendDecision *> decided;
     for (const BlendDecision &d : BLEND_DECISIONS)
@@ -649,7 +651,7 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
         auto key = blend_key(bp.a, bp.b);
         if (skip.count(key)) bp.state = "excluded";
         else if (!strcmp(bp.state, "validated") && want.count(key)) bp.state = "enabled";
-        else if (!strcmp(bp.state, "review") && explicitAsk.count(key)) {
+        else if (!strcmp(bp.state, "review") && (explicitAsk.count(key) || (overlapKeys.count(key) && want.count(key) && bp.pinchVsRigid >= BLEND_OVERLAP_PINCH))) {
             bp.state = "enabled";
             out.notes.push_back("pair " + std::to_string(bp.a) + "," + std::to_string(bp.b) + " is drawn although flagged for review: " + bp.why);
         }
@@ -676,7 +678,17 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
         std::vector<Slot> &sl = slots[b];
         if (sl.empty()) continue;
         std::sort(sl.begin(), sl.end(), [](const Slot &x, const Slot &y) { return x.partner < y.partner; });
-        if (sl.size() > 3) {
+        if (sl.size() > 3) { /* the 3 that meet at the most vertices stay (ties: the lower bone) */
+            std::stable_sort(sl.begin(), sl.end(), [&](const Slot &x, const Slot &y) { return out.pairs[pw[x.pair].pair].meets > out.pairs[pw[y.pair].pair].meets; });
+            std::vector<Slot> all = sl;
+            sl.resize(3);
+            std::sort(sl.begin(), sl.end(), [](const Slot &x, const Slot &y) { return x.partner < y.partner; });
+            std::string kept, left;
+            for (const Slot &s : sl) kept += (kept.empty() ? "" : " ") + std::to_string(s.partner);
+            for (const Slot &s : all) if (std::none_of(sl.begin(), sl.end(), [&](const Slot &k) { return k.partner == s.partner; })) left += (left.empty() ? "" : " ") + std::to_string(s.partner);
+            out.notes.push_back("bone " + std::to_string(b) + " is in " + std::to_string(all.size()) + " pairs; used (partner bones): " + kept + "; left out: " + left);
+        }
+        if (false) {
             std::string kept, left;
             for (size_t s = 0; s < sl.size(); s++) {
                 const BlendPair *bp = out.find((int)b, sl[s].partner);
