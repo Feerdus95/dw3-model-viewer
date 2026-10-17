@@ -62,3 +62,16 @@ Separation: the matched vertices, rigid -> blended, units. Disp: the largest dis
 | 1381 M077REDV | b10<-b9 | review | m11 k44 | 84% | 118.0 -> 0.0 | 59 | neutral | **pending** | no visible difference |
 | 1148 M066VAND | b3<-b2 | validated | m12 k24 | 99% | 294.0 -> 17.3 | 148 | inconclusive | **pending** | collapsed to a line at the audited pose; at motion 1 key 0 it shows no difference |
 | 1112 M375TAOM | b13<-b12 | validated | m18 k8 | 95% | 182.0 -> 6.3 | 91 | neutral | **pending** | shows no difference at motion 1 key 0 |
+
+## Reproducing the five approved pairs
+
+From `viewer/`, with `DATA=..\native\data\files`. Sheets: rigid left, blended right, same pose and camera. Drop `--only A,B` for the surrounding model.
+
+    dw3mv --inspect 3,4  --only 3,4  --motion 3  --key 16 --shot wrist_ring.bmp   %DATA%\0356.bin   (Guilmon wrist; also --motion 17 --key 42, the README's reference pose)
+    dw3mv --inspect 8,9  --only 8,9  --motion 2  --key 64 --shot neck98.bmp       %DATA%\0502.bin   (Brachiomon neck 9<-8)
+    dw3mv --inspect 9,10 --only 9,10 --motion 12 --key 28 --shot neck109.bmp      %DATA%\0502.bin   (Brachiomon neck 10<-9)
+    dw3mv --inspect 11,12 --only 11,12 --motion 6 --key 8  --shot redv_ring.bmp   %DATA%\1381.bin   (REDV 12<-11; extreme: --motion 11 --key 24)
+    dw3mv --inspect 12,13 --only 12,13 --motion 6 --key 8  --shot vegi_ring.bmp   %DATA%\0736.bin   (VEGI 13<-12; extreme: --motion 11 --key 24)
+
+The motion and key are the audited worst-ring pose; the "disp" pose (largest displacement) is the same for the first three pairs and
+motion 11 key 24 for REDV and VEGI. `python tools/test_blend_policy.py` checks the activation policy (what is and is not drawn).
