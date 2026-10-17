@@ -14,9 +14,9 @@ Separation: the matched vertices, rigid -> blended, units. Disp: the largest dis
 
 | model | pair | state | pose | ratio | separation | disp | verdict | decision | reason |
 |---|---|---|---|---|---|---|---|---|---|
-| 0356 M366GIRU | b4<-b3 | enabled | m3 k16 | 91% | 124.0 -> 1.0 | 62 | improved | **approved** | wrist corner softened; the first reference case (seen earlier at motion 17 key 42, and at the audited pose) |
-| 0502 M126BRAK | b9<-b8 | validated | m2 k64 | 96% | 324.0 -> 0.0 | 162 | improved | **approved** | neck crack between segments closed (seen earlier); separation 324 -> 0 |
-| 0502 M126BRAK | b10<-b9 | validated | m12 k28 | 96% | 216.0 -> 1.0 | 108 | improved | **approved** | neck crack between segments closed (seen earlier); separation 216 -> 1 |
+| 0356 M366GIRU | b4<-b3 | validated | m3 k16 | 91% | 124.0 -> 1.0 | 62 | improved | **pending** | seen from 4 angles at m3 k16 and in 3 more poses: the lump is the forearm bending smoothly into the glove where the rigid view has a step; nothing crushed. Awaiting approval by a person |
+| 0502 M126BRAK | b9<-b8 | validated | m12 k8 | 96% | 324.0 -> 0.0 | 162 | improved | **pending** | the TAIL (bones 8-10) crack closes with this pair alone, at m12 k8 and k28 (10<-9 alone leaves it). Awaiting approval by a person |
+| 0502 M126BRAK | b10<-b9 | validated | m12 k28 | 96% | 216.0 -> 1.0 | 108 | neutral | **pending** | alone it does not close the tail crack at m12 k8 and k28; no visible effect elsewhere |
 | 1381 M077REDV | b12<-b11 | validated | m6 k8 | 92% | 90.0 -> 0.0 | 45 | improved | **approved** | the step between the two segments is gone: one smooth limb |
 | 0736 M025VEGI | b13<-b12 | validated | m6 k8 | 92% | 90.0 -> 1.1 | 45 | improved | **approved** | the step between the two segments is gone: one smooth limb |
 | 1766 M378BVND | b3<-b2 | validated | m51 k176 | 89% | 1600.0 -> 1.4 | 801 | degraded | **excluded** | a jaw hinge: blended, the open mouth closes (it validates by the numbers; the metrics cannot tell a hinge) |
@@ -68,10 +68,23 @@ Separation: the matched vertices, rigid -> blended, units. Disp: the largest dis
 From `viewer/`, with `DATA=..\native\data\files`. Sheets: rigid left, blended right, same pose and camera. Drop `--only A,B` for the surrounding model.
 
     dw3mv --inspect 3,4  --only 3,4  --motion 3  --key 16 --shot wrist_ring.bmp   %DATA%\0356.bin   (Guilmon wrist; also --motion 17 --key 42, the README's reference pose)
-    dw3mv --inspect 8,9  --only 8,9  --motion 2  --key 64 --shot neck98.bmp       %DATA%\0502.bin   (Brachiomon neck 9<-8)
-    dw3mv --inspect 9,10 --only 9,10 --motion 12 --key 28 --shot neck109.bmp      %DATA%\0502.bin   (Brachiomon neck 10<-9)
+    dw3mv --inspect 8,9  --only 8,9  --motion 12 --key 8 --shot tail98.bmp       %DATA%\0502.bin   (Brachiomon tail 9<-8)
+    dw3mv --inspect 9,10 --only 9,10 --motion 12 --key 28 --shot tail109.bmp      %DATA%\0502.bin   (Brachiomon tail 10<-9)
     dw3mv --inspect 11,12 --only 11,12 --motion 6 --key 8  --shot redv_ring.bmp   %DATA%\1381.bin   (REDV 12<-11; extreme: --motion 11 --key 24)
     dw3mv --inspect 12,13 --only 12,13 --motion 6 --key 8  --shot vegi_ring.bmp   %DATA%\0736.bin   (VEGI 13<-12; extreme: --motion 11 --key 24)
 
 The motion and key are the audited worst-ring pose; the "disp" pose (largest displacement) is the same for the first three pairs and
 motion 11 key 24 for REDV and VEGI. `python tools/test_blend_policy.py` checks the activation policy (what is and is not drawn).
+
+## Second look (after the first five sheets)
+
+Approved now: REDV 12<-11 and VEGI 13<-12 only. Brachiomon 9<-8 and Guilmon 4<-3 are *pending* with an `improved` verdict (a person has to approve them);
+Brachiomon 10<-9 is pending, `neutral`. Bones 8-10 of Brachiomon are its **tail**, not its neck.
+
+Per-pair tail check (the crack closes with 9<-8 alone, not with 10<-9 alone), motion 12 key 8 and key 28:
+
+    dw3mv --shot a.bmp --motion 12 --key 8 --only 8,9,10 --zoom 1.6 %DATA%\0502.bin                                    (rigid)
+    dw3mv --shot b.bmp --motion 12 --key 8 --only 8,9,10 --zoom 1.6 --blend --weld 8,9 %DATA%\0502.bin                 (9<-8 only)
+    dw3mv --shot c.bmp --motion 12 --key 8 --only 8,9,10 --zoom 1.6 --blend --weld 9,10 %DATA%\0502.bin                (10<-9 only)
+
+Guilmon's wrist, from four angles: `dw3mv --inspect 3,4 --only 3,4 --yaw 34|124|214|304 --zoom 1.8 --motion 3 --key 16 --shot w.bmp %DATA%\0356.bin`.

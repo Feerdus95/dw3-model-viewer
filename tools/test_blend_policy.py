@@ -50,7 +50,7 @@ def check(ok, what):
 
 
 approved = {k for k, v in DEC.items() if v == 'approved'}
-check(len(approved) == 5, 'the table has 5 approved pairs (%d)' % len(approved))
+check(len(approved) == 2, 'the table has 2 approved pairs, REDV and VEGI (%d)' % len(approved))
 dflt = enabled([])
 check(dflt == approved, 'default enables exactly the approved pairs (%d: %s)' % (len(dflt), sorted(dflt ^ approved)))
 

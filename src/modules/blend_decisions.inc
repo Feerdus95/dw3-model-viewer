@@ -1,10 +1,11 @@
 /* The per-pair decisions: which joints were looked at (--inspect, at the audited worst pose, rigid beside blended), and what was decided.
    Kept apart from eligibility and from the geometric verdict, and explicit and deterministic: nothing here is a rule or a threshold.
-     APPROVED  a clear visual improvement and no relevant deformation: drawn by default (when the geometry still validates).
+     APPROVED  a clear visual improvement, seen in more than one pose, and no relevant deformation: drawn by default (when the geometry still validates).
      EXCLUDED  a destructive deformation or a joint that must stay rigid (a hinge): never drawn, not even by --weld-unreviewed or --weld.
      PENDING   not enough evidence, an ambiguous or unjudgeable pose, or a defect not resolved: drawn only when asked for by name (--weld),
                never by --weld-unreviewed. "Neutral" (no change worth having) is pending too.
    A pair nobody has looked at has no entry; --weld-unreviewed still draws it if it validates (an experiment, not a decision).
+   The kind is the ACTIVATION state; the verdict is what the sheets showed, and only at the poses inspected (MOTION, KEY): a kind is not evidence.
    Bones are the file's numbers; MOTION and KEY are the pose that was inspected. The figures (ratio, separation, displacement) are
    what `dw3mv --blend-audit` prints for the pair; docs/joint_blend_review.md has them next to each decision. */
 enum BlendDecisionKind { BLEND_APPROVED, BLEND_EXCLUDED, BLEND_PENDING };
@@ -17,9 +18,9 @@ struct BlendDecision {
     const char *why;
 };
 static const BlendDecision BLEND_DECISIONS[] = {
-    {"M366GIRU.BIN", 3, 4, BLEND_APPROVED, "improved", 3, 16, "wrist corner softened; the first reference case (seen earlier at motion 17 key 42, and at the audited pose)"},
-    {"M126BRAK.BIN", 8, 9, BLEND_APPROVED, "improved", 2, 64, "neck crack between segments closed (seen earlier); separation 324 -> 0"},
-    {"M126BRAK.BIN", 9, 10, BLEND_APPROVED, "improved", 12, 28, "neck crack between segments closed (seen earlier); separation 216 -> 1"},
+    {"M366GIRU.BIN", 3, 4, BLEND_PENDING, "improved", 3, 16, "seen from 4 angles at motion 3 key 16 and in 3 other poses: the lump is the forearm bending smoothly into the glove where the rigid view has a step; nothing crushed. Awaiting approval by a person"},
+    {"M126BRAK.BIN", 8, 9, BLEND_PENDING, "improved", 12, 8, "the TAIL (bones 8-10) crack closes with this pair alone, at motion 12 keys 8 and 28 (10<-9 alone leaves it). Awaiting approval by a person"},
+    {"M126BRAK.BIN", 9, 10, BLEND_PENDING, "neutral", 12, 28, "alone it does not close the tail crack at motion 12 keys 8 and 28; no visible effect elsewhere"},
     {"M077REDV.BIN", 11, 12, BLEND_APPROVED, "improved", 6, 8, "the step between the two segments is gone: one smooth limb"},
     {"M025VEGI.BIN", 12, 13, BLEND_APPROVED, "improved", 6, 8, "the step between the two segments is gone: one smooth limb"},
     {"M378BVND.BIN", 2, 3, BLEND_EXCLUDED, "degraded", 51, 176, "a jaw hinge: blended, the open mouth closes (it validates by the numbers; the metrics cannot tell a hinge)"},

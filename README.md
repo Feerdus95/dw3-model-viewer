@@ -364,7 +364,7 @@ Five things are kept apart, and nothing is blended unless asked for (the details
   Brachiomon and Guilmon: hinges whose opening is meant to show). Bones are the file's numbers; `--seams` and `--blend-audit` show each
   pair's state: eligible, validated, review, rejected, enabled or excluded.
 - **Decisions** (`src/modules/blend_decisions.inc`, with the evidence in `docs/joint_blend_review.md`): pairs looked at with `--inspect`, by eye,
-  and what was decided. *Approved* pairs are drawn by default (Guilmon's wrist, Brachiomon's neck, REDV and VEGI limbs; the geometry must still
+  and what was decided. *Approved* pairs are drawn by default (REDV and VEGI limbs; the geometry must still
   validate); *excluded* ones (BVND's jaws, which close blended) are never drawn, `--weld` included; *pending* ones (neutral,
   inconclusive or degraded) are drawn only by name with `--weld`, never in bulk. A pair nobody looked at has no entry and is drawn only by `--weld-unreviewed`: an experiment, not a decision. The table is not a rule and holds no threshold. `--blend-audit` prints each
   pair's decision.

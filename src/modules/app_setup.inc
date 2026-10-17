@@ -523,7 +523,7 @@ int main(int argc, char **argv) {
             const BlendPair &bp = *ip;
             char l1[200], l2[300];
             snprintf(l1, sizeof l1, "%s b%d<-b%d  motion %d key %d (%s)  state %s", scene.model->name.c_str(), bp.b, bp.a, shot_motion, shot_key, shot_posed ? "given" : "audited worst pose", bp.why.empty() ? bp.state : "DRAWN FOR INSPECTION (not validated)");
-            if (bp.decision) snprintf(l1 + strlen(l1), sizeof l1 - strlen(l1), "  decision %s (%s)", bp.decision->kind == BLEND_APPROVED ? "approved" : bp.decision->kind == BLEND_EXCLUDED ? "excluded" : "pending", bp.decision->verdict);
+            if (bp.decision) snprintf(l1 + strlen(l1), sizeof l1 - strlen(l1), "  activation: %s | visual verdict: %s (at m%d k%d)", bp.decision->kind == BLEND_APPROVED ? "approved" : bp.decision->kind == BLEND_EXCLUDED ? "excluded" : "pending", bp.decision->verdict, bp.decision->motion, bp.decision->key);
             snprintf(l2, sizeof l2, "same-pose ratio %.0f%% (old %.0f%%)  matched separation %.1f rigid>%.1f blended  max displacement %.0f units  rigid ring %.0f", 100 * bp.pinchVsRigid, 100 * bp.pinch,
                      bp.sepRigid, bp.sepBlended, bp.disp, bp.ring);
             SDL_Surface *sf = SDL_CreateSurfaceFrom(2 * W, H + BAR, SDL_PIXELFORMAT_ABGR8888, sheet.data(), 2 * W * 4);
