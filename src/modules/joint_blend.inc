@@ -76,6 +76,14 @@ static float blend_fade(const float *A, const float *B) {
     float t = std::max(0.0f, std::min(1.0f, (theta - BLEND_FADE_START) / (BLEND_FADE_END - BLEND_FADE_START)));
     return 1 - t * t * (3 - 2 * t);
 }
+/* SUBDIVISION (opt-in, --weld-subdiv): a tube between two rings has no vertex to round an elbow with, so the triangles that reach into a pair's band are
+   split into four (midpoints) until their edges are under BLEND_SUBDIV_EDGE, and the new vertices get the weight the same rule gives them. A draw-time
+   copy: the model's own polygons are untouched. */
+static bool g_blendSubdiv = false;
+static const float BLEND_SUBDIV_EDGE = 20; /* game units (a fifth of an OBJ unit) */
+static const int BLEND_SUBDIV_DEPTH = 5;
+/* the weights of a point (the bone's own mesh space) that isn't a vertex: as blend_build gives a vertex, then scaled if they come to more than 1 */
+static void blend_weights_at(const struct BoneBlend &bb, const float *v, float out[3]);
 static const float BLEND_SEP_SLACK = 1.0f; /* blended, matched vertices may be this much (rounding) farther apart than at rest */
 /* Displacement: a vertex follows its partner bone by w (at most 0.5) of the way, so it moves at most w times the two bones' offset, and for a
    ring turned about its own middle that offset is at most twice the vertex's distance L from the middle: displacement <= L. A weighted vertex is
@@ -257,7 +265,30 @@ struct BoneBlend {
     int partner[3] = {0, 0, 0};
     float rel[3][16];                   /* partner's rest inverse * this bone's rest: this bone's space to the partner's */
     std::vector<std::array<float, 3>> w; /* by mesh vertex */
+    /* what the weights were made from, for vertices that don't exist yet (the subdivision): per partner, the meeting points in the pair's rest
+       space, this bone's rest matrix to that space, and the tolerance of a point on the meeting points */
+    std::vector<std::array<float, 3>> meet[3];
+    float restW[3][16];
+    float tol[3] = {0, 0, 0};
 };
+
+static void blend_weights_at(const BoneBlend &bb, const float *v, float out[3]) {
+    out[0] = out[1] = out[2] = 0;
+    for (int s = 0; s < bb.n; s++) {
+        const float *R = bb.restW[s];
+        BlendPt p;
+        for (int i = 0; i < 3; i++) p[i] = R[i] * v[0] + R[4 + i] * v[1] + R[8 + i] * v[2] + R[12 + i];
+        float d = 1e30f;
+        for (const BlendPt &q : bb.meet[s]) d = std::min(d, blend_dist(p, q));
+        if (d <= bb.tol[s]) out[s] = 0.5f;
+        else {
+            float t = std::min(d / std::max(g_blendBand, 1.0f), 1.0f);
+            out[s] = 0.5f * (1 - t * t * (3 - 2 * t));
+        }
+    }
+    float sum = out[0] + out[1] + out[2];
+    if (sum > 1) out[0] /= sum, out[1] /= sum, out[2] /= sum;
+}
 
 struct BlendPair {
     int a = 0, b = 0;                   /* a < b */
@@ -367,6 +398,9 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
         std::vector<float> wa, wb;
         std::vector<int> contactA, contactB; /* the vertices on the pieces' meeting points */
         float ab[16], ba[16];                /* A's rest space to B's, and back */
+        std::vector<BlendPt> meet;           /* the meeting points, in the pair's rest space */
+        float Ra[16], Rb[16];                /* each bone's rest matrix to it */
+        float tol = 0;
     };
     std::vector<PairW> pw;
     std::vector<int> judge; /* indices into pw to give a verdict */
@@ -409,6 +443,8 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
             }
         };
         weights(pa, w.wa, w.contactA), weights(pb, w.wb, w.contactB);
+        w.meet = meet, w.tol = mt.tol;
+        memcpy(w.Ra, Ra, sizeof w.Ra), memcpy(w.Rb, Rb, sizeof w.Rb);
         bp.vertsA = (int)pa.size(), bp.vertsB = (int)pb.size();
         bp.contactA = (int)w.contactA.size(), bp.contactB = (int)w.contactB.size();
         for (float x : w.wa) bp.weightedA += x > 0;
@@ -552,6 +588,9 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
             memcpy(bb.rel[s], sl[s].isA ? w.ab : w.ba, sizeof bb.rel[s]);
             const std::vector<float> &wt = sl[s].isA ? w.wa : w.wb;
             for (size_t i = 0; i < nv; i++) bb.w[i][s] = wt[i];
+            bb.meet[s].assign(w.meet.begin(), w.meet.end());
+            memcpy(bb.restW[s], sl[s].isA ? w.Ra : w.Rb, sizeof bb.restW[s]);
+            bb.tol[s] = w.tol;
         }
         for (auto &v : bb.w) { /* weights that come to more than 1 are scaled to 1 */
             float sum = v[0] + v[1] + v[2];

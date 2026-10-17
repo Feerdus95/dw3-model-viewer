@@ -76,6 +76,66 @@ static void upload(Scene &s) {
                 }
             }
         }
+        if (bw && g_blendSubdiv) {
+            /* the edges that reach into the band and are long get a midpoint, the same for both triangles that share one (a decision about the edge alone),
+               so no crack opens: a triangle splits along the edges flagged, in 2, 3 or 4. A few passes. */
+            std::vector<GVert> tris(v.begin() + s.first[b], v.end());
+            v.resize(s.first[b]);
+            auto wsum = [](const GVert &g) { return g.wgt[0] + g.wgt[1] + g.wgt[2]; };
+            auto len = [](const GVert &x, const GVert &y) {
+                float d = 0;
+                for (int i = 0; i < 3; i++) d += (x.pos[i] - y.pos[i]) * (x.pos[i] - y.pos[i]);
+                return sqrtf(d);
+            };
+            auto midpoint = [&](const GVert &x, const GVert &y) { /* every attribute halfway, the normal renormalised, the weights from the rule */
+                GVert g = x;
+                for (int i = 0; i < 3; i++) g.pos[i] = (x.pos[i] + y.pos[i]) / 2, g.nrm[i] = (x.nrm[i] + y.nrm[i]) / 2;
+                float nl = sqrtf(g.nrm[0] * g.nrm[0] + g.nrm[1] * g.nrm[1] + g.nrm[2] * g.nrm[2]);
+                if (nl > 1e-6f) for (float &c : g.nrm) c /= nl;
+                for (int i = 0; i < 2; i++) g.uv[i] = (x.uv[i] + y.uv[i]) / 2;
+                for (int i = 0; i < 3; i++) g.color[i] = (uint8_t)((x.color[i] + y.color[i]) / 2);
+                blend_weights_at(*bw, g.pos, g.wgt);
+                /* a point between two meeting points isn't on one, yet the edge joining them is the joint's own: never under the lesser end's weight */
+                float sum = 0;
+                for (int j = 0; j < 3; j++) g.wgt[j] = std::max(g.wgt[j], std::min(x.wgt[j], y.wgt[j])), sum += g.wgt[j];
+                if (sum > 1) for (float &c : g.wgt) c /= sum;
+                return g;
+            };
+            for (int pass = 0; pass < BLEND_SUBDIV_DEPTH; pass++) {
+                std::vector<GVert> next;
+                bool any = false;
+                for (size_t t = 0; t + 2 < tris.size(); t += 3) {
+                    const GVert *q[3] = {&tris[t], &tris[t + 1], &tris[t + 2]};
+                    int mask = 0;
+                    GVert mid[3];
+                    for (int k = 0; k < 3; k++) {
+                        const GVert &x = *q[k], &y = *q[(k + 1) % 3];
+                        if ((wsum(x) > 0 || wsum(y) > 0) && len(x, y) > BLEND_SUBDIV_EDGE) mask |= 1 << k, mid[k] = midpoint(x, y);
+                    }
+                    auto emit = [&](const GVert &a, const GVert &b2, const GVert &c) { next.push_back(a), next.push_back(b2), next.push_back(c); };
+                    int n = (mask & 1) + (mask >> 1 & 1) + (mask >> 2 & 1);
+                    if (!n) emit(*q[0], *q[1], *q[2]);
+                    else {
+                        any = true;
+                        if (n == 1) {
+                            int k = mask == 1 ? 0 : mask == 2 ? 1 : 2;
+                            emit(*q[k], mid[k], *q[(k + 2) % 3]), emit(mid[k], *q[(k + 1) % 3], *q[(k + 2) % 3]);
+                        } else if (n == 2) {
+                            int jj = !(mask & 1) ? 0 : !(mask & 2) ? 1 : 2; /* the edge not split */
+                            int j1 = (jj + 1) % 3, j2 = (jj + 2) % 3;
+                            emit(mid[j1], *q[j2], mid[j2]);
+                            emit(*q[jj], *q[j1], mid[j1]);
+                            emit(*q[jj], mid[j1], mid[j2]);
+                        } else {
+                            emit(*q[0], mid[0], mid[2]), emit(mid[0], *q[1], mid[1]), emit(mid[2], mid[1], *q[2]), emit(mid[0], mid[1], mid[2]);
+                        }
+                    }
+                }
+                tris.swap(next);
+                if (!any) break;
+            }
+            v.insert(v.end(), tris.begin(), tris.end());
+        }
         s.count[b] = (int)v.size() - s.first[b];
     }
     if (!s.vao) {
