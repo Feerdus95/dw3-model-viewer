@@ -38,6 +38,8 @@ int main(int argc, char **argv) {
         else if (a == "--weld-fade") g_blendFade = true;
         else if (a == "--weld-subdiv") g_blendSubdiv = true;
         else if (a == "--weld-soft") g_blendSoft = true;
+        else if (a == "--hand-weights" && i + 1 < argc) g_handFile = argv[++i];
+        else if (a == "--hand-dump" && i + 1 < argc) for (const char *c = argv[++i]; *c; c += *c == ',') g_handDump.push_back(atoi(c)), c += strspn(c, "0123456789");
         else if (a == "--weld-overlap") g_blendOverlap = true;
         else if (a == "--weld-bridge") g_blendBridge = true;
         else if (a == "--weld-normals") g_blendNormals = true;

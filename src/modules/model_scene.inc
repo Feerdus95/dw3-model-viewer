@@ -72,6 +72,7 @@ static void upload(Scene &s) {
     s.count.assign(m.bones.size(), 0);
     s.hidden.assign(m.bones.size(), false);
     blend_build(m, s.blend);
+    blend_hand(m, s.blend);
     /* --weld-normals: a matched seam vertex gets the mean of both pieces' normals there, so the lighting doesn't break at the joint */
     std::vector<std::vector<std::array<float, 3>>> snrm(m.bones.size());
     std::vector<std::vector<char>> snHas(m.bones.size());

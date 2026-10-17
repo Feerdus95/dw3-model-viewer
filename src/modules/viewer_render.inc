@@ -210,7 +210,7 @@ static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vec
             /* --weld-bridge: per pair, a sleeve from ring a to ring b along a Hermite curve that leaves a and enters b along the joint's axis; the first
                half takes a's ring's attributes, the second b's. Built in the model's space, so the bones' own matrices are the identity here. */
             const int SEG = 8;
-            std::vector<GVert> out;
+            std::vector<GVert> out, outB; /* the sleeve in a's ring's attributes, and again in b's with the cross-fade as its weight */
             for (const Bridge &br : sc.bridges) {
                 if (!m.pose[br.a].visible || !m.pose[br.b].visible || sc.hidden[br.a] || sc.hidden[br.b]) continue;
                 M4 pa = mul(pre, bone_pose(sc, br.a)), pb = mul(pre, bone_pose(sc, br.b));
@@ -223,7 +223,7 @@ static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vec
                 float tA[3], tB[3];
                 dir(pa, br.axA, tA), dir(pb, br.axB, tB);
                 size_t n = br.va.size();
-                std::vector<std::vector<GVert>> col(n); /* each ring vertex's column of SEG+1 points */
+                std::vector<std::vector<GVert>> col(n), colB(n); /* each ring vertex's column of SEG+1 points */
                 for (size_t i = 0; i < n; i++) {
                     float A[3], B[3], nA[3], nB[3];
                     blend_point(pa.m, br.va[i], A), blend_point(pb.m, br.vb[i], B);
@@ -232,11 +232,15 @@ static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vec
                     for (int s = 0; s <= SEG; s++) {
                         float t = (float)s / SEG, t2 = t * t, t3 = t2 * t;
                         float h00 = 2 * t3 - 3 * t2 + 1, h10 = t3 - 2 * t2 + t, h01 = -2 * t3 + 3 * t2, h11 = t3 - t2;
-                        GVert g = s * 2 <= SEG ? br.ga[i] : br.gb[i];
+                        GVert g = br.ga[i];
                         for (int k = 0; k < 3; k++) g.pos[k] = h00 * A[k] + h10 * L * tA[k] + h01 * B[k] + h11 * L * tB[k], g.nrm[k] = (1 - t) * nA[k] + t * nB[k];
                         g.mode &= ~16u; /* opaque */
                         g.wgt[0] = g.wgt[1] = g.wgt[2] = 0;
                         col[i].push_back(g);
+                        GVert h = br.gb[i];
+                        memcpy(h.pos, g.pos, sizeof h.pos), memcpy(h.nrm, g.nrm, sizeof h.nrm);
+                        h.mode &= ~16u, h.wgt[0] = t2 * (3 - 2 * t), h.wgt[1] = h.wgt[2] = 0;
+                        colB[i].push_back(h);
                     }
                 }
                 for (size_t i = 0; i < n; i++) {
@@ -245,6 +249,8 @@ static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vec
                     for (int s = 0; s < SEG; s++) {
                         out.push_back(col[i][s]), out.push_back(col[j][s]), out.push_back(col[i][s + 1]);
                         out.push_back(col[j][s]), out.push_back(col[j][s + 1]), out.push_back(col[i][s + 1]);
+                        outB.push_back(colB[i][s]), outB.push_back(colB[j][s]), outB.push_back(colB[i][s + 1]);
+                        outB.push_back(colB[j][s]), outB.push_back(colB[j][s + 1]), outB.push_back(colB[i][s + 1]);
                     }
                 }
             }
@@ -263,6 +269,15 @@ static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vec
                 GL(glUniform4f)(loc_tint, 0, 0, 0, 0);
                 GL(glDisable)(GL_CULL_FACE);
                 GL(glDrawArrays)(GL_TRIANGLES, 0, (GLsizei)out.size());
+                /* the second ring's texture over it, faded in along the sleeve (alpha = xf) */
+                GL(glBufferData)(GL_ARRAY_BUFFER, outB.size() * sizeof(GVert), outB.data(), GL_STREAM_DRAW);
+                GLint loc_xf = GL(glGetUniformLocation)(g_mesh, "xfade");
+                GL(glUniform1i)(loc_xf, 1);
+                GL(glEnable)(GL_BLEND), GL(glBlendEquation)(GL_FUNC_ADD), GL(glBlendFunc)(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                GL(glDepthFunc)(GL_LEQUAL), GL(glDepthMask)(GL_FALSE);
+                GL(glDrawArrays)(GL_TRIANGLES, 0, (GLsizei)outB.size());
+                GL(glDepthFunc)(GL_LESS), GL(glDepthMask)(GL_TRUE), GL(glDisable)(GL_BLEND);
+                GL(glUniform1i)(loc_xf, 0);
                 if (v.cull) GL(glEnable)(GL_CULL_FACE);
                 GL(glBindVertexArray)(sc.vao);
             }

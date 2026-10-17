@@ -743,3 +743,47 @@ static void blend_build(const Model &m, BlendSet &out, const std::set<std::pair<
     if (out.scaled) out.notes.push_back(std::to_string(out.scaled) + " vertices' weights came to more than 1 and were scaled");
     std::sort(out.notes.begin(), out.notes.end());
 }
+
+/* --- hand weights (a pilot, to see whether a joint can be skinned by hand) ---
+   --hand-weights FILE: lines "bone vertex partner w": that vertex of the bone's mesh follows the partner bone by w (0..1), in the idle pose's rest.
+   --hand-dump A,B: prints the vertices of those bones' meshes in the idle pose's world space. Throwaway. */
+static std::string g_handFile;
+static std::vector<int> g_handDump;
+static void blend_hand(const Model &m, BlendSet &out) {
+    BlendRest rest = blend_rest(m);
+    for (int b : g_handDump) {
+        if (b < 1 || b >= (int)m.bones.size() || m.bones[b].mesh < 0) continue;
+        const Mesh &me = m.meshes[m.bones[b].mesh];
+        printf("bone %d origin %.0f %.0f %.0f verts %d\n", b, rest.idle[b][12], rest.idle[b][13], rest.idle[b][14], (int)me.verts.size());
+        for (size_t i = 0; i < me.verts.size(); i++) {
+            float p[3];
+            blend_point(rest.idle[b].data(), me.verts[i], p);
+            printf("v %d %d %.1f %.1f %.1f\n", b, (int)i, p[0], p[1], p[2]);
+        }
+    }
+    if (g_handFile.empty()) return;
+    FILE *f = fopen(g_handFile.c_str(), "r");
+    if (!f) return;
+    int b, v, p;
+    float w;
+    while (fscanf(f, "%d %d %d %f", &b, &v, &p, &w) == 4) {
+        if (b < 1 || p < 1 || b >= (int)m.bones.size() || p >= (int)m.bones.size() || m.bones[b].mesh < 0) continue;
+        BoneBlend &bb = out.bone[b];
+        size_t nv = m.meshes[m.bones[b].mesh].verts.size();
+        if (bb.w.size() != nv) bb.w.assign(nv, {0, 0, 0});
+        int s = -1;
+        for (int k = 0; k < bb.n; k++) if (bb.partner[k] == p) s = k;
+        if (s < 0) {
+            if (bb.n >= 3) continue;
+            s = bb.n++, bb.partner[s] = p;
+            float Rpi[16];
+            if (!blend_inverse(rest.idle[p].data(), Rpi)) { bb.n--; continue; }
+            M4 rel = mul(from(Rpi), from(rest.idle[b].data()));
+            memcpy(bb.rel[s], rel.m, sizeof bb.rel[s]);
+            memcpy(bb.restW[s], rest.idle[b].data(), sizeof bb.restW[s]);
+            bb.tol[s] = 0, bb.band[s] = 60;
+        }
+        if (v >= 0 && v < (int)nv) bb.w[v][s] = w;
+    }
+    fclose(f);
+}

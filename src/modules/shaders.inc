@@ -19,6 +19,7 @@ uniform int lighting; /* 0 none, 1 the viewer's light, 2 the stage's (the GTE's 
 uniform vec3 ldir[3], lcol[3], amb;
 out vec2 uv;
 out vec3 col;
+out float xf;
 flat out uvec4 t, lim;
 flat out uint md;
 void main() {
@@ -27,6 +28,7 @@ void main() {
     vec4 p4 = vec4(pos, 1.0);
     gl_Position = home * (mvp * p4) + wk.x * (mvpO[0] * p4) + wk.y * (mvpO[1] * p4) + wk.z * (mvpO[2] * p4);
     vec3 nw = home * (mat3(world) * nrm) + wk.x * (mat3(worldO[0]) * nrm) + wk.y * (mat3(worldO[1]) * nrm) + wk.z * (mat3(worldO[2]) * nrm);
+    xf = wgt.x; /* the sleeve's cross-fade (--weld-bridge): this vertex's share of the second pass */
     uv = uv_in; t = tex; lim = limits; md = mode;
     col = color.rgb * 255.0;
     if ((mode & 2u) != 0u) {
@@ -53,6 +55,8 @@ uniform int pass;     /* 0 the opaque, 1 the semi-transparent of abr */
 uniform int abr;
 uniform int textures; /* 0 off, 1 nearest, 2 bilinear */
 uniform vec4 tint;    /* a highlight, alpha its amount */
+uniform int xfade;    /* 1: the sleeve's second pass, drawn over the first by xf */
+in float xf;
 in vec2 uv;
 in vec3 col;
 flat in uvec4 t, lim;
@@ -100,7 +104,7 @@ void main() {
     if (pass == 0 && semi) discard;
     if (pass == 1 && (!semi || int((md >> 5) & 3u) != abr)) discard;
     c = mix(c, tint.rgb, tint.a);
-    frag = vec4(c, abr == 0 ? 0.5 : abr == 3 ? 0.25 : 1.0);
+    frag = vec4(c, xfade == 1 ? xf : abr == 0 ? 0.5 : abr == 3 ? 0.25 : 1.0);
     if (pass == 1 && abr == 3) frag.rgb *= 0.25;
 }
 )";
