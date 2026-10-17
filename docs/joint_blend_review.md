@@ -21,13 +21,13 @@ Separation: the matched vertices, rigid -> blended, units. Disp: the largest dis
 | 0736 M025VEGI | b13<-b12 | validated | m6 k8 | 92% | 90.0 -> 1.1 | 45 | improved | **approved** | the step between the two segments is gone: one smooth limb |
 | 1766 M378BVND | b3<-b2 | validated | m51 k176 | 89% | 1600.0 -> 1.4 | 801 | degraded | **excluded** | a jaw hinge: blended, the open mouth closes (it validates by the numbers; the metrics cannot tell a hinge) |
 | 1766 M378BVND | b11<-b10 | validated | m51 k176 | 89% | 1600.0 -> 1.4 | 801 | degraded | **excluded** | a jaw hinge: same model, same behaviour as 3<-2 |
-| 1798 M241HNGY | b19<-b18 | review | m3 k16 | 77% | 278.0 -> 1.0 | 139 | degraded | **pending** | the boot pinches and creases at the red band (kept disabled until resolved) |
-| 1798 M241HNGY | b23<-b22 | review | m2 k60 | 78% | 275.0 -> 1.0 | 138 | degraded | **pending** | the boot pinches and creases at the red band (kept disabled until resolved) |
-| 1798 M241HNGY | b3<-b2 | review | m13 k80 | 66% | 301.0 -> 1.0 | 150 | degraded | **pending** | the red band shrinks and the blue piece pinches |
-| 1798 M241HNGY | b6<-b5 | review | m13 k80 | 66% | 301.0 -> 1.0 | 150 | degraded | **pending** | the red band shrinks to a sliver |
-| 0600 M041GIRO | b3<-b2 | review | m15 k40 | 55% | 180.0 -> 0.0 | 90 | degraded | **pending** | the narrow tube pinches at the ring (ratio 55%): ring and tube both thin |
-| 0737 M108GOLE | b3<-b2 | review | m13 k104 | 50% | 466.0 -> 1.4 | 234 | degraded | **pending** | a sharp spike grows at the junction of the arm pieces |
-| 0620 M110GECO | b7<-b6 | review | m15 k80 | 54% | 98.0 -> 1.4 | 49 | degraded | **pending** | the upper piece kinks where the rigid view shows a gap |
+| 1798 M241HNGY | b19<-b18 | review | m3 k16 | 77% | 278.0 -> 1.0 | 139 | degraded | **pending** | a pointed flap is pulled out of the blue boot in every pose seen (m3 k16, idle, m5 k20): a constant defect |
+| 1798 M241HNGY | b23<-b22 | review | m2 k60 | 78% | 275.0 -> 1.0 | 138 | neutral | **pending** | near-identical at idle and m5 k20; at the audited pose the lower piece is pulled up under the upper one with a crease |
+| 1798 M241HNGY | b3<-b2 | review | m13 k80 | 66% | 301.0 -> 1.0 | 150 | mixed | **pending** | improved at idle and m5 k20 (the step at the red band closes); the band shrinks only at the extreme pose m13 k80 |
+| 1798 M241HNGY | b6<-b5 | review | m13 k80 | 66% | 301.0 -> 1.0 | 150 | mixed | **pending** | neutral at idle and m5 k20; at the extreme pose (m13 k80) a sharp wedge forms |
+| 0600 M041GIRO | b3<-b2 | review | m15 k40 | 55% | 180.0 -> 0.0 | 90 | mixed | **pending** | improved at idle and m5 k20 (the torn white ring becomes one clean band); at the extreme twist, m15 k40, the tube pinches to an hourglass |
+| 0737 M108GOLE | b3<-b2 | review | m13 k104 | 50% | 466.0 -> 1.4 | 234 | mixed | **pending** | identical at idle and m5 k20; a spike grows at the junction only at the extreme pose, m13 k104 |
+| 0620 M110GECO | b7<-b6 | review | m15 k80 | 54% | 98.0 -> 1.4 | 49 | mixed | **pending** | a smoother elbow at idle, neutral at m5 k20; at the extreme bend (m15 k80) the corner is drawn into a wedge |
 | 1335 M143CLOK | b9<-b8 | review | m13 k44 | 51% | 237.0 -> 0.0 | 119 | neutral | **pending** | no visible crack or defect either way |
 | 1335 M143CLOK | b11<-b10 | review | m13 k44 | 51% | 237.0 -> 0.0 | 119 | neutral | **pending** | no visible crack or defect either way |
 | 0620 M110GECO | b10<-b9 | review | m13 k44 | 54% | 98.0 -> 1.4 | 49 | neutral | **pending** | no visible difference |
@@ -87,3 +87,10 @@ Per-pair tail check (the crack closes with 9<-8 alone, not with 10<-9 alone), mo
     dw3mv --shot c.bmp --motion 12 --key 8 --only 8,9,10 --zoom 1.6 --blend --weld 9,10 %DATA%\0502.bin                (10<-9 only)
 
 Guilmon's wrist, from four angles: `dw3mv --inspect 3,4 --only 3,4 --yaw 34|124|214|304 --zoom 1.8 --motion 3 --key 16 --shot w.bmp %DATA%\0356.bin`.
+
+## Pending, degraded: a second look with chosen poses
+
+The seven "degraded" pairs were judged at the audited worst-ring pose only. Seen again at idle, motion 5 key 20 and the audited pose:
+six of seven are good or neutral in ordinary poses and bad only at an extreme twist or bend (the known limit of averaging two matrices);
+HNGY 19<-18 is the exception, a flap pulled out of the boot in every pose, which points at the selection or the band rather than at the pose.
+All seven stay pending (drawn only by `--weld`). Sheets: `build/models/blend_degraded/*_big.png` (rigid left, blended right).

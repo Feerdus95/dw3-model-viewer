@@ -13,7 +13,7 @@ struct BlendDecision {
     const char *model;
     int a, b;
     BlendDecisionKind kind;
-    const char *verdict; /* improved, neutral, degraded, inconclusive */
+    const char *verdict; /* improved, neutral, degraded, mixed (good in some poses, bad in others), inconclusive */
     int motion, key;
     const char *why;
 };
@@ -25,13 +25,13 @@ static const BlendDecision BLEND_DECISIONS[] = {
     {"M025VEGI.BIN", 12, 13, BLEND_APPROVED, "improved", 6, 8, "the step between the two segments is gone: one smooth limb"},
     {"M378BVND.BIN", 2, 3, BLEND_EXCLUDED, "degraded", 51, 176, "a jaw hinge: blended, the open mouth closes (it validates by the numbers; the metrics cannot tell a hinge)"},
     {"M378BVND.BIN", 10, 11, BLEND_EXCLUDED, "degraded", 51, 176, "a jaw hinge: same model, same behaviour as 3<-2"},
-    {"M241HNGY.BIN", 18, 19, BLEND_PENDING, "degraded", 3, 16, "the boot pinches and creases at the red band (kept disabled until resolved)"},
-    {"M241HNGY.BIN", 22, 23, BLEND_PENDING, "degraded", 2, 60, "the boot pinches and creases at the red band (kept disabled until resolved)"},
-    {"M241HNGY.BIN", 2, 3, BLEND_PENDING, "degraded", 13, 80, "the red band shrinks and the blue piece pinches"},
-    {"M241HNGY.BIN", 5, 6, BLEND_PENDING, "degraded", 13, 80, "the red band shrinks to a sliver"},
-    {"M041GIRO.BIN", 2, 3, BLEND_PENDING, "degraded", 15, 40, "the narrow tube pinches at the ring (ratio 55%): ring and tube both thin"},
-    {"M108GOLE.BIN", 2, 3, BLEND_PENDING, "degraded", 13, 104, "a sharp spike grows at the junction of the arm pieces"},
-    {"M110GECO.BIN", 6, 7, BLEND_PENDING, "degraded", 15, 80, "the upper piece kinks where the rigid view shows a gap"},
+    {"M241HNGY.BIN", 18, 19, BLEND_PENDING, "degraded", 3, 16, "a pointed flap is pulled out of the blue boot in every pose seen (motion 3 key 16, idle, motion 5 key 20): a constant defect, not an extreme-pose one"},
+    {"M241HNGY.BIN", 22, 23, BLEND_PENDING, "neutral", 2, 60, "near-identical at idle and motion 5 key 20; at the audited pose (motion 2 key 60) the lower piece is pulled up under the upper one with a crease"},
+    {"M241HNGY.BIN", 2, 3, BLEND_PENDING, "mixed", 13, 80, "improved at idle and motion 5 key 20 (the step between the pieces at the red band closes); the band shrinks only at the extreme pose, motion 13 key 80"},
+    {"M241HNGY.BIN", 5, 6, BLEND_PENDING, "mixed", 13, 80, "neutral at idle and motion 5 key 20; at the extreme pose (motion 13 key 80) a sharp wedge forms"},
+    {"M041GIRO.BIN", 2, 3, BLEND_PENDING, "mixed", 15, 40, "improved at idle and motion 5 key 20 (the torn white ring becomes one clean band); at the extreme twist, motion 15 key 40, the tube pinches to an hourglass"},
+    {"M108GOLE.BIN", 2, 3, BLEND_PENDING, "mixed", 13, 104, "identical at idle and motion 5 key 20; a spike grows at the junction only at the extreme pose, motion 13 key 104"},
+    {"M110GECO.BIN", 6, 7, BLEND_PENDING, "mixed", 15, 80, "a smoother elbow at idle, neutral at motion 5 key 20; at the extreme bend (motion 15 key 80) the corner is drawn into a wedge"},
     {"M143CLOK.BIN", 8, 9, BLEND_PENDING, "neutral", 13, 44, "no visible crack or defect either way"},
     {"M143CLOK.BIN", 10, 11, BLEND_PENDING, "neutral", 13, 44, "no visible crack or defect either way"},
     {"M110GECO.BIN", 9, 10, BLEND_PENDING, "neutral", 13, 44, "no visible difference"},
