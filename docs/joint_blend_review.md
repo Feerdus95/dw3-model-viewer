@@ -23,11 +23,11 @@ Separation: the matched vertices, rigid -> blended, units. Disp: the largest dis
 | 1766 M378BVND | b11<-b10 | validated | m51 k176 | 89% | 1600.0 -> 1.4 | 801 | degraded | **excluded** | a jaw hinge: same model, same behaviour as 3<-2 |
 | 1798 M241HNGY | b19<-b18 | review | m3 k16 | 77% | 278.0 -> 1.0 | 139 | degraded | **pending** | a pointed flap is pulled out of the blue boot in every pose seen (m3 k16, idle, m5 k20): a constant defect |
 | 1798 M241HNGY | b23<-b22 | review | m2 k60 | 78% | 275.0 -> 1.0 | 138 | neutral | **pending** | near-identical at idle and m5 k20; at the audited pose the lower piece is pulled up under the upper one with a crease |
-| 1798 M241HNGY | b3<-b2 | review | m13 k80 | 66% | 301.0 -> 1.0 | 150 | mixed | **pending** | improved at idle and m5 k20 (the step at the red band closes); the band shrinks only at the extreme pose m13 k80 |
-| 1798 M241HNGY | b6<-b5 | review | m13 k80 | 66% | 301.0 -> 1.0 | 150 | mixed | **pending** | neutral at idle and m5 k20; at the extreme pose (m13 k80) a sharp wedge forms |
-| 0600 M041GIRO | b3<-b2 | review | m15 k40 | 55% | 180.0 -> 0.0 | 90 | mixed | **pending** | improved at idle and m5 k20 (the torn white ring becomes one clean band); at the extreme twist, m15 k40, the tube pinches to an hourglass |
-| 0737 M108GOLE | b3<-b2 | review | m13 k104 | 50% | 466.0 -> 1.4 | 234 | mixed | **pending** | identical at idle and m5 k20; a spike grows at the junction only at the extreme pose, m13 k104 |
-| 0620 M110GECO | b7<-b6 | review | m15 k80 | 54% | 98.0 -> 1.4 | 49 | mixed | **pending** | a smoother elbow at idle, neutral at m5 k20; at the extreme bend (m15 k80) the corner is drawn into a wedge |
+| 1798 M241HNGY | b3<-b2 | review | m13 k80 | 66% | 301.0 -> 1.0 | 150 | improved | **pending** | With --weld-fade, 8 poses (motions 2-15): the gap at the red band closes in about 5 of 8 and nothing degrades. Needs the fade on; awaiting approval |
+| 1798 M241HNGY | b6<-b5 | review | m13 k80 | 66% | 301.0 -> 1.0 | 150 | neutral | **pending** | With --weld-fade, 8 poses (motions 2-15): almost identical to rigid, a slightly smoother band at times; no defect |
+| 0600 M041GIRO | b3<-b2 | review | m15 k40 | 55% | 180.0 -> 0.0 | 90 | improved | **pending** | With --weld-fade, 8 poses (motions 2-15): the torn white ring becomes one clean band and the elbow is natural in all 8; no pinch. Needs the fade on; awaiting approval |
+| 0737 M108GOLE | b3<-b2 | review | m13 k104 | 50% | 466.0 -> 1.4 | 234 | neutral | **pending** | With --weld-fade, 8 poses (motions 2-15): identical to rigid in all 8 (the fade cuts 87% of its poses): nothing gained |
+| 0620 M110GECO | b7<-b6 | review | m15 k80 | 54% | 98.0 -> 1.4 | 49 | improved | **pending** | With --weld-fade, 8 poses (motions 2-15): a smoother elbow, no wedge; the gain is small. Needs the fade on; awaiting approval |
 | 1335 M143CLOK | b9<-b8 | review | m13 k44 | 51% | 237.0 -> 0.0 | 119 | neutral | **pending** | no visible crack or defect either way |
 | 1335 M143CLOK | b11<-b10 | review | m13 k44 | 51% | 237.0 -> 0.0 | 119 | neutral | **pending** | no visible crack or defect either way |
 | 0620 M110GECO | b10<-b9 | review | m13 k44 | 54% | 98.0 -> 1.4 | 49 | neutral | **pending** | no visible difference |
@@ -94,3 +94,10 @@ The seven "degraded" pairs were judged at the audited worst-ring pose only. Seen
 six of seven are good or neutral in ordinary poses and bad only at an extreme twist or bend (the known limit of averaging two matrices);
 HNGY 19<-18 is the exception, a flap pulled out of the boot in every pose, which points at the selection or the band rather than at the pose.
 All seven stay pending (drawn only by `--weld`). Sheets: `build/models/blend_degraded/*_big.png` (rigid left, blended right).
+
+## The five mixed pairs again, with `--weld-fade`
+
+Eight poses each (motions 2, 3, 5, 7, 9, 11, 13, 15), rigid beside blended+fade: `build/models/blend_fade2/*.png`.
+GIRO 3<-2 improved in all eight (the white ring is one clean band, a natural elbow); HNGY 3<-2 improved (the gap at the red band closes), nothing degraded;
+GECO 7<-6 a smoother elbow without the wedge (small gain); HNGY 6<-5 and GOLE 3<-2 neutral (GOLE is identical to rigid: the fade cuts 87% of its poses).
+GIRO, HNGY 3<-2 and GECO are good only with the fade on, so approving them means making the fade the default. They stay pending until then.
