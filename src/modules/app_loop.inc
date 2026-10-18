@@ -332,7 +332,10 @@
         for (int b = 0; b < 3; b++) {
             if (!ImGui::IsMouseClicked(b) || !vpHover) continue;
             vpDown[b] = true, vpUses++;
-            if (b == 0 && gzHot >= 0 && gz.on && propGz) {
+            float bg[3];
+            if (b == 0 && brush_ready() && ground_hit(view, vw, vh, mp.x - vx, mp.y - vy, bg) && brush_begin(bg)) {
+                /* a stroke of the brush has begun */
+            } else if (b == 0 && gzHot >= 0 && gz.on && propGz) {
                 stage_mark();
                 propMoving = true, propBefore = props[propSel];
                 gzDrag = gzHot;
@@ -444,6 +447,15 @@
                 float k = view.cam.dist * 0.0015f, cy = cosf(view.cam.yaw), sy = sinf(view.cam.yaw);
                 if (io.KeyShift) p.move[1] += d.y * k;
                 else p.move[0] += (d.x * cy + d.y * sy) * k, p.move[2] -= (-d.x * sy + d.y * cy) * k;
+            } else if (vpDown[0] && propBrush) {
+                float g[3];
+                if (moved && ground_hit(view, vw, vh, mp.x - vx, mp.y - vy, g)) {
+                    float dx = g[0] - brushLast[0], dz = g[2] - brushLast[2];
+                    if (dx * dx + dz * dz >= brushR * brushR * 0.25f) {
+                        brush_dab(g, io.KeyCtrl);
+                        for (int k = 0; k < 3; k++) brushLast[k] = g[k];
+                    }
+                }
             } else if (vpDown[0] && moved) {
                 view.cam.yaw -= d.x * 0.008f;
                 view.cam.pitch = std::clamp(view.cam.pitch + d.y * 0.008f, -1.5f, 1.5f);
@@ -463,6 +475,11 @@
         for (int b = 0; b < 3; b++) {
             if (!vpDown[b] || ImGui::IsMouseDown(b)) continue;
             vpDown[b] = false;
+            if (b == 0 && propBrush) {
+                propBrush = false;
+                if (!brushAdded && !stageHist.undo.empty()) stageHist.undo.pop_back();
+                continue;
+            }
             if (b == 0 && propMoving) {
                 gzDrag = -1, propMoving = false;
                 const StageProp &n = props[propSel];
@@ -485,7 +502,7 @@
             if (io.MouseDragMaxDistanceSqr[b] > 25 * dpi * dpi || !inView) continue; /* a drag, not a click */
             if (pcatArm >= 0 && pcatArm < (int)pcat.size() && section == STAGES && stage_on()) { /* a catalog pick: a click places it, the other button stops */
                 float g[3];
-                if (b == 0 && vpHover && ground_hit(view, vw, vh, mp.x - vx, mp.y - vy, g)) {
+                if (b == 0 && !brushOn && vpHover && ground_hit(view, vw, vh, mp.x - vx, mp.y - vy, g)) {
                     prop_add(pcat[pcatArm].path, pcat[pcatArm].kind, g);
                     if (!io.KeyShift) pcatArm = -1;
                 } else if (b == 1) {

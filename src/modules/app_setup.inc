@@ -239,6 +239,12 @@ int main(int argc, char **argv) {
     std::string pcatTab;              /* the category shown, "" all */
     char pcatFind[64] = "";
     bool ghostOn = false;
+    /* the brush: dragging on the ground scatters the picked billboard; Ctrl erases its kind */
+    bool brushOn = false, propBrush = false, brushAdded = false;
+    float brushR = 600, brushScale[2] = {0.7f, 1.3f}, brushVar = 0.2f, brushSway = 0.5f, brushLast[3] = {};
+    int brushN = 4;
+    StageProp brushTpl;
+    const int BB_MAX = 600; /* what the port keeps (stagefx.c MAX_BB) */
     float ghostAt[3] = {0, 0, 0};     /* where, in the view's world */
     GLuint propWhite = 0;                   /* a white pixel, what a leaf is drawn with */
     int propSel = -1, propKind = 0; /* the one picked; what the file dialog is for: 0 billboard, 1 emitter, 2 model */

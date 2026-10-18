@@ -1387,6 +1387,46 @@
         stageDirty = true;
         note(s.image.empty() ? NOTE_WARN : NOTE_OK, s.image.empty() ? "Added " + name + ": it has no texture, pick a PNG for it" : "Added " + name + " to the stage's props");
     };
+    /* the brush: the picked billboard's file is copied once, each dab scatters a few of it around the mouse */
+    auto brush_ready = [&]() { return brushOn && pcatArm >= 0 && pcatArm < (int)pcat.size() && pcat[pcatArm].kind == 0 && section == STAGES && stage_on(); };
+    auto brush_dab = [&](const float g[3], bool erase) {
+        if (erase) {
+            size_t before = props.size();
+            props.erase(std::remove_if(props.begin(), props.end(),
+                                       [&](const StageProp &p) {
+                                           float dx = p.pos[0] - g[0], dz = -p.pos[2] - g[2];
+                                           return !p.emitter && !p.model && p.image == brushTpl.image && dx * dx + dz * dz <= brushR * brushR;
+                                       }),
+                        props.end());
+            if (props.size() != before) brushAdded = stageDirty = true, propSel = -1;
+            return;
+        }
+        int bb = 0;
+        for (const StageProp &p : props) bb += !p.emitter && !p.model;
+        for (int k = 0; k < brushN && bb < BB_MAX; k++, bb++) {
+            StageProp s = brushTpl;
+            float a = psim_rnd() * 6.2831853f, r = sqrtf(psim_rnd()) * brushR, tv = 1 - brushVar * psim_rnd();
+            s.pos[0] = g[0] + cosf(a) * r, s.pos[1] = 0, s.pos[2] = -(g[2] + sinf(a) * r);
+            s.scale = brushScale[0] + psim_rnd() * (brushScale[1] - brushScale[0]);
+            for (float &c : s.tint) c = roundf(255 * tv);
+            props.push_back(s);
+            brushAdded = stageDirty = true;
+        }
+        if (bb >= BB_MAX) note(NOTE_WARN, "That is as many pictures as the port keeps (" + std::to_string(BB_MAX) + "): erase some, or use bigger ones");
+    };
+    auto brush_begin = [&](const float g[3]) {
+        std::string nm;
+        if (!copy_to_props(pcat[pcatArm].path, nm)) return false;
+        const PropImg &pi = prop_img(nm);
+        if (!pi.tex) return note(NOTE_ERROR, "Can't read " + nm), false;
+        brushTpl = StageProp();
+        brushTpl.image = nm, brushTpl.size[1] = 300, brushTpl.size[0] = std::max(10.0f, 300 * pi.w / pi.h), brushTpl.sway = brushSway;
+        stage_mark();
+        propBrush = true, brushAdded = false;
+        for (int k = 0; k < 3; k++) brushLast[k] = g[k];
+        brush_dab(g, ImGui::GetIO().KeyCtrl);
+        return true;
+    };
     auto pick_prop = [&](int kind) {
         static const SDL_DialogFileFilter PNG = {"PNG images", "png"}, OBJ = {"OBJ models", "obj"};
         propKind = kind;
@@ -1549,7 +1589,7 @@
         /* where a catalog pick would go: a ring on the ground and, for a picture, the picture itself */
         if (ghostOn && pcatArm >= 0 && pcatArm < (int)pcat.size()) {
             const PCat &g = pcat[pcatArm];
-            float r = view.cam.dist * 0.03f, gy[3] = {ghostAt[0], 0, ghostAt[2]};
+            float r = brushOn && g.kind == 0 ? brushR : view.cam.dist * 0.03f, gy[3] = {ghostAt[0], 0, ghostAt[2]};
             for (int s = 0; s < 24; s++) {
                 float a = s * 6.2831853f / 24, b = (s + 1) * 6.2831853f / 24;
                 float u[3] = {gy[0] + cosf(a) * r, 0, gy[2] + sinf(a) * r}, v[3] = {gy[0] + cosf(b) * r, 0, gy[2] + sinf(b) * r};
@@ -1566,7 +1606,7 @@
                     }
                 }
             }
-            if (g.kind == 0 && g.gl) {
+            if (g.kind == 0 && g.gl && !brushOn) {
                 PropQuad gq;
                 float h = 300, w = std::max(10.0f, 300 * g.w / g.h), c[4][3], one[3] = {1, 1, 1};
                 for (int k = 0; k < 4; k++) {
@@ -1698,7 +1738,8 @@
         float pic = 96 * dpi, lineH = ImGui::GetTextLineHeight();
         const ImGuiStyle &sty = ImGui::GetStyle();
         ImVec2 cell(pic + 12 * dpi, pic + lineH + 14 * dpi);
-        float foot = ImGui::GetTextLineHeightWithSpacing() * 2 + sty.ItemSpacing.y * 2;
+        bool paint = pcatArm >= 0 && pcatArm < (int)pcat.size() && pcat[pcatArm].kind == 0;
+        float foot = ImGui::GetTextLineHeightWithSpacing() * 2 + sty.ItemSpacing.y * 2 + (paint ? ImGui::GetFrameHeightWithSpacing() * (brushOn ? 3 : 1) : 0);
         ImGui::BeginChild("##pcgrid", ImVec2(0, -foot), ImGuiChildFlags_Borders);
         int cols = std::max(1, (int)(ImGui::GetContentRegionAvail().x / (cell.x + sty.ItemSpacing.x))), n = 0, loaded = 0;
         std::string q = lower(pcatFind);
@@ -1760,8 +1801,33 @@
         }
         if (!n) hint("%s", pcat.empty() ? "Nothing here yet: Open folder, add PNGs or OBJs in subfolders, and Refresh." : "Nothing matches.");
         ImGui::EndChild();
-        if (!stage_on()) ImGui::TextDisabled("Open a stage first.");
-        else if (pcatArm >= 0) ImGui::TextColored(C_SELECT, "Click in the stage to place it. Shift keeps placing; Esc or right-click stops.");
+        if (paint && stage_on()) {
+            ImGui::Checkbox("Brush", &brushOn);
+            tip("Drag on the ground to scatter it: grass fields, flower beds. Ctrl+drag erases this picture.");
+            if (brushOn) {
+                float w = ImGui::GetContentRegionAvail().x / 3 - 8 * dpi;
+                ImGui::SetNextItemWidth(w);
+                ImGui::DragFloat("##br", &brushR, 10, 50, 5000, "Radius %.0f");
+                tip("How far around the mouse, in the game's units");
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(w);
+                ImGui::DragInt("##bn", &brushN, 0.1f, 1, 30, "%d a dab");
+                tip("How many it drops each time; a dab comes every half radius you drag");
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(w);
+                ImGui::DragFloat("##bs", &brushSway, 0.01f, 0, 3, "Sway %.2f");
+                ImGui::SetNextItemWidth(w * 2 + 8 * dpi);
+                ImGui::DragFloatRange2("##bz", &brushScale[0], &brushScale[1], 0.01f, 0.1f, 5, "Size %.2f", "to %.2f");
+                tip("Each gets a size between these, of the 300-tall picture");
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(w);
+                ImGui::DragFloat("##bv", &brushVar, 0.01f, 0, 0.9f, "Shade %.2f");
+                tip("How much darker some come out, so the field isn't flat");
+                ImGui::TextDisabled("Drag on the ground. Ctrl+drag erases. One Ctrl+Z takes back a stroke.");
+            }
+        } else if (!stage_on()) ImGui::TextDisabled("Open a stage first.");
+        if (!stage_on()) {}
+        else if (pcatArm >= 0 && !(paint && brushOn)) ImGui::TextColored(C_SELECT, "Click in the stage to place it. Shift keeps placing; Esc or right-click stops.");
         else ImGui::TextDisabled("Pick one, then click in the stage where it goes.");
         ImGui::End();
     };
