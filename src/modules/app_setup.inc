@@ -221,10 +221,7 @@ int main(int argc, char **argv) {
     std::vector<StageProp> props;
     PropsMeta propsMeta;
     bool propWind = false; /* the view plays the effects: the wind bending the props, the particles falling */
-    std::vector<std::vector<PSim>> propSim; /* each emitter's particles, by its place in the list */
-    std::vector<PSimCfg> propSimCfg;        /* what they were made for: another and they start again */
-    std::vector<PSim> leafSim;              /* the stage's leaves (the list's count) */
-    int propFrame = -1;                     /* the 60 Hz frame they have moved to */
+    float propClock = 0;                    /* the frames the effects have played: the particles' clock, held when paused */
     /* the props' catalog: the PNGs and OBJs of <mods>/prop-catalog/<category>/ and the ones in this stage's folder */
     struct PCat {
         std::string cat, name, path, tex; /* tex: a model's picture, with its folder */
@@ -244,7 +241,7 @@ int main(int argc, char **argv) {
     float brushR = 600, brushScale[2] = {0.7f, 1.3f}, brushVar = 0.2f, brushSway = 0.5f, brushLast[3] = {};
     int brushN = 4;
     StageProp brushTpl;
-    const int BB_MAX = 600; /* what the port keeps (stagefx.c MAX_BB) */
+    const int BB_MAX = 20000; /* the viewer draws on the CPU; the port keeps up to 100000 (stagefx.c MAX_BB) */
     float ghostAt[3] = {0, 0, 0};     /* where, in the view's world */
     GLuint propWhite = 0;                   /* a white pixel, what a leaf is drawn with */
     int propSel = -1, propKind = 0; /* the one picked; what the file dialog is for: 0 billboard, 1 emitter, 2 model */

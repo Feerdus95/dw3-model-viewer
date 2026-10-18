@@ -81,46 +81,45 @@ static float prop_bend(const StageProp &p, float t, float h) {
     return p.sway / 18.0f * h * 0.3f * (0.5f + sinf(t * 0.042f + (p.pos[0] + p.pos[2]) * 0.0004f));
 }
 
-/* Falling particles as the port moves them (stagefx.c), in its world: y down, z not negated. The stage's leaves
-   are the same with the arena's numbers. */
+/* Falling particles as the port's card places them (gl.c's PINST_VS), in its world: y down, z not negated. Nothing is
+   kept: a particle's place is worked out from its number and the clock, a hash of the number and of the round it is on
+   giving its randoms. The stage's leaves are the same with the arena's numbers. */
 struct PSim {
-    float p[3], size, phase, spin, angle, fall;
+    float p[3], size, phase, angle;
     int shade;
 };
 struct PSimCfg {
-    float c[3], radius, top, fall, size[2], wind, above, outer, floor;
+    float c[3], radius, top, fall, size[2], wind, above, floor;
 };
-static float psim_rnd() {
+static float psim_rnd() { /* the brush's dice */
     static uint32_t s = 0x2003;
     s = s * 1664525u + 1013904223u;
     return (s >> 8) / 16777216.0f;
 }
-static void psim_spawn(const PSimCfg &e, PSim &l, bool anywhere, const float wind[2]) {
-    float a = psim_rnd() * 6.2831853f, r = sqrtf(psim_rnd()) * e.radius;
-    l.p[0] = e.c[0] + cosf(a) * r, l.p[2] = e.c[2] + sinf(a) * r;
-    l.p[1] = -(e.c[1] + (anywhere ? psim_rnd() * e.top : e.top + psim_rnd() * e.above));
-    if (!anywhere) l.p[0] -= wind[0] * 120.0f, l.p[2] -= wind[1] * 120.0f;
-    l.size = e.size[0] + psim_rnd() * (e.size[1] - e.size[0]);
-    l.phase = psim_rnd() * 6.2831853f, l.spin = (psim_rnd() - 0.5f) * 0.12f, l.angle = psim_rnd() * 6.2831853f;
-    l.fall = e.fall * (5.0f + psim_rnd() * 6.0f), l.shade = (int)(psim_rnd() * 5) % 5;
+static uint32_t psim_hash(uint32_t x) {
+    x ^= x >> 16, x *= 0x7feb352du, x ^= x >> 15, x *= 0x846ca68bu, x ^= x >> 16;
+    return x;
 }
-/* frame T of COUNT of them (all anew if V isn't that size); PLAY: they move */
-static void psim_step(const PSimCfg &e, std::vector<PSim> &v, int count, float t, bool play) {
-    float wind[2];
-    prop_wind(t, e.wind, wind);
-    if ((int)v.size() != count) {
-        v.resize(count);
-        for (PSim &l : v) psim_spawn(e, l, true, wind);
-    }
-    if (!play) return;
-    for (PSim &l : v) {
-        float sway = sinf(t * 0.045f + l.phase), dx = l.p[0] - e.c[0], dz = l.p[2] - e.c[2];
-        l.p[0] += wind[0] + sway * 9.0f;
-        l.p[2] += wind[1] + cosf(t * 0.037f + l.phase) * 6.0f;
-        l.p[1] += l.fall * (0.7f + 0.3f * fabsf(sway));
-        l.angle += l.spin;
-        if (l.p[1] > -e.c[1] - e.floor || dx * dx + dz * dz > e.radius * e.radius * e.outer) psim_spawn(e, l, false, wind);
-    }
+static float psim_r(uint32_t x) { return (psim_hash(x) >> 8) / 16777216.0f; }
+/* particle I at frame T */
+static void psim_at(const PSimCfg &e, uint32_t i, float t, PSim &l) {
+    float vfall = e.fall * (5.0f + psim_r(i * 7u + 1u) * 6.0f) * 0.89f;
+    float L = std::max((e.top + e.above * 0.5f - e.floor) / vfall, 1.0f);
+    float ph = t + psim_r(i * 7u + 2u) * L, cyc = floorf(ph / L), age = ph - cyc * L;
+    uint32_t hs = i * 7919u + (uint32_t)cyc * 104729u + 13u;
+    float a0 = psim_r(hs) * 6.2831853f, r = sqrtf(psim_r(hs + 1u)) * e.radius;
+    l.size = e.size[0] + psim_r(hs + 2u) * (e.size[1] - e.size[0]);
+    l.phase = psim_r(hs + 3u) * 6.2831853f;
+    l.angle = psim_r(hs + 5u) * 6.2831853f + (psim_r(hs + 4u) - 0.5f) * 0.12f * age;
+    l.shade = (int)(psim_r(hs + 6u) * 5.0f) % 5;
+    float ts = t - age, w0[2], ws[2];
+    prop_wind(t - age * 0.5f, e.wind, w0);
+    prop_wind(ts, e.wind, ws);
+    float dx = w0[0] * age + 9.0f / 0.045f * (cosf(0.045f * ts + l.phase) - cosf(0.045f * t + l.phase));
+    float dz = w0[1] * age + 6.0f / 0.037f * (sinf(0.037f * t + l.phase) - sinf(0.037f * ts + l.phase));
+    l.p[0] = e.c[0] + cosf(a0) * r - ws[0] * 120.0f + dx;
+    l.p[1] = -(e.c[1] + e.top + e.above * 0.5f - vfall * age);
+    l.p[2] = e.c[2] + sinf(a0) * r - ws[1] * 120.0f + dz;
 }
 
 /* A model's point (the OBJ's x, y, z) in the view's world: scaled, turned, set down, bent by WW * BEND at its height squared */

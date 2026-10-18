@@ -71,7 +71,7 @@ struct PropsMeta {
     bool fog = false;
     float fogColor[3] = {140, 150, 190}; /* 0-255 */
     float fogAmount = 0.6f, fogFrom = 0.3f;
-    int leaves = -1; /* falling leaves for the stage, 0-200; -1: the stage's own (stages.ini) */
+    int leaves = -1; /* falling leaves for the stage, 0-5000; -1: the stage's own (stages.ini) */
 };
 
 /* DIR's props.json; false (and PROPS empty) when there is none */

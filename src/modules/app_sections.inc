@@ -1481,15 +1481,7 @@
         float yaw = view.cam.yaw, rt[3] = {cosf(yaw), 0, -sinf(yaw)};
         float t = propWind ? (float)ImGui::GetTime() * 60.0f : 0, ww[2] = {0, 0};
         if (propWind) prop_wind(t, propsMeta.wind, ww);
-        /* the particles move a frame at a time as the port's do; paused they stay where they are */
-        int now = (int)((float)ImGui::GetTime() * 60.0f);
-        if (propWind && (propFrame < 0 || now - propFrame > 10)) propFrame = now;
-        auto advance = [&](const PSimCfg &c, std::vector<PSim> &v, int count) {
-            psim_step(c, v, count, (float)std::max(propFrame, 0), false);
-            if (propWind)
-                for (int f = propFrame + 1; f <= now; f++) psim_step(c, v, count, (float)f, true);
-        };
-        propSim.resize(props.size()), propSimCfg.resize(props.size());
+        if (propWind) propClock += ImGui::GetIO().DeltaTime * 60.0f; /* the particles' clock; paused, they stay where they are */
         /* one particle: a flat picture turned about its middle, facing the camera (the port's turn and flip); a leaf is a diamond */
         auto particle = [&](PropQuad &q, const PSim &l, const float tint[3], float fogShare, bool leaf) {
             static const float LX[2][4] = {{-1, 1, -1, 1}, {0, 0.45f, -0.45f, 0}}, LY[2][4] = {{-1, -1, 1, 1}, {-1, 0, 0, 1}};
@@ -1555,11 +1547,9 @@
             if (!q.tex) continue;
             PSimCfg cfg = {};
             cfg.c[0] = p.pos[0], cfg.c[1] = p.pos[1], cfg.c[2] = p.pos[2], cfg.radius = p.radius, cfg.top = p.top, cfg.fall = p.fall;
-            cfg.size[0] = p.size[0], cfg.size[1] = p.size[1], cfg.wind = p.wind, cfg.above = 300, cfg.outer = 2.5f, cfg.floor = 20;
-            for (int k = 0; k < 3; k++) propSimCfg[i].c[k] = cfg.c[k]; /* moved: the ones in the air go on */
-            if (memcmp(&cfg, &propSimCfg[i], sizeof cfg) != 0) propSimCfg[i] = cfg, propSim[i].clear();
-            advance(cfg, propSim[i], std::min(p.count, 300));
-            for (const PSim &l : propSim[i]) particle(q, l, tint, p.fog, false);
+            cfg.size[0] = p.size[0], cfg.size[1] = p.size[1], cfg.wind = p.wind, cfg.above = 300, cfg.floor = 20;
+            PSim l;
+            for (int k = 0; k < std::min(p.count, 5000); k++) psim_at(cfg, (uint32_t)k, propClock, l), particle(q, l, tint, p.fog, false);
             quads.push_back(q);
         }
         /* the stage's leaves, the list's count of them, as the port draws them: a diamond in greens and browns */
@@ -1574,18 +1564,17 @@
                 GL(glTexParameteri)(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
             }
             PSimCfg lc = {};
-            lc.radius = 9000, lc.top = 7500, lc.fall = 1, lc.size[0] = 70, lc.size[1] = 140, lc.wind = 1, lc.above = 1500, lc.outer = 1.6f, lc.floor = 40;
-            if ((int)leafSim.size() != propsMeta.leaves) leafSim.clear();
-            advance(lc, leafSim, propsMeta.leaves);
+            lc.radius = 9000, lc.top = 7500, lc.fall = 1, lc.size[0] = 70, lc.size[1] = 140, lc.wind = 1, lc.above = 1500, lc.floor = 40;
             PropQuad lq;
             lq.tex = propWhite;
-            for (const PSim &l : leafSim) {
+            for (int k = 0; k < propsMeta.leaves; k++) {
+                PSim l;
+                psim_at(lc, (uint32_t)k, propClock, l);
                 float tn[3] = {PAL[l.shade][0] / 255.0f, PAL[l.shade][1] / 255.0f, PAL[l.shade][2] / 255.0f};
                 particle(lq, l, tn, 1, true);
             }
             quads.push_back(lq);
         }
-        if (propWind) propFrame = now;
         /* where a catalog pick would go: a ring on the ground and, for a picture, the picture itself */
         if (ghostOn && pcatArm >= 0 && pcatArm < (int)pcat.size()) {
             const PCat &g = pcat[pcatArm];
@@ -1875,7 +1864,7 @@
                 me(ImGui::Checkbox("Own leaves", &own));
                 if (own != (propsMeta.leaves >= 0)) propsMeta.leaves = own ? 15 : -1, stageDirty = true;
                 tip("Leaves falling through the whole arena, in the stage's greens and browns. Off: the ones stages.ini gives the stage, if any (the view can't show those).");
-                if (propsMeta.leaves >= 0) me(ImGui::DragInt("Leaves", &propsMeta.leaves, 0.2f, 0, 200));
+                if (propsMeta.leaves >= 0) me(ImGui::DragInt("Leaves", &propsMeta.leaves, 0.5f, 0, 5000));
             }
             me(ImGui::Checkbox("Own fog", &propsMeta.fog));
             tip("Off: the props take the stage's fog, as its trees do. On: a fog of their own that you set here.");
@@ -1921,7 +1910,7 @@
         pe(ImGui::DragFloat("Z", &p.pos[2], 10, -40000, 40000, "%.0f"));
         tip("Depth, as the port reads it (the view's blue arrow goes the other way). The arena's middle is 0, 0, 0.");
         if (p.emitter) {
-            pe(ImGui::DragInt("Count", &p.count, 0.2f, 1, 300));
+            pe(ImGui::DragInt("Count", &p.count, 0.5f, 1, 5000));
             pe(ImGui::DragFloat("Radius", &p.radius, 10, 50, 40000, "%.0f"));
             tip("The area's radius around the point. In the view: the box.");
             pe(ImGui::DragFloat("Height", &p.top, 10, 50, 40000, "%.0f"));
