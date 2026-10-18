@@ -1434,7 +1434,10 @@
             }
             const ObjMesh &m = prop_mesh(name);
             if (m.v.empty()) return note(NOTE_ERROR, "No triangles in " + name);
-            s.scale = 400.0f / m.h; /* about as tall as a man to start with */
+            float reach = 0; /* the stage's half width: a model starts a fifth of it tall (a man, in a small stage) */
+            for (const StagePart &sp : stageEdit.parts)
+                for (const auto &pv : sp.verts) reach = std::max({reach, fabsf(pv[0]), fabsf(pv[2])});
+            s.scale = std::max(400.0f, reach * 0.2f) / m.h;
         } else {
             s.image = name;
             const PropImg &pi = prop_img(name);
@@ -2115,7 +2118,7 @@
                 pe(ImGui::DragFloat("Width", &p.size[0], 5, 1, 20000, "%.0f"));
                 pe(ImGui::DragFloat("Height", &p.size[1], 5, 1, 20000, "%.0f"));
             }
-            pe(ImGui::DragFloat("Scale", &p.scale, p.model ? 0.05f : 0.01f, 0.01f, 400, p.model ? "%.2f" : "%.2f"));
+            pe(ImGui::DragFloat("Scale", &p.scale, p.model ? std::max(0.05f, p.scale * 0.005f) : 0.01f, 0.01f, 100000, "%.2f")); /* a model's step follows its size: a stage is thousands of units wide */
             tip("In the view: the box.");
             pe(ImGui::DragFloat("Sway", &p.sway, 0.01f, 0, 3, "%.2f"));
             tip("How much the wind bends it, from its foot to its top (the view shows it with Play effects); 0 stands still");

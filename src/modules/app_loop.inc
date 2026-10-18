@@ -317,7 +317,7 @@
                 for (int i : propSet) o[0] += props[i].pos[0], o[1] += props[i].pos[1], o[2] -= props[i].pos[2];
                 for (float &c : o) c /= propSet.size();
             }
-            gz.up = 1, gz.rings = false;
+            gz.up = 1, gz.rings = propSet.size() <= 1 && !sp.emitter && (sp.model || sp.fixed); /* the ring turns a model, or a flat billboard */
             propGz = gizmo_make(gz, view_proj(view, (int)vw, (int)vh), o, vw, vh, view.fov, dpi);
         }
         bool charGz = false;
@@ -345,7 +345,7 @@
             } else if (b == 0 && gzHot >= 0 && gz.on && propGz) {
                 stage_mark();
                 propMoving = true, propBefore = props[propSel];
-                gzDrag = gzHot;
+                gzDrag = gzHot, gzAngSet = false;
             } else if (b == 0 && gzHot >= 0 && gz.on && charGz) {
                 char_mark();
                 vpMoving = charEditing = true, charMoved = false;
@@ -394,12 +394,26 @@
                         for (int i : tg) props[i].pos[gzDrag] += gzDrag == 2 ? -k : k;
                         stageDirty = true;
                     }
+                } else if (gzDrag == 3) { /* the ring: the mouse's angle around the prop in the ground's plane, as the part's ring does */
+                    ImVec2 a = gz.ring[0] - gz.c, b = gz.ring[12] - gz.c, q = ImVec2(mp.x - vx, mp.y - vy) - gz.c;
+                    float det = a.x * b.y - a.y * b.x;
+                    if (fabsf(det) > 1) {
+                        float ang = atan2f((a.x * q.y - a.y * q.x) / det, (q.x * b.y - q.y * b.x) / det);
+                        if (gzAngSet) {
+                            float da = ang - gzAng;
+                            if (da > 3.1415927f) da -= 6.2831853f;
+                            if (da < -3.1415927f) da += 6.2831853f;
+                            props[propSel].rot = std::remainder(props[propSel].rot + da * 57.29578f, 360.0f);
+                            stageDirty = true;
+                        }
+                        gzAng = ang, gzAngSet = true;
+                    }
                 } else if (moved) {
                     float f = powf(1.01f, d.x - d.y);
                     for (int i : tg) {
                         StageProp &p = props[i];
                         if (p.emitter) p.radius = std::clamp(p.radius * f, 50.0f, 40000.0f);
-                        else p.scale = std::clamp(p.scale * f, 0.01f, 400.0f);
+                        else p.scale = std::clamp(p.scale * f, 0.01f, 100000.0f);
                     }
                     stageDirty = true;
                 }
