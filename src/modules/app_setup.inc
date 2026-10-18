@@ -220,7 +220,12 @@ int main(int argc, char **argv) {
     /* its props for the port (custom.h), in <mods>/fightstages/<id>/: the list, the one picked, the PNGs as textures */
     std::vector<StageProp> props;
     PropsMeta propsMeta;
-    bool propWind = false; /* the view shows the wind bending the props */
+    bool propWind = false; /* the view plays the effects: the wind bending the props, the particles falling */
+    std::vector<std::vector<PSim>> propSim; /* each emitter's particles, by its place in the list */
+    std::vector<PSimCfg> propSimCfg;        /* what they were made for: another and they start again */
+    std::vector<PSim> leafSim;              /* the stage's leaves (the list's count) */
+    int propFrame = -1;                     /* the 60 Hz frame they have moved to */
+    GLuint propWhite = 0;                   /* a white pixel, what a leaf is drawn with */
     int propSel = -1, propKind = 0; /* the one picked; what the file dialog is for: 0 billboard, 1 emitter, 2 model */
     struct PropImg {
         GLuint tex = 0;

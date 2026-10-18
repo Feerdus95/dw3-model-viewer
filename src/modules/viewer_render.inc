@@ -81,6 +81,48 @@ static float prop_bend(const StageProp &p, float t, float h) {
     return p.sway / 18.0f * h * 0.3f * (0.5f + sinf(t * 0.042f + (p.pos[0] + p.pos[2]) * 0.0004f));
 }
 
+/* Falling particles as the port moves them (stagefx.c), in its world: y down, z not negated. The stage's leaves
+   are the same with the arena's numbers. */
+struct PSim {
+    float p[3], size, phase, spin, angle, fall;
+    int shade;
+};
+struct PSimCfg {
+    float c[3], radius, top, fall, size[2], wind, above, outer, floor;
+};
+static float psim_rnd() {
+    static uint32_t s = 0x2003;
+    s = s * 1664525u + 1013904223u;
+    return (s >> 8) / 16777216.0f;
+}
+static void psim_spawn(const PSimCfg &e, PSim &l, bool anywhere, const float wind[2]) {
+    float a = psim_rnd() * 6.2831853f, r = sqrtf(psim_rnd()) * e.radius;
+    l.p[0] = e.c[0] + cosf(a) * r, l.p[2] = e.c[2] + sinf(a) * r;
+    l.p[1] = -(e.c[1] + (anywhere ? psim_rnd() * e.top : e.top + psim_rnd() * e.above));
+    if (!anywhere) l.p[0] -= wind[0] * 120.0f, l.p[2] -= wind[1] * 120.0f;
+    l.size = e.size[0] + psim_rnd() * (e.size[1] - e.size[0]);
+    l.phase = psim_rnd() * 6.2831853f, l.spin = (psim_rnd() - 0.5f) * 0.12f, l.angle = psim_rnd() * 6.2831853f;
+    l.fall = e.fall * (5.0f + psim_rnd() * 6.0f), l.shade = (int)(psim_rnd() * 5) % 5;
+}
+/* frame T of COUNT of them (all anew if V isn't that size); PLAY: they move */
+static void psim_step(const PSimCfg &e, std::vector<PSim> &v, int count, float t, bool play) {
+    float wind[2];
+    prop_wind(t, e.wind, wind);
+    if ((int)v.size() != count) {
+        v.resize(count);
+        for (PSim &l : v) psim_spawn(e, l, true, wind);
+    }
+    if (!play) return;
+    for (PSim &l : v) {
+        float sway = sinf(t * 0.045f + l.phase), dx = l.p[0] - e.c[0], dz = l.p[2] - e.c[2];
+        l.p[0] += wind[0] + sway * 9.0f;
+        l.p[2] += wind[1] + cosf(t * 0.037f + l.phase) * 6.0f;
+        l.p[1] += l.fall * (0.7f + 0.3f * fabsf(sway));
+        l.angle += l.spin;
+        if (l.p[1] > -e.c[1] - e.floor || dx * dx + dz * dz > e.radius * e.radius * e.outer) psim_spawn(e, l, false, wind);
+    }
+}
+
 /* A model's point (the OBJ's x, y, z) in the view's world: scaled, turned, set down, bent by WW * BEND at its height squared */
 static void prop_model_point(const StageProp &p, const ObjMesh &m, float x, float y, float z, const float ww[2], float bend, float out[3]) {
     float a = p.rot * 0.017453293f, ca = cosf(a), sa = sinf(a), lx = x * p.scale, ly = (y - m.miny) * p.scale, lz = z * p.scale;

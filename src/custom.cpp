@@ -238,6 +238,7 @@ bool props_load(const std::string &dir, std::vector<StageProp> &props, PropsMeta
     Json root;
     if (!parse(p, root) || root.type != '{') return false;
     meta.wind = jnum(root, "wind", 1);
+    meta.leaves = (int)jnum(root, "leaves", -1);
     if (const Json *fg = root.get("fog"); fg && fg->type == '{') {
         meta.fog = true;
         jvec(*fg, "color", meta.fogColor, 3);
@@ -278,7 +279,7 @@ bool props_load(const std::string &dir, std::vector<StageProp> &props, PropsMeta
 }
 
 bool props_save(const std::string &dir, const std::vector<StageProp> &props, const PropsMeta &meta) {
-    if (props.empty()) {
+    if (props.empty() && meta.leaves < 0) {
         SDL_RemovePath((dir + "/props.json").c_str());
         return true;
     }
@@ -294,6 +295,10 @@ bool props_save(const std::string &dir, const std::vector<StageProp> &props, con
     f << "{\n";
     if (meta.wind != 1) {
         snprintf(b, sizeof b, " \"wind\": %g,\n", meta.wind);
+        f << b;
+    }
+    if (meta.leaves >= 0) {
+        snprintf(b, sizeof b, " \"leaves\": %d,\n", meta.leaves);
         f << b;
     }
     if (meta.fog) {

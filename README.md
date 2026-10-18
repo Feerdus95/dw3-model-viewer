@@ -126,7 +126,9 @@ trademark of its owners.
     a rock; upright facing the camera, or flat in the world) and emitters (petals, snow: a PNG
     falling through an area). Click one in the view, drag its arrows and its box, set its size,
     tint, sway and wind in the panel; undo covers it. Save to game writes them to
-    `data/mods/fightstages/<id>/props.json` beside their PNGs;
+    `data/mods/fightstages/<id>/props.json` beside their PNGs. **Play effects** (under *Wind and fog*)
+    makes the wind bend what sways and the emitters' particles fall as in a battle; **Own leaves**
+    sets how many leaves fall through the arena (the stage's own from `stages.ini` if off);
   - **Save to game** writes the stage in the game's own format to the native port's
     `data/mods/<file>.bin` (with the stages' table, `0459.bin`), which the port reads
     instead of the disc's when it starts; **Revert to the disc's** takes it back.
