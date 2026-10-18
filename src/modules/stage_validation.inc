@@ -1,3 +1,60 @@
+/* --import-stage ID MODS OBJ: the OBJ's objects become stage ID's parts (those not in it go), saved to MODS as the panel's Save does */
+static int import_stage_cli(int id, const std::string &mods, const std::string &obj) {
+    std::vector<uint8_t> table, bytes, disc;
+    char b[16];
+    auto mod = [&](int fid) { return snprintf(b, sizeof b, "/%04d.bin", fid), mods + b; };
+    if (!read_file(mod(459), table)) read_file(fid_path(459), table);
+    for (StageInfo si : read_stage_infos(table)) {
+        if (si.id != id) continue;
+        Model m;
+        StageEdit e;
+        if (!read_file(fid_path(si.fid), disc) || !(read_file(mod(si.fid), bytes) || read_file(fid_path(si.fid), bytes)) ||
+            !m.load("", bytes, nullptr, si.boneEntry)) {
+            fprintf(stderr, "stage %d: %s\n", id, m.error.c_str());
+            return 1;
+        }
+        e.fromModel(m, si);
+        StageBuild made;
+        if (!e.importObj(obj) || !e.build(disc, si.boneEntry, bytes, si, made)) {
+            fprintf(stderr, "stage %d: %s\n", id, e.error.c_str());
+            return 1;
+        }
+        if (!e.error.empty()) fprintf(stderr, "note: %s\n", e.error.c_str());
+        for (StageInfo o : read_stage_infos(table))
+            if (o.fid == si.fid) memcpy(o.noBounds, si.noBounds, 8), write_stage_info(table, o);
+        std::ofstream(mod(si.fid), std::ios::binary).write((const char *)bytes.data(), (std::streamsize)bytes.size());
+        std::ofstream(mod(459), std::ios::binary).write((const char *)table.data(), (std::streamsize)table.size());
+        printf("stage %d: %d parts, %d bytes -> %s%s%s\n", id, (int)e.parts.size(), (int)bytes.size(), mod(si.fid).c_str(), made.warning.empty() ? "" : "; ", made.warning.c_str());
+        return 0;
+    }
+    fprintf(stderr, "no stage %d\n", id);
+    return 1;
+}
+
+/* --export-stage ID MODS OUT: stage ID as an OBJ in OUT, from MODS/<file>.bin if it has a mod */
+static int export_stage_cli(int id, const std::string &mods, const std::string &dir) {
+    std::vector<uint8_t> table, bytes;
+    char b[16];
+    auto mod = [&](int fid) { return snprintf(b, sizeof b, "/%04d.bin", fid), mods + b; };
+    if (!read_file(mod(459), table)) read_file(fid_path(459), table);
+    for (const StageInfo &si : read_stage_infos(table)) {
+        if (si.id != id) continue;
+        Model m;
+        StageEdit e;
+        if (!(read_file(mod(si.fid), bytes) || read_file(fid_path(si.fid), bytes)) || !m.load("", bytes, nullptr, si.boneEntry)) {
+            fprintf(stderr, "stage %d: %s\n", id, m.error.c_str());
+            return 1;
+        }
+        e.fromModel(m, si);
+        char nm[16];
+        snprintf(nm, sizeof nm, "stage_%02d", id);
+        printf("stage %d: %d parts, %s -> %s\n", id, (int)e.parts.size(), e.exportObj(dir, nm) ? "ok" : "can't write", dir.c_str());
+        return 0;
+    }
+    fprintf(stderr, "no stage %d\n", id);
+    return 1;
+}
+
 /* --stages: each stage read, built back (and through an OBJ) and read
    again; what changed of its polygons and their corners' texels */
 static int check_stages() {

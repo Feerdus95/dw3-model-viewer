@@ -3,7 +3,8 @@ int main(int argc, char **argv) {
     std::string start_obj; /* an OBJ to import once the model is open */
     int shot_motion = 1, shot_key = 0, shot_cam = -1, shot_stage = 0, shot_fighter = 0;
     bool check = false, users = false, stages = false, seams = false;
-    int effect = -1;
+    int effect = -1, xstage = -1, istage = -1;
+    std::string xdir, xmods, iobj; /* --export-stage ID MODS OUT: the stage's OBJ as the game has it (the mod, if any) */
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--shot" && i + 1 < argc) shot = argv[++i];
@@ -15,6 +16,8 @@ int main(int argc, char **argv) {
         else if (a == "--import-obj" && i + 1 < argc) start_obj = argv[++i];
         else if (a == "--data" && i + 1 < argc) data = argv[++i];
         else if (a == "--check") check = true;
+        else if (a == "--import-stage" && i + 3 < argc) istage = atoi(argv[++i]), xmods = argv[++i], iobj = argv[++i];
+        else if (a == "--export-stage" && i + 3 < argc) xstage = atoi(argv[++i]), xmods = argv[++i], xdir = argv[++i];
         else if (a == "--stages") stages = true;
         else if (a == "--seams") seams = true;
         else if (a == "--effect" && i + 1 < argc) effect = atoi(argv[++i]);
@@ -26,6 +29,9 @@ int main(int argc, char **argv) {
     find_data(data);
 
     if (check || users || stages || seams || !shot.empty() || effect >= 0) attach_console();
+    if (xstage >= 0 || istage >= 0) attach_console();
+    if (istage >= 0) return import_stage_cli(istage, xmods, iobj);
+    if (xstage >= 0) return export_stage_cli(xstage, xmods, xdir);
     if (stages) return check_stages();
     if (seams) return check_seams();
     if (users) {
