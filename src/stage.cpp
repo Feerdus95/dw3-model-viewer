@@ -259,7 +259,7 @@ void StageEdit::remove(int k) {
 
 static const float OBJ_UNIT = 100; /* the game's units in one of the OBJ's */
 
-bool StageEdit::exportObj(const std::string &dir, const std::string &name) const {
+bool StageEdit::exportObj(const std::string &dir, const std::string &name, int only) const {
     SDL_CreateDirectory(dir.c_str());
     std::ofstream obj(dir + "/" + name + ".obj"), mtl(dir + "/" + name + ".mtl");
     if (!obj || !mtl) return false;
@@ -269,7 +269,9 @@ bool StageEdit::exportObj(const std::string &dir, const std::string &name) const
     std::set<std::pair<int, int>> mats;
     int base = 1, uvBase = 1;
     char line[160];
-    for (const StagePart &p : parts) {
+    for (int k = 0; k < (int)parts.size(); k++) {
+        if (only >= 0 && k != only) continue;
+        const StagePart &p = parts[k];
         obj << "o " << p.name << "\n";
         for (const auto &v : placed(p)) {
             snprintf(line, sizeof line, "v %.4f %.4f %.4f\n", v[0] / OBJ_UNIT, -v[1] / OBJ_UNIT, -v[2] / OBJ_UNIT);

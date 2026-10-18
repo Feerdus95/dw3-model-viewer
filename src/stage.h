@@ -81,7 +81,8 @@ struct StageEdit {
     void remove(int part); /* its children stay where they stand */
     std::vector<std::array<float, 3>> placed(const StagePart &p) const; /* its vertices, placed */
     /* DIR/NAME.obj (y up, 1 unit = 100 of the game's), NAME.mtl and texN.png */
-    bool exportObj(const std::string &dir, const std::string &name) const;
+    /* ONLY >= 0: just that part */
+    bool exportObj(const std::string &dir, const std::string &name, int only = -1) const;
     /* an OBJ: its objects become the parts (by name the ones it had, new ones fixed) */
     bool importObj(const std::string &path);
     /* the stage's model file: DISC's entries, the bone list (BONE_ENTRY) and

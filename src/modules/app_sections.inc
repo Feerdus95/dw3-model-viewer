@@ -2281,18 +2281,27 @@
         hint("Or copy a part (Ctrl+C) and paste it in another stage (Ctrl+V)."); 
 
         heading("Blender and the like (OBJ)");
-        if (ImGui::Button(IC_EXPORT "  Export OBJ")) {
+        hint("Export to edit outside, import to bring it back. Keep the objects' names to keep their parts.");
+        auto obj_export = [&](int only) {
             char nm[16];
+            std::string name = only < 0 ? std::string("stage_") + (stageId < 10 ? "0" : "") + std::to_string(stageId) : part_name(only);
+            for (char &c : name)
+                if (!isalnum((unsigned char)c) && c != '_' && c != '-' && c != '.') c = '_';
             snprintf(nm, sizeof nm, "stage_%02d", stageId);
             stageDir = g_exe_dir + "stages";
             SDL_CreateDirectory(stageDir.c_str());
             stageDir += std::string("/") + nm;
-            if (stageEdit.exportObj(stageDir, nm)) note(NOTE_OK, "Exported stage " + std::to_string(stageId) + " to " + stageDir);
+            if (stageEdit.exportObj(stageDir, name, only)) note(NOTE_OK, "Exported " + (only < 0 ? "stage " + std::to_string(stageId) : "part " + name) + " to " + stageDir);
             else note(NOTE_ERROR, "Can't write " + stageDir);
-        }
-        tip("An OBJ with its MTL and PNGs (y up, 1 unit = 100 of the game's). Keep the objects' names to keep their "
-            "parts; a material's _abrN is its semi-transparency.");
-        same_line_if_fits(IC_IMPORT "  Import OBJ...");
+        };
+        if (ImGui::Button(IC_EXPORT "  Export stage")) obj_export(-1);
+        tip("All the parts in one OBJ with its MTL and PNGs (y up, 1 unit = 100 of the game's). A material's _abrN is its "
+            "semi-transparency.");
+        same_line_if_fits(IC_EXPORT "  Export part");
+        ImGui::BeginDisabled(stagePart < 0);
+        if (ImGui::Button(IC_EXPORT "  Export part")) obj_export(stagePart);
+        ImGui::EndDisabled();
+        tip(stagePart < 0 ? "Select a part first (in the view or the Parts list)" : "Only the selected part, in its own OBJ named after it");
         if (ImGui::Button(IC_IMPORT "  Import OBJ...")) {
             static const SDL_DialogFileFilter OBJ = {"OBJ models", "obj"};
             SDL_ShowOpenFileDialog(
