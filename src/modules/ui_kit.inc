@@ -304,6 +304,25 @@ static M4 view_proj(const View &v, int w, int h) {
     return mul(perspective(v.fov, (float)w / std::max(h, 1), v.cam.dist * 0.01f, v.cam.dist * 50), v.cam.view());
 }
 
+/* Where the mouse (MX, MY on the W x H view) meets the ground, y 0; false in the sky */
+static bool ground_hit(const View &v, float w, float h, float mx, float my, float out[3]) {
+    const Camera &c = v.cam;
+    float e[3] = {c.target[0] + c.dist * cosf(c.pitch) * sinf(c.yaw), c.target[1] + c.dist * sinf(c.pitch), c.target[2] + c.dist * cosf(c.pitch) * cosf(c.yaw)};
+    float f[3] = {c.target[0] - e[0], c.target[1] - e[1], c.target[2] - e[2]};
+    float fl = sqrtf(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
+    for (float &x : f) x /= fl;
+    float s[3] = {-f[2], 0, f[0]}, sl = sqrtf(s[0] * s[0] + s[2] * s[2]);
+    for (float &x : s) x /= sl;
+    float u[3] = {s[1] * f[2] - s[2] * f[1], s[2] * f[0] - s[0] * f[2], s[0] * f[1] - s[1] * f[0]};
+    float k = tanf(v.fov / 2), nx = (mx / w * 2 - 1) * k * (w / h), ny = (1 - my / h * 2) * k, d[3];
+    for (int i = 0; i < 3; i++) d[i] = f[i] + s[i] * nx + u[i] * ny;
+    if (d[1] > -1e-4f) return false;
+    float t = -e[1] / d[1];
+    if (t <= 0) return false;
+    for (int i = 0; i < 3; i++) out[i] = e[i] + d[i] * t;
+    return true;
+}
+
 /* A point of the world on the view (W x H, from its top left); false behind the camera */
 static bool to_screen(const M4 &vp, const float p[3], float w, float h, ImVec2 &out) {
     const float *m = vp.m;

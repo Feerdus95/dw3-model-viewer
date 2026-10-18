@@ -1355,7 +1355,7 @@
         propMeshes.erase(to);
         return true;
     };
-    auto prop_add = [&](const std::string &path, int kind) {
+    auto prop_add = [&](const std::string &path, int kind, const float *at = nullptr) {
         if (!stage_on()) return;
         std::string name, tex;
         if (!copy_to_props(path, name)) return;
@@ -1380,7 +1380,7 @@
             else s.size[1] = 300, s.size[0] = std::max(10.0f, 300 * pi.w / pi.h);
         }
         stage_mark();
-        s.pos[0] = view.cam.target[0], s.pos[2] = -view.cam.target[2]; /* on the ground where the camera looks */
+        s.pos[0] = at ? at[0] : view.cam.target[0], s.pos[2] = -(at ? at[2] : view.cam.target[2]); /* on the ground, where asked or the camera looks */
         props.push_back(s);
         propSel = (int)props.size() - 1;
         select_part(-1);
@@ -1516,6 +1516,7 @@
             PSimCfg cfg = {};
             cfg.c[0] = p.pos[0], cfg.c[1] = p.pos[1], cfg.c[2] = p.pos[2], cfg.radius = p.radius, cfg.top = p.top, cfg.fall = p.fall;
             cfg.size[0] = p.size[0], cfg.size[1] = p.size[1], cfg.wind = p.wind, cfg.above = 300, cfg.outer = 2.5f, cfg.floor = 20;
+            for (int k = 0; k < 3; k++) propSimCfg[i].c[k] = cfg.c[k]; /* moved: the ones in the air go on */
             if (memcmp(&cfg, &propSimCfg[i], sizeof cfg) != 0) propSimCfg[i] = cfg, propSim[i].clear();
             advance(cfg, propSim[i], std::min(p.count, 300));
             for (const PSim &l : propSim[i]) particle(q, l, tint, p.fog, false);
@@ -1545,6 +1546,38 @@
             quads.push_back(lq);
         }
         if (propWind) propFrame = now;
+        /* where a catalog pick would go: a ring on the ground and, for a picture, the picture itself */
+        if (ghostOn && pcatArm >= 0 && pcatArm < (int)pcat.size()) {
+            const PCat &g = pcat[pcatArm];
+            float r = view.cam.dist * 0.03f, gy[3] = {ghostAt[0], 0, ghostAt[2]};
+            for (int s = 0; s < 24; s++) {
+                float a = s * 6.2831853f / 24, b = (s + 1) * 6.2831853f / 24;
+                float u[3] = {gy[0] + cosf(a) * r, 0, gy[2] + sinf(a) * r}, v[3] = {gy[0] + cosf(b) * r, 0, gy[2] + sinf(b) * r};
+                line(lines, u, v, 1.0f, 0.85f, 0.2f);
+            }
+            float top[3] = {gy[0], g.kind == 1 ? 4000.0f : 300.0f, gy[2]};
+            line(lines, gy, top, 1.0f, 0.85f, 0.2f);
+            if (g.kind == 1) {
+                for (int s = 0; s < 48; s++) {
+                    float a = s * 6.2831853f / 48, b = (s + 1) * 6.2831853f / 48;
+                    for (float y : {0.0f, 4000.0f}) {
+                        float u[3] = {gy[0] + cosf(a) * 3000, y, gy[2] + sinf(a) * 3000}, v[3] = {gy[0] + cosf(b) * 3000, y, gy[2] + sinf(b) * 3000};
+                        line(lines, u, v, 1.0f, 0.85f, 0.2f);
+                    }
+                }
+            }
+            if (g.kind == 0 && g.gl) {
+                PropQuad gq;
+                float h = 300, w = std::max(10.0f, 300 * g.w / g.h), c[4][3], one[3] = {1, 1, 1};
+                for (int k = 0; k < 4; k++) {
+                    float side = k & 1 ? 0.5f : -0.5f;
+                    for (int j = 0; j < 3; j++) c[k][j] = gy[j] + rt[j] * w * side + (j == 1 ? (k < 2 ? h : 0) : 0);
+                }
+                gq.tex = g.gl;
+                pq_quad(gq, c, one, 0);
+                quads.push_back(gq);
+            }
+        }
         /* the fog of the list's own, for the props: the stage's isn't known here, so its far side is about the arena's */
         if (propsMeta.fog) {
             float zf = view.cam.dist + 9000;
@@ -1555,10 +1588,189 @@
             view.pfog[3] = 0;
         }
     };
+    /* --- the props' catalog: every picture and model on offer as a thumbnail; pick one and click in the stage --- */
+    auto pcat_free = [&]() {
+        for (PCat &c : pcat)
+            if (c.gl) GL(glDeleteTextures)(1, &c.gl);
+        pcat.clear(), pcatArm = -1;
+    };
+    auto pcat_root = [&]() { return mods_root() + "/prop-catalog"; };
+    auto pcat_build = [&]() {
+        pcat_free();
+        pcatStage = stageId;
+        auto lower = [](std::string s) {
+            std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+            return s;
+        };
+        auto scan = [&](const std::string &dir, const char *pattern, const std::string &fixed) {
+            int n = 0;
+            char **names = SDL_GlobDirectory(dir.c_str(), pattern, SDL_GLOB_CASEINSENSITIVE, &n);
+            std::vector<std::string> sorted(names, names + (names ? n : 0));
+            SDL_free(names);
+            std::sort(sorted.begin(), sorted.end());
+            std::set<std::string> used; /* a model's picture is its own, not an item */
+            for (const std::string &rel : sorted)
+                if (lower(rel).size() > 4 && lower(rel).substr(lower(rel).size() - 4) == ".obj") {
+                    std::string t = obj_texture(dir + "/" + rel);
+                    if (!t.empty()) used.insert(lower(rel.substr(0, rel.find_last_of("/") + 1) + t));
+                }
+            for (const std::string &rel : sorted) {
+                std::string l = lower(rel), ext = l.size() > 4 ? l.substr(l.size() - 4) : "";
+                if (ext != ".png" && ext != ".obj") continue;
+                if (used.count(l)) continue;
+                PCat c;
+                size_t sl = rel.find_last_of("/");
+                c.name = sl == std::string::npos ? rel : rel.substr(sl + 1);
+                c.cat = !fixed.empty() ? fixed : sl == std::string::npos ? "Other" : rel.substr(0, sl);
+                c.path = dir + "/" + rel;
+                std::string lc = lower(c.cat);
+                c.kind = ext == ".obj" ? 2 : lc == "falling" || lc == "particles" ? 1 : 0;
+                if (c.kind == 2) {
+                    std::string t = obj_texture(c.path);
+                    if (!t.empty()) c.tex = c.path.substr(0, c.path.find_last_of("/\\") + 1) + t;
+                } else {
+                    c.tex = c.path;
+                    if (!fixed.empty()) /* what this stage already uses as particles */
+                        for (const StageProp &p : props)
+                            if (p.emitter && p.image == c.name) c.kind = 1;
+                }
+                pcat.push_back(c);
+            }
+        };
+        scan(pcat_root(), "*", "");
+        scan(pcat_root(), "*/*", "");
+        if (stage_on()) scan(props_dir(stageId), "*", "This stage");
+    };
+    auto pcat_thumb = [&](PCat &c) { /* its picture as a texture, read the first time it is shown */
+        c.tried = true;
+        if (c.tex.empty()) return;
+        SDL_Surface *png = SDL_LoadPNG(c.tex.c_str());
+        SDL_Surface *rgba = png ? SDL_ConvertSurface(png, SDL_PIXELFORMAT_RGBA32) : nullptr;
+        if (png) SDL_DestroySurface(png);
+        if (!rgba) return;
+        GL(glGenTextures)(1, &c.gl);
+        GL(glBindTexture)(GL_TEXTURE_2D, c.gl);
+        GL(glPixelStorei)(GL_UNPACK_ALIGNMENT, 4);
+        GL(glPixelStorei)(0x0CF2 /* GL_UNPACK_ROW_LENGTH */, rgba->pitch / 4);
+        GL(glTexImage2D)(GL_TEXTURE_2D, 0, GL_RGBA8, rgba->w, rgba->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba->pixels);
+        GL(glPixelStorei)(0x0CF2, 0);
+        GL(glGenerateMipmap)(GL_TEXTURE_2D);
+        GL(glTexParameteri)(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        GL(glTexParameteri)(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        c.w = (float)rgba->w, c.h = (float)rgba->h;
+        SDL_DestroySurface(rgba);
+    };
+    auto pcat_window = [&]() {
+        if (!pcatOpen) return;
+        if (pcatStage != stageId) pcat_build();
+        ImVec2 ds = ImGui::GetIO().DisplaySize;
+        ImGui::SetNextWindowSize(ImVec2(std::min(ds.x - 40 * dpi, 640 * dpi), std::min(ds.y - 60 * dpi, 560 * dpi)), ImGuiCond_Appearing);
+        ImGui::SetNextWindowPos(ImVec2(ds.x * 0.5f, ds.y * 0.5f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+        if (!ImGui::Begin(IC_STAGE "  Props catalog###pcat", &pcatOpen, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings)) {
+            ImGui::End();
+            return;
+        }
+        if (!pcatOpen) pcatArm = -1;
+        auto lower = [](std::string s) {
+            std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+            return s;
+        };
+        std::vector<std::string> tabs;
+        for (const PCat &c : pcat)
+            if (std::find(tabs.begin(), tabs.end(), c.cat) == tabs.end()) tabs.push_back(c.cat);
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.4f);
+        ImGui::InputTextWithHint("##pcfind", IC_SEARCH " Search", pcatFind, sizeof pcatFind);
+        ImGui::SameLine();
+        if (ImGui::Button(IC_LOOP "  Refresh")) pcat_build();
+        tip("Read the folders again");
+        ImGui::SameLine();
+        if (ImGui::Button(IC_FOLDER "  Open folder")) {
+            SDL_CreateDirectory(pcat_root().c_str());
+            open_folder(pcat_root());
+        }
+        tip("The catalog's folder: a PNG in a subfolder is a billboard, in Falling a particle, an OBJ (with its PNG) a model. Add your own and press Refresh.");
+        if (ImGui::BeginTabBar("##pctabs")) {
+            if (ImGui::BeginTabItem("All")) pcatTab = "", ImGui::EndTabItem();
+            for (const std::string &t : tabs)
+                if (ImGui::BeginTabItem(t.c_str())) pcatTab = t, ImGui::EndTabItem();
+            ImGui::EndTabBar();
+        }
+        float pic = 96 * dpi, lineH = ImGui::GetTextLineHeight();
+        const ImGuiStyle &sty = ImGui::GetStyle();
+        ImVec2 cell(pic + 12 * dpi, pic + lineH + 14 * dpi);
+        float foot = ImGui::GetTextLineHeightWithSpacing() * 2 + sty.ItemSpacing.y * 2;
+        ImGui::BeginChild("##pcgrid", ImVec2(0, -foot), ImGuiChildFlags_Borders);
+        int cols = std::max(1, (int)(ImGui::GetContentRegionAvail().x / (cell.x + sty.ItemSpacing.x))), n = 0, loaded = 0;
+        std::string q = lower(pcatFind);
+        double now = ImGui::GetTime();
+        for (int i = 0; i < (int)pcat.size(); i++) {
+            PCat &c = pcat[i];
+            if (!pcatTab.empty() && c.cat != pcatTab) continue;
+            if (!q.empty() && lower(c.name + " " + c.cat).find(q) == std::string::npos) continue;
+            if (n++ % cols) ImGui::SameLine();
+            if (!c.tried && loaded < 6) pcat_thumb(c), loaded++;
+            ImGui::PushID(i);
+            ImVec2 p = ImGui::GetCursorScreenPos();
+            bool hov;
+            if (ImGui::Selectable("##i", pcatArm == i, 0, cell)) {
+                pcatArm = pcatArm == i ? -1 : i, propSel = -1;
+                if (pcatArm >= 0) select_part(-1);
+            }
+            hov = ImGui::IsItemHovered();
+            ImDrawList *dl = ImGui::GetWindowDrawList();
+            ImVec2 a = p + ImVec2(6 * dpi, 4 * dpi), b = a + ImVec2(pic, pic);
+            dl->AddRectFilled(a, b, IM_COL32(40, 44, 52, 255));
+            dl->PushClipRect(a, b, true);
+            if (c.gl) {
+                float k = std::min((pic - 8 * dpi) / c.w, (pic - 8 * dpi) / c.h);
+                ImVec2 mid = (a + b) * 0.5f, hs(c.w * k * 0.5f, c.h * k * 0.5f);
+                ImTextureID tx = (ImTextureID)(intptr_t)c.gl;
+                if (hov && c.kind == 1) { /* it falls: a handful of them turning as they go down */
+                    for (int s = 0; s < 8; s++) {
+                        float ph = (float)fmod(now * 0.45 + s * 0.173, 1.0), x = a.x + (0.1f + 0.8f * (s * 0.37f - floorf(s * 0.37f))) * pic + sinf((float)now * 3 + s) * 7 * dpi;
+                        float y = a.y + ph * (pic + 20 * dpi) - 10 * dpi, ang = (float)now * 2 + s, r = pic * 0.12f, ca = cosf(ang) * r, sa = sinf(ang) * r;
+                        float fl = 0.35f + 0.65f * fabsf(cosf((float)now * 3.6f + s * 2));
+                        ImVec2 m(x, y);
+                        dl->AddImageQuad(tx, m + ImVec2(-ca * fl + sa, -sa * fl - ca), m + ImVec2(ca * fl + sa, sa * fl - ca), m + ImVec2(ca * fl - sa, sa * fl + ca),
+                                         m + ImVec2(-ca * fl - sa, -sa * fl + ca));
+                    }
+                } else if (hov && c.kind == 0) { /* it sways: the top goes with the wind, the foot stays */
+                    float sw = sinf((float)now * 3) * hs.x * 0.35f;
+                    dl->AddImageQuad(tx, ImVec2(mid.x - hs.x + sw, mid.y - hs.y), ImVec2(mid.x + hs.x + sw, mid.y - hs.y), mid + hs, ImVec2(mid.x - hs.x, mid.y + hs.y));
+                } else {
+                    dl->AddImage(tx, mid - hs, mid + hs);
+                }
+            } else {
+                dl->AddText(a + ImVec2(8 * dpi, pic / 2 - lineH / 2), IM_COL32(130, 135, 145, 255), c.kind == 2 ? "no texture" : "can't read");
+            }
+            dl->PopClipRect();
+            const char *badge = c.kind == 2 ? "3D" : c.kind == 1 ? "falls" : "";
+            if (*badge) dl->AddText(a + ImVec2(4 * dpi, 2 * dpi), IM_COL32(255, 217, 51, 255), badge);
+            if (pcatArm == i) dl->AddRect(a, b, IM_COL32(255, 217, 51, 255), 0, 0, 2 * dpi);
+            ImGui::PushClipRect(a, p + ImVec2(cell.x - 2 * dpi, cell.y), true);
+            dl->AddText(ImVec2(a.x, b.y + 3 * dpi), ImGui::GetColorU32(ImGuiCol_Text), c.name.c_str());
+            ImGui::PopClipRect();
+            if (hov) {
+                ImGui::BeginTooltip();
+                ImGui::Text("%s", c.name.c_str());
+                ImGui::TextDisabled("%s: %s", c.cat.c_str(), c.kind == 2 ? "a 3D model" : c.kind == 1 ? "particles falling through an area" : "a picture standing in the stage");
+                ImGui::EndTooltip();
+            }
+            ImGui::PopID();
+        }
+        if (!n) hint("%s", pcat.empty() ? "Nothing here yet: Open folder, add PNGs or OBJs in subfolders, and Refresh." : "Nothing matches.");
+        ImGui::EndChild();
+        if (!stage_on()) ImGui::TextDisabled("Open a stage first.");
+        else if (pcatArm >= 0) ImGui::TextColored(C_SELECT, "Click in the stage to place it. Shift keeps placing; Esc or right-click stops.");
+        else ImGui::TextDisabled("Pick one, then click in the stage where it goes.");
+        ImGui::End();
+    };
     auto props_panel = [&]() {
         char head[48];
         snprintf(head, sizeof head, "Props (%d)", (int)props.size());
         heading(head);
+        if (button(IC_STAGE "  Catalog...")) pcatOpen = true;
+        tip("Grass, flowers, petals and models as thumbnails: pick one, then click in the stage to place it");
         if (button(IC_ADD "  Billboard...")) pick_prop(0);
         tip("A PNG standing upright in the stage (grass, a flower, a rock), facing the camera. Its transparency cuts it out.");
         same_line_if_fits(IC_ADD "  Emitter...");

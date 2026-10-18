@@ -483,6 +483,16 @@
                 continue;
             }
             if (io.MouseDragMaxDistanceSqr[b] > 25 * dpi * dpi || !inView) continue; /* a drag, not a click */
+            if (pcatArm >= 0 && pcatArm < (int)pcat.size() && section == STAGES && stage_on()) { /* a catalog pick: a click places it, the other button stops */
+                float g[3];
+                if (b == 0 && vpHover && ground_hit(view, vw, vh, mp.x - vx, mp.y - vy, g)) {
+                    prop_add(pcat[pcatArm].path, pcat[pcatArm].kind, g);
+                    if (!io.KeyShift) pcatArm = -1;
+                } else if (b == 1) {
+                    pcatArm = -1;
+                }
+                continue;
+            }
             int hit = section == TEXTURES ? texHover : mode2d || !scene.model ? -1 : pick_bone(scene, view, vw, vh, mp.x - vx, mp.y - vy);
             if (b == 0 && (section == TEXTURES || !mode2d)) {
                 /* a prop under the mouse wins over the stage's parts: the nearest of the quads it is on */
@@ -530,7 +540,7 @@
         if (chord(ImGuiKey_H)) hide_selected();
         if (chord(ImGuiMod_Alt | ImGuiKey_H)) show_all();
         if (chord(ImGuiKey_F)) frame_sel();
-        if (chord(ImGuiKey_Escape)) select_bone(-1), ownFrame = -1;
+        if (chord(ImGuiKey_Escape)) select_bone(-1), ownFrame = -1, pcatArm = -1;
         if (chord(ImGuiKey_F1)) helpOpen = !helpOpen;
         if (chord(ImGuiKey_Space)) section == EFFECTS ? void(fxPlaying = !fxPlaying) : void(view.playing = !view.playing);
         if (keys && !io.KeyMods && ImGui::IsKeyPressed(ImGuiKey_RightArrow)) step(1);
@@ -892,6 +902,7 @@
 
         /* --- help: the controls --- */
         catalog_window();
+        pcat_window();
         if (helpOpen) {
             ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
             ImGui::SetNextWindowSize(ImVec2(std::min(ds.x - 40 * dpi, 600 * dpi), std::min(ds.y - 60 * dpi, 760 * dpi)), ImGuiCond_Appearing);
@@ -984,6 +995,8 @@
             float sx = ww / std::max(ds.x, 1.0f), sy = wh / std::max(ds.y, 1.0f);
             std::vector<PropQuad> propQuads;
             std::vector<float> propLines;
+            ghostOn = pcatArm >= 0 && section == STAGES && stage_on() && inView && !ImGui::GetIO().WantCaptureMouse &&
+                      ground_hit(view, vw, vh, mp.x - vx, mp.y - vy, ghostAt);
             if (stage_on()) props_build(propQuads, propLines);
             render(scene, view, (int)(vx * sx), (int)((ds.y - vy - vh) * sy), (int)(vw * sx), (int)(vh * sy), spriteDraws, extraModels, propQuads,
                    propLines);

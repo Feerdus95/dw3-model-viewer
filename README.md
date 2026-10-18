@@ -129,6 +129,11 @@ trademark of its owners.
     `data/mods/fightstages/<id>/props.json` beside their PNGs. **Play effects** (under *Wind and fog*)
     makes the wind bend what sways and the emitters' particles fall as in a battle; **Own leaves**
     sets how many leaves fall through the arena (the stage's own from `stages.ini` if off);
+    **Catalog...** opens thumbnails of every picture and model on offer (`<mods>/prop-catalog/<category>/`:
+    a PNG is a billboard, one in *Falling* a particle, an OBJ with its PNG a model; *This stage* lists the
+    folder's own). Hover one to see it sway or fall; pick it and click in the stage to place it (a ring and
+    the picture follow the mouse; Shift keeps placing, Esc or right-click stops). *Open folder* is where
+    you add your own, then *Refresh*;
   - **Save to game** writes the stage in the game's own format to the native port's
     `data/mods/<file>.bin` (with the stages' table, `0459.bin`), which the port reads
     instead of the disc's when it starts; **Revert to the disc's** takes it back.
