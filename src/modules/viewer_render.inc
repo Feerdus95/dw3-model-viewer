@@ -20,7 +20,7 @@ struct View {
     float pfog[4] = {}, pfogz[2] = {}; /* the props' own fog when set (alpha 0: none): colour and amount; where it starts and ends */
 };
 
-static GLuint g_mesh, g_line, g_lineVao, g_lineVbo, g_sprite, g_prop, g_propVao, g_propVbo;
+static GLuint g_mesh, g_line, g_lineVao, g_lineVbo, g_sprite, g_prop, g_propVao, g_propVbo, g_pgpu, g_pgVao, g_pgVao0;
 
 /* A stage prop on the view: its PNG's texture on a quad (top left, top right,
    bottom left, bottom right corners, in the view's world), times a tint */
@@ -40,6 +40,31 @@ static void pq_quad(PropQuad &q, const float c[4][3], const float tint[3], float
     static const float UV[4][2] = {{0, 0}, {1, 0}, {0, 1}, {1, 1}};
     for (int k : TRI) pq_vertex(q, c[k], UV[k][0], UV[k][1], tint, fog);
 }
+
+/* The stage's props on the card: tables uploaded once and drawn with instances (shaders.inc's PGPU_VS), rebuilt only when
+   a prop, its picture or its model changed */
+struct PropBatch {
+    int mode = 0;            /* 0 billboards, 1 an emitter, 2 the stage's leaves, 3 a model */
+    GLuint tex = 0, buf = 0; /* the picture; the instance table */
+    int n = 0;               /* instances, or particles */
+    int mesh = -1;           /* a model's: PropGpu::meshes */
+    float pc[4] = {}, pa[4] = {}, pb[4] = {}, tint[4] = {}; /* an emitter's or the leaves' */
+};
+struct PropMeshGpu {
+    std::string key;
+    const float *ptr = nullptr;
+    size_t size = 0;
+    int gen = -1, n = 0;
+    float miny = 0, h = 1;
+    GLuint vao = 0, vbo = 0;
+};
+struct PropGpu {
+    std::vector<PropBatch> batches;
+    std::vector<PropMeshGpu> meshes;
+    uint64_t sig = 0;
+    bool valid = false;
+    float t = 0, clock = 0, ww[2] = {0, 0}; /* this frame's: the wind's clock, the particles', the wind */
+};
 
 /* A sprite effect's picture (the 320x240 screen around its point) as the
    battle draws it: at its point in the view's world, or at a screen position
@@ -131,6 +156,55 @@ static void prop_model_point(const StageProp &p, const ObjMesh &m, float x, floa
     out[2] = -(p.pos[2] - lx * sa + lz * ca + ww[1] * bend * rel * rel);
 }
 
+static void draw_props_gpu(const PropGpu &pg, const View &v, const M4 &vp) {
+    if (pg.batches.empty()) return;
+    GL(glUseProgram)(g_pgpu);
+    auto U = [&](const char *n) { return GL(glGetUniformLocation)(g_pgpu, n); };
+    GL(glUniformMatrix4fv)(U("mvp"), 1, GL_FALSE, vp.m);
+    GL(glUniform1i)(U("tex"), 0);
+    GL(glUniform4f)(U("fog"), v.pfog[0], v.pfog[1], v.pfog[2], v.pfog[3]);
+    GL(glUniform2f)(U("fogz"), v.pfogz[0], v.pfogz[1]);
+    GL(glUniform3f)(U("right"), cosf(v.cam.yaw), 0, -sinf(v.cam.yaw));
+    GL(glUniform1f)(U("t"), pg.t);
+    GL(glUniform1f)(U("clock"), pg.clock);
+    GL(glUniform2f)(U("ww"), pg.ww[0], pg.ww[1]);
+    GL(glActiveTexture)(GL_TEXTURE0);
+    const GLsizei st = 12 * 4;
+    for (const PropBatch &b : pg.batches) {
+        GL(glBindTexture)(GL_TEXTURE_2D, b.tex);
+        GL(glUniform1i)(U("mode"), b.mode);
+        if (b.mode == 0) {
+            GL(glBindVertexArray)(g_pgVao);
+            GL(glBindBuffer)(GL_ARRAY_BUFFER, b.buf);
+            const int size[4] = {3, 4, 4, 1}, off[4] = {0, 12, 28, 44};
+            for (int a = 0; a < 4; a++) {
+                GL(glEnableVertexAttribArray)(a);
+                GL(glVertexAttribPointer)(a, size[a], GL_FLOAT, GL_FALSE, st, (void *)(size_t)off[a]);
+                GL(glVertexAttribDivisor)(a, 1);
+            }
+            GL(glDrawArraysInstanced)(GL_TRIANGLES, 0, 6, b.n);
+        } else if (b.mode == 3) {
+            const PropMeshGpu &m = pg.meshes[b.mesh];
+            GL(glUniform2f)(U("mmesh"), m.miny, m.h);
+            GL(glBindVertexArray)(m.vao);
+            GL(glBindBuffer)(GL_ARRAY_BUFFER, b.buf);
+            for (int a = 5; a < 8; a++) {
+                GL(glEnableVertexAttribArray)(a);
+                GL(glVertexAttribPointer)(a, 4, GL_FLOAT, GL_FALSE, st, (void *)(size_t)((a - 5) * 16));
+                GL(glVertexAttribDivisor)(a, 1);
+            }
+            GL(glDrawArraysInstanced)(GL_TRIANGLES, 0, m.n, b.n);
+        } else {
+            GL(glUniform4f)(U("pc"), b.pc[0], b.pc[1], b.pc[2], b.pc[3]);
+            GL(glUniform4f)(U("pa"), b.pa[0], b.pa[1], b.pa[2], b.pa[3]);
+            GL(glUniform4f)(U("pb"), b.pb[0], b.pb[1], b.pb[2], b.pb[3]);
+            GL(glUniform4f)(U("ptint"), b.tint[0], b.tint[1], b.tint[2], b.tint[3]);
+            GL(glBindVertexArray)(g_pgVao0);
+            GL(glDrawArraysInstanced)(GL_TRIANGLES, 0, 6, b.n);
+        }
+    }
+}
+
 static void draw_lines(const std::vector<float> &v, const M4 &mvp) {
     if (v.empty()) return;
     GL(glUseProgram)(g_line);
@@ -207,7 +281,7 @@ static void draw_sprites(const std::vector<SpriteDraw> &sprites, const M4 &vp, i
 /* The scene in the view at X, Y (from the window's bottom left), W x H pixels */
 static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vector<SpriteDraw> &sprites = {},
                    const std::vector<ExtraModel> &extras = {}, const std::vector<PropQuad> &props = {},
-                   const std::vector<float> &propLines = {}) {
+                   const std::vector<float> &propLines = {}, const PropGpu *pg = nullptr) {
     if (v.stageView)
         GL(glClearColor)(v.stageBg[0], v.stageBg[1], v.stageBg[2], 1);
     else
@@ -316,6 +390,7 @@ static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vec
             GL(glDrawArrays)(GL_TRIANGLES, 0, (GLsizei)(q.v.size() / 9));
         }
     }
+    if (pg) draw_props_gpu(*pg, v, vp);
     if (v.skeleton) {
         std::vector<float> l;
         for (size_t b = 1; b < m.bones.size(); b++) {

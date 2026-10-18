@@ -1415,7 +1415,7 @@
             return note(NOTE_ERROR, to + ": " + SDL_GetError()), false;
         auto old = propImgs.find(to); /* a new file under an old name */
         if (old != propImgs.end()) GL(glDeleteTextures)(1, &old->second.tex), propImgs.erase(old);
-        propMeshes.erase(to);
+        propMeshes.erase(to), ++propGen;
         return true;
     };
     auto prop_add = [&](const std::string &path, int kind, const float *at = nullptr) {
@@ -1584,84 +1584,91 @@
     };
     /* the props on the view: billboards and models drawn, emitters as their volume and a few of their particles, and
        the outlines (the picked one yellow) */
-    auto props_build = [&](std::vector<PropQuad> &quads, std::vector<float> &lines) {
-        float yaw = view.cam.yaw, rt[3] = {cosf(yaw), 0, -sinf(yaw)};
-        float t = propWind ? (float)ImGui::GetTime() * 60.0f : 0, ww[2] = {0, 0};
-        if (propWind) prop_wind(t, propsMeta.wind, ww);
-        if (propWind) propClock += ImGui::GetIO().DeltaTime * 60.0f; /* the particles' clock; paused, they stay where they are */
-        /* one particle: a flat picture turned about its middle, facing the camera (the port's turn and flip); a leaf is a diamond */
-        auto particle = [&](PropQuad &q, const PSim &l, const float tint[3], float fogShare, bool leaf) {
-            static const float LX[2][4] = {{-1, 1, -1, 1}, {0, 0.45f, -0.45f, 0}}, LY[2][4] = {{-1, -1, 1, 1}, {-1, 0, 0, 1}};
-            float half = l.size * 0.5f, flip = 0.25f + 0.75f * fabsf(cosf(t * 0.06f + l.phase * 2.0f)), c = cosf(l.angle), sn = sinf(l.angle);
-            float at[3] = {l.p[0], -l.p[1], -l.p[2]}, cr[4][3];
-            for (int k = 0; k < 4; k++) {
-                float lx = LX[leaf][k] * flip, ly = LY[leaf][k], dx = (lx * c - ly * sn) * half, dy = (lx * sn + ly * c) * half;
-                for (int j = 0; j < 3; j++) cr[k][j] = at[j] + rt[j] * dx + (j == 1 ? -dy : 0);
+    auto pg_mesh = [&](const std::string &name) -> int {
+        const ObjMesh &m = prop_mesh(name);
+        if (m.v.empty()) return -1;
+        std::string key = props_dir(stageId) + "/" + name;
+        int at = -1;
+        for (int i = 0; i < (int)propGpu.meshes.size(); i++)
+            if (propGpu.meshes[i].key == key) at = i;
+        if (at < 0) propGpu.meshes.push_back({}), at = (int)propGpu.meshes.size() - 1, propGpu.meshes[at].key = key;
+        PropMeshGpu &g = propGpu.meshes[at];
+        if (g.gen != propGen || g.ptr != m.v.data() || g.size != m.v.size()) { /* new, or its file was replaced: up to the card */
+            if (!g.vao) GL(glGenVertexArrays)(1, &g.vao), GL(glGenBuffers)(1, &g.vbo);
+            GL(glBindVertexArray)(g.vao);
+            GL(glBindBuffer)(GL_ARRAY_BUFFER, g.vbo);
+            GL(glBufferData)(GL_ARRAY_BUFFER, (GLsizeiptr)(m.v.size() * 4), m.v.data(), GL_STATIC_DRAW);
+            const int size[3] = {3, 2, 3}, loc[3] = {0, 1, 4}, off[3] = {0, 12, 20};
+            for (int a = 0; a < 3; a++) {
+                GL(glEnableVertexAttribArray)(loc[a]);
+                GL(glVertexAttribPointer)(loc[a], size[a], GL_FLOAT, GL_FALSE, 32, (void *)(size_t)off[a]);
             }
-            pq_quad(q, cr, tint, fogShare);
-        };
-        for (int i = 0; i < (int)props.size(); i++) {
-            const StageProp &p = props[i];
-            bool sel = i == propSel || (propSet.size() > 1 && propSet.count(i));
-            float col[3] = {1.0f, 0.85f, 0.2f}, tint[3] = {p.tint[0] / 255.0f, p.tint[1] / 255.0f, p.tint[2] / 255.0f};
-            if (!sel) col[0] = p.emitter ? 0.3f : p.model ? 0.5f : 0.6f, col[1] = p.emitter ? 0.8f : p.model ? 0.9f : 0.6f, col[2] = p.emitter ? 1.0f : p.model ? 0.5f : 0.6f;
-            PropQuad q;
-            if (p.model) {
-                const ObjMesh &m = prop_mesh(p.obj);
-                if (m.v.empty()) continue;
-                float h = m.h * p.scale, bend = propWind ? prop_bend(p, t, h) : 0, L = 1 / 0.98f;
-                float a = p.rot * 0.017453293f, ca = cosf(a), sa = sinf(a);
-                q.tex = p.image.empty() ? 0 : prop_img(p.image).tex;
-                if (q.tex)
-                    for (size_t k = 0; k < m.v.size(); k += 8) {
-                        const float *v = &m.v[k];
-                        float at[3], nx = v[5] * ca + v[7] * sa, nz = -v[5] * sa + v[7] * ca;
-                        float shade = 0.55f + 0.45f * std::max((nx * 0.35f + v[6] * 0.8f + nz * 0.45f) * L, 0.0f), tn[3] = {tint[0] * shade, tint[1] * shade, tint[2] * shade};
-                        prop_model_point(p, m, v[0], v[1], v[2], ww, bend, at);
-                        pq_vertex(q, at, v[3], v[4], tn, p.fog);
-                    }
-                if (q.tex) quads.push_back(q);
-                if (sel) { /* its box */
-                    float bx[8][3];
-                    prop_points(p, bx);
-                    static const int E[12][2] = {{0, 1}, {2, 3}, {4, 5}, {6, 7}, {0, 2}, {1, 3}, {4, 6}, {5, 7}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
-                    for (const auto &e : E) line(lines, bx[e[0]], bx[e[1]], col[0], col[1], col[2]);
-                }
-                continue;
-            }
-            if (!p.emitter) {
-                float c[4][3], h = p.size[1] * p.scale, bend = propWind ? prop_bend(p, t, h) : 0;
-                prop_corners(p, yaw, c, ww[0] * bend, ww[1] * bend);
-                q.tex = prop_img(p.image).tex;
-                if (q.tex) pq_quad(q, c, tint, p.fog), quads.push_back(q);
-                static const int E[4][2] = {{0, 1}, {1, 3}, {3, 2}, {2, 0}};
-                for (const auto &e : E) line(lines, c[e[0]], c[e[1]], col[0], col[1], col[2]);
-                continue;
-            }
-            float cx = p.pos[0], cy = p.pos[1], cz = -p.pos[2];
-            for (int s = 0; s < 48; s++) {
-                float a = s * 6.2831853f / 48, b = (s + 1) * 6.2831853f / 48;
-                for (float y : {cy, cy + p.top}) {
-                    float u[3] = {cx + cosf(a) * p.radius, y, cz + sinf(a) * p.radius}, v[3] = {cx + cosf(b) * p.radius, y, cz + sinf(b) * p.radius};
-                    line(lines, u, v, col[0], col[1], col[2]);
-                }
-            }
-            for (int s = 0; s < 4; s++) {
-                float a = s * 1.5707963f, lo[3] = {cx + cosf(a) * p.radius, cy, cz + sinf(a) * p.radius}, hi[3] = {lo[0], cy + p.top, lo[2]};
-                line(lines, lo, hi, col[0], col[1], col[2]);
-            }
-            q.tex = prop_img(p.image).tex;
-            if (!q.tex) continue;
-            PSimCfg cfg = {};
-            cfg.c[0] = p.pos[0], cfg.c[1] = p.pos[1], cfg.c[2] = p.pos[2], cfg.radius = p.radius, cfg.top = p.top, cfg.fall = p.fall;
-            cfg.size[0] = p.size[0], cfg.size[1] = p.size[1], cfg.wind = p.wind, cfg.above = 300, cfg.floor = 20;
-            PSim l;
-            for (int k = 0; k < std::min(p.count, 5000); k++) psim_at(cfg, (uint32_t)k, propClock, l), particle(q, l, tint, p.fog, false);
-            quads.push_back(q);
+            g.gen = propGen, g.ptr = m.v.data(), g.size = m.v.size(), g.n = (int)(m.v.size() / 8), g.miny = m.miny, g.h = m.h;
         }
-        /* the stage's leaves, the list's count of them, as the port draws them: a diamond in greens and browns */
-        if (propsMeta.leaves > 0) {
-            static const unsigned char PAL[5][3] = {{58, 102, 34}, {74, 118, 38}, {110, 120, 40}, {128, 86, 36}, {96, 70, 34}};
+        return at;
+    };
+    /* the tables of the props: rebuilt only when the hash of what they come from changes (a prop, its picture or model) */
+    auto pg_sync = [&]() {
+        uint64_t h = 1469598103934665603ull;
+        auto mix = [&](uint32_t w) { h = (h ^ w) * 1099511628211ull, h ^= h >> 29; };
+        auto mixf = [&](float f) { uint32_t w; memcpy(&w, &f, 4); mix(w); };
+        std::hash<std::string> hs;
+        mix((uint32_t)stageId + 7), mix((uint32_t)propGen), mix((uint32_t)propsMeta.leaves), mix((uint32_t)props.size());
+        for (const StageProp &p : props) {
+            mix((p.emitter ? 1u : 0u) | (p.model ? 2u : 0u) | (p.fixed ? 4u : 0u) | ((uint32_t)p.count << 4));
+            for (float f : {p.pos[0], p.pos[1], p.pos[2], p.size[0], p.size[1], p.tint[0], p.tint[1], p.tint[2], p.scale, p.sway, p.rot, p.fog,
+                            p.radius, p.top, p.fall, p.wind})
+                mixf(f);
+            mix((uint32_t)hs(p.image)), mix((uint32_t)hs(p.obj));
+        }
+        if (propGpu.valid && h == propGpu.sig) return;
+        propGpu.valid = true, propGpu.sig = h;
+        for (PropBatch &b : propGpu.batches)
+            if (b.buf) GL(glDeleteBuffers)(1, &b.buf);
+        propGpu.batches.clear();
+        std::map<GLuint, std::vector<float>> bb;
+        std::map<std::pair<int, GLuint>, std::vector<float>> md;
+        for (const StageProp &p : props) {
+            GLuint tex = p.image.empty() ? 0 : prop_img(p.image).tex;
+            if (!tex) continue;
+            if (p.emitter) {
+                PropBatch b;
+                b.mode = 1, b.tex = tex, b.n = std::min(p.count, 5000);
+                float c[4] = {p.pos[0], p.pos[1], p.pos[2], p.radius}, a[4] = {p.top, p.fall, p.wind, 300}, s[4] = {p.size[0], p.size[1], 20, (float)b.n},
+                      t4[4] = {p.tint[0] / 255, p.tint[1] / 255, p.tint[2] / 255, p.fog};
+                memcpy(b.pc, c, 16), memcpy(b.pa, a, 16), memcpy(b.pb, s, 16), memcpy(b.tint, t4, 16);
+                propGpu.batches.push_back(b);
+            } else if (p.model) {
+                int mesh = pg_mesh(p.obj);
+                if (mesh < 0) continue;
+                std::vector<float> &v = md[{mesh, tex}];
+                const float row[12] = {p.pos[0], p.pos[1], p.pos[2], p.scale, p.rot, p.sway, p.fog, 0, p.tint[0] / 255, p.tint[1] / 255, p.tint[2] / 255, 1};
+                v.insert(v.end(), row, row + 12);
+            } else {
+                std::vector<float> &v = bb[tex];
+                const float row[12] = {p.pos[0], p.pos[1], p.pos[2], p.size[0] * p.scale, p.size[1] * p.scale, p.sway, p.rot,
+                                       p.tint[0] / 255, p.tint[1] / 255, p.tint[2] / 255, p.fog, p.fixed ? 1.0f : 0.0f};
+                v.insert(v.end(), row, row + 12);
+            }
+        }
+        auto table = [&](PropBatch &b, const std::vector<float> &v) {
+            b.n = (int)(v.size() / 12);
+            GL(glGenBuffers)(1, &b.buf);
+            GL(glBindBuffer)(GL_ARRAY_BUFFER, b.buf);
+            GL(glBufferData)(GL_ARRAY_BUFFER, (GLsizeiptr)(v.size() * 4), v.data(), GL_STATIC_DRAW);
+            propGpu.batches.push_back(b);
+        };
+        for (auto &it : bb) {
+            PropBatch b;
+            b.mode = 0, b.tex = it.first;
+            table(b, it.second);
+        }
+        for (auto &it : md) {
+            PropBatch b;
+            b.mode = 3, b.mesh = it.first.first, b.tex = it.first.second;
+            table(b, it.second);
+        }
+        if (propsMeta.leaves > 0) { /* the stage's leaves, the list's count of them: a diamond in greens and browns */
             if (!propWhite) {
                 const unsigned char px[4] = {255, 255, 255, 255};
                 GL(glGenTextures)(1, &propWhite);
@@ -1670,17 +1677,52 @@
                 GL(glTexParameteri)(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
                 GL(glTexParameteri)(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
             }
-            PSimCfg lc = {};
-            lc.radius = 9000, lc.top = 7500, lc.fall = 1, lc.size[0] = 70, lc.size[1] = 140, lc.wind = 1, lc.above = 1500, lc.floor = 40;
-            PropQuad lq;
-            lq.tex = propWhite;
-            for (int k = 0; k < propsMeta.leaves; k++) {
-                PSim l;
-                psim_at(lc, (uint32_t)k, propClock, l);
-                float tn[3] = {PAL[l.shade][0] / 255.0f, PAL[l.shade][1] / 255.0f, PAL[l.shade][2] / 255.0f};
-                particle(lq, l, tn, 1, true);
+            PropBatch b;
+            b.mode = 2, b.tex = propWhite, b.n = std::min(propsMeta.leaves, 5000);
+            const float c[4] = {0, 0, 0, 9000}, a[4] = {7500, 1, 1, 1500}, s[4] = {70, 140, 40, (float)b.n}, t4[4] = {1, 1, 1, 1};
+            memcpy(b.pc, c, 16), memcpy(b.pa, a, 16), memcpy(b.pb, s, 16), memcpy(b.tint, t4, 16);
+            propGpu.batches.push_back(b);
+        }
+    };
+    /* the props on the view: drawn on the card (propGpu); here the outlines (the picked one yellow), the catalog's ghost and
+       the list's fog */
+    auto props_build = [&](std::vector<PropQuad> &quads, std::vector<float> &lines) {
+        float yaw = view.cam.yaw, rt[3] = {cosf(yaw), 0, -sinf(yaw)};
+        float t = propWind ? (float)ImGui::GetTime() * 60.0f : 0, ww[2] = {0, 0};
+        if (propWind) prop_wind(t, propsMeta.wind, ww);
+        if (propWind) propClock += ImGui::GetIO().DeltaTime * 60.0f; /* the particles' clock; paused, they stay where they are */
+        pg_sync();
+        propGpu.t = t, propGpu.clock = propClock, propGpu.ww[0] = ww[0], propGpu.ww[1] = ww[1];
+        for (int i = 0; i < (int)props.size(); i++) {
+            const StageProp &p = props[i];
+            bool sel = i == propSel || (propSet.size() > 1 && propSet.count(i));
+            if (!sel && (p.model || !propOutlines)) continue; /* a model shows its box only when picked */
+            float col[3] = {1.0f, 0.85f, 0.2f};
+            if (!sel) col[0] = p.emitter ? 0.3f : 0.6f, col[1] = p.emitter ? 0.8f : 0.6f, col[2] = p.emitter ? 1.0f : 0.6f;
+            if (p.model) { /* its box */
+                float bx[8][3];
+                if (!prop_points(p, bx)) continue;
+                static const int E[12][2] = {{0, 1}, {2, 3}, {4, 5}, {6, 7}, {0, 2}, {1, 3}, {4, 6}, {5, 7}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
+                for (const auto &e : E) line(lines, bx[e[0]], bx[e[1]], col[0], col[1], col[2]);
+            } else if (!p.emitter) {
+                float c[4][3], h = p.size[1] * p.scale, bend = propWind ? prop_bend(p, t, h) : 0;
+                prop_corners(p, yaw, c, ww[0] * bend, ww[1] * bend);
+                static const int E[4][2] = {{0, 1}, {1, 3}, {3, 2}, {2, 0}};
+                for (const auto &e : E) line(lines, c[e[0]], c[e[1]], col[0], col[1], col[2]);
+            } else {
+                float cx = p.pos[0], cy = p.pos[1], cz = -p.pos[2];
+                for (int s = 0; s < 48; s++) {
+                    float a = s * 6.2831853f / 48, b = (s + 1) * 6.2831853f / 48;
+                    for (float y : {cy, cy + p.top}) {
+                        float u[3] = {cx + cosf(a) * p.radius, y, cz + sinf(a) * p.radius}, v[3] = {cx + cosf(b) * p.radius, y, cz + sinf(b) * p.radius};
+                        line(lines, u, v, col[0], col[1], col[2]);
+                    }
+                }
+                for (int s = 0; s < 4; s++) {
+                    float a = s * 1.5707963f, lo[3] = {cx + cosf(a) * p.radius, cy, cz + sinf(a) * p.radius}, hi[3] = {lo[0], cy + p.top, lo[2]};
+                    line(lines, lo, hi, col[0], col[1], col[2]);
+                }
             }
-            quads.push_back(lq);
         }
         /* where a catalog pick would go: a ring on the ground and, for a picture, the picture itself */
         if (ghostOn && pcatArm >= 0 && pcatArm < (int)pcat.size()) {
@@ -1982,6 +2024,14 @@
         same_line_if_fits(IC_ADD "  Model...");
         if (button(IC_ADD "  Model...")) pick_prop(2);
         tip("A small 3D model from an OBJ (a rock, a signpost, a tree) with a PNG texture; if the OBJ's MTL names one, it comes along");
+        if (ImGui::Checkbox("Outline all", &propOutlines)) {}
+        tip("Off: only the picked prop shows its outline, so the ground stays clear. On: every billboard and emitter shows its box.");
+        same_line_if_fits("Original stage");
+        if (ImGui::Checkbox("Original stage", &showOrig)) {
+            if (showOrig) stage_show(stageDisc, false);
+            else stage_rebuild();
+        }
+        tip("Shows the disc's stage instead of yours, to see where its trees (or anything you took out) stood. The props stay. Editing a part brings yours back.");
         if (!props.empty()) {
             float lh = ImGui::GetTextLineHeightWithSpacing();
             if (ImGui::BeginChild("##props", ImVec2(0, std::min((int)props.size(), 6) * lh + 8 * dpi), ImGuiChildFlags_Borders)) {

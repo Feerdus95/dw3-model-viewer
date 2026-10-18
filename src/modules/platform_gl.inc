@@ -28,7 +28,8 @@ static int fatal(const char *what) {
     X(glUniform4f) X(glUniform2f) X(glUniform3fv) X(glUniformMatrix4fv) X(glGenVertexArrays) X(glBindVertexArray) X(glGenBuffers)                \
     X(glDeleteBuffers) X(glDeleteVertexArrays) X(glBindBuffer) X(glBufferData) X(glEnableVertexAttribArray) X(glVertexAttribPointer)     \
     X(glVertexAttribIPointer) X(glGenFramebuffers) X(glBindFramebuffer) X(glFramebufferTexture2D)                \
-    X(glGenRenderbuffers) X(glBindRenderbuffer) X(glRenderbufferStorage) X(glFramebufferRenderbuffer) X(glGenerateMipmap)
+    X(glGenRenderbuffers) X(glBindRenderbuffer) X(glRenderbufferStorage) X(glFramebufferRenderbuffer) X(glGenerateMipmap) \
+    X(glDrawArraysInstanced) X(glVertexAttribDivisor)
 
 #define X(f) static decltype(&f) p_##f;
 GL_FUNCS(X)

@@ -1080,7 +1080,7 @@
                       ground_hit(view, vw, vh, mp.x - vx, mp.y - vy, ghostAt);
             if (stage_on()) props_build(propQuads, propLines);
             render(scene, view, (int)(vx * sx), (int)((ds.y - vy - vh) * sy), (int)(vw * sx), (int)(vh * sy), spriteDraws, extraModels, propQuads,
-                   propLines);
+                   propLines, stage_on() ? &propGpu : nullptr);
         }
         GL(glViewport)(0, 0, ww, wh);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());

@@ -134,7 +134,10 @@ int main(int argc, char **argv) {
     g_line = compile(LINE_VS, LINE_FS);
     g_sprite = compile(SPRITE_VS, SPRITE_FS);
     g_prop = compile(PROP_VS, PROP_FS);
-    if (!g_mesh || !g_line || !g_sprite || !g_prop) return 1;
+    g_pgpu = compile(PGPU_VS, PROP_FS);
+    if (!g_mesh || !g_line || !g_sprite || !g_prop || !g_pgpu) return 1;
+    GL(glGenVertexArrays)(1, &g_pgVao);
+    GL(glGenVertexArrays)(1, &g_pgVao0); /* particles: no attributes, each is its number */
     GL(glGenVertexArrays)(1, &g_lineVao);
     GL(glGenBuffers)(1, &g_lineVbo);
     GL(glBindVertexArray)(g_lineVao);
@@ -222,6 +225,7 @@ int main(int argc, char **argv) {
     StageBuild stageMade;
     std::vector<uint8_t> stageDisc; /* its file on the disc, what builds start from */
     bool stageDirty = false;
+    bool showOrig = false, propOutlines = false; /* the disc's stage in the view instead of the mod's; every prop's outline, not only the picked one's */
     std::string stageDir; /* the last export's folder */
     /* its props for the port (custom.h), in <mods>/fightstages/<id>/: the list, the one picked, the PNGs as textures */
     std::vector<StageProp> props;
@@ -257,6 +261,8 @@ int main(int argc, char **argv) {
     std::map<std::string, float> brushMix; /* the ticked pictures, by their catalog path, and their weights */
     const int BB_MAX = 20000; /* the viewer draws on the CPU; the port keeps up to 100000 (stagefx.c MAX_BB) */
     float ghostAt[3] = {0, 0, 0};     /* where, in the view's world */
+    PropGpu propGpu;                        /* the props as the card has them */
+    int propGen = 0;                        /* up one whenever a prop's picture or model file is replaced */
     GLuint propWhite = 0;                   /* a white pixel, what a leaf is drawn with */
     /* a group of props (box select): the primary one is propSel; the group is dropped when that changes or the list does */
     std::set<int> propSet;
@@ -445,9 +451,9 @@ int main(int argc, char **argv) {
         std::vector<uint8_t> bytes;
         if (!stage_load(id, stageEdit, stageInfo, bytes)) return;
         read_file(fid_path(stageInfo.fid), stageDisc);
-        stageId = id, stagePart = -1, stageDirty = false, stageMade = StageBuild();
+        stageId = id, stagePart = -1, stageDirty = false, showOrig = false, stageMade = StageBuild();
         props_load(props_dir(id), props, propsMeta), propSel = -1;
-        propMeshes.clear();
+        propMeshes.clear(), ++propGen;
         for (auto &it : propImgs) GL(glDeleteTextures)(1, &it.second.tex);
         propImgs.clear();
         for (int k = 0; k < (int)stageEdit.parts.size(); k++) stageMade.firstBone.push_back(k + 1);
@@ -461,7 +467,7 @@ int main(int argc, char **argv) {
             status = stageEdit.error;
             return false;
         }
-        stageDirty = true;
+        stageDirty = true, showOrig = false;
         note(NOTE_WARN, stageMade.warning);
         stage_show(std::move(bytes), false);
         if (stagePart >= 0 && stagePart < (int)stageMade.firstBone.size()) scene.selected = stageMade.firstBone[stagePart];
