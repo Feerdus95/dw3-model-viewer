@@ -136,6 +136,10 @@ trademark of its owners.
     you add your own, then *Refresh*. With a picture picked, **Brush** scatters it as you drag on the
     ground (radius, amount, size range, shade and sway are set there; **Mix** paints with the pictures you tick in the grid, each with a weight and without repeating the one before, so a field isn't one grass over and over; Ctrl+drag erases; one Ctrl+Z takes a
     stroke back). The port draws them on the GPU (up to 100000 pictures a stage; the viewer, on the CPU, stops the brush at 20000); particles are worked out from their number and the clock, so the same stage looks the same in both;
+  - **Select** (a box in the Props panel) picks every prop inside a box you drag over the view (Shift adds,
+    Ctrl toggles, Ctrl+A picks all). The group moves and scales together with the arrows, copies and pastes
+    with Ctrl+C / Ctrl+V (the copy lands where the mouse is on the ground), duplicates with Ctrl+D, goes
+    with Del, and its size, sway and shade can be set at once; each action is one Ctrl+Z.
   - **Save to game** writes the stage in the game's own format to the native port's
     `data/mods/<file>.bin` (with the stages' table, `0459.bin`), which the port reads
     instead of the disc's when it starts; **Revert to the disc's** takes it back.

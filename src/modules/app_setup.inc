@@ -252,6 +252,16 @@ int main(int argc, char **argv) {
     const int BB_MAX = 20000; /* the viewer draws on the CPU; the port keeps up to 100000 (stagefx.c MAX_BB) */
     float ghostAt[3] = {0, 0, 0};     /* where, in the view's world */
     GLuint propWhite = 0;                   /* a white pixel, what a leaf is drawn with */
+    /* a group of props (box select): the primary one is propSel; the group is dropped when that changes or the list does */
+    std::set<int> propSet;
+    int propSetPrim = -1;
+    size_t propSetN = 0;
+    bool selectMode = false, marquee = false;
+    ImVec2 marqA, marqB;
+    std::vector<StageProp> propClip; /* Ctrl+C of props, with where their middle was */
+    float propClipC[3] = {0, 0, 0};
+    bool clipIsProps = false;
+    float vpRect[4] = {0, 0, 1, 1}; /* the view's x, y, width, height, last frame */
     int propSel = -1, propKind = 0; /* the one picked; what the file dialog is for: 0 billboard, 1 emitter, 2 model */
     struct PropImg {
         GLuint tex = 0;

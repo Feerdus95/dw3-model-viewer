@@ -296,6 +296,8 @@
         /* the selected part's gizmo: where it is, and what the mouse is on */
         gzHot = -1;
         gz.on = false;
+        vpRect[0] = vx, vpRect[1] = vy, vpRect[2] = vw, vpRect[3] = vh;
+        if (propSet.size() > 1 && (propSel != propSetPrim || props.size() != propSetN)) propSet.clear(); /* something else was picked, or the list changed */
         if (section == STAGES && stage_on() && !mode2d && scene.model && stagePart >= 0 && stagePart < (int)stageEdit.parts.size()) {
             std::vector<int> gb = selected_bones();
             float lo[3], hi[3];
@@ -310,6 +312,11 @@
         if (section == STAGES && stage_on() && !mode2d && propSel >= 0 && propSel < (int)props.size()) { /* a prop's arrows: the view's y is up */
             const StageProp &sp = props[propSel];
             float o[3] = {sp.pos[0], sp.pos[1], -sp.pos[2]};
+            if (propSet.size() > 1) { /* a group: the arrows are at its middle */
+                o[0] = o[1] = o[2] = 0;
+                for (int i : propSet) o[0] += props[i].pos[0], o[1] += props[i].pos[1], o[2] -= props[i].pos[2];
+                for (float &c : o) c /= propSet.size();
+            }
             gz.up = 1, gz.rings = false;
             propGz = gizmo_make(gz, view_proj(view, (int)vw, (int)vh), o, vw, vh, view.fov, dpi);
         }
@@ -350,6 +357,8 @@
                 vpMoving = partEditing;
                 gzDrag = vpMoving ? gzHot : -1;
                 gzAngSet = false;
+            } else if (b == 0 && selectMode && !mode2d && section == STAGES && stage_on() && !(pcatArm >= 0 && pcatArm < (int)pcat.size())) {
+                marquee = true, marqA = marqB = mp; /* a box over the view picks the props in it */
             } else if (b == 0 && io.KeyCtrl && !mode2d && stage_on()) { /* Ctrl+drag: the part under the mouse (or the selected one) moves */
                 int hit = pick_bone(scene, view, vw, vh, mp.x - vx, mp.y - vy);
                 int k = hit > 0 ? part_of_bone(hit) : stagePart;
@@ -374,19 +383,24 @@
         } else if (scene.model) {
             if (vpDown[0] && propMoving && propSel >= 0 && propSel < (int)props.size()) {
                 /* a prop: an arrow moves it along that axis of the view (the port's z is the view's -z), the box scales it */
-                StageProp &p = props[propSel];
+                std::vector<int> tg;
+                if (propSet.size() > 1) tg.assign(propSet.begin(), propSet.end());
+                else tg.push_back(propSel);
                 if (gzDrag < 3) {
                     ImVec2 s = gz.tip[gzDrag] - gz.c;
                     float sl = s.x * s.x + s.y * s.y;
                     if (sl > 1 && moved) {
                         float k = (d.x * s.x + d.y * s.y) / sl * gz.len;
-                        p.pos[gzDrag] += gzDrag == 2 ? -k : k;
+                        for (int i : tg) props[i].pos[gzDrag] += gzDrag == 2 ? -k : k;
                         stageDirty = true;
                     }
                 } else if (moved) {
                     float f = powf(1.01f, d.x - d.y);
-                    if (p.emitter) p.radius = std::clamp(p.radius * f, 50.0f, 40000.0f);
-                    else p.scale = std::clamp(p.scale * f, 0.01f, 400.0f);
+                    for (int i : tg) {
+                        StageProp &p = props[i];
+                        if (p.emitter) p.radius = std::clamp(p.radius * f, 50.0f, 40000.0f);
+                        else p.scale = std::clamp(p.scale * f, 0.01f, 400.0f);
+                    }
                     stageDirty = true;
                 }
             } else if (vpDown[0] && vpMoving && charEditing && gzDrag >= 0 && charGz) {
@@ -447,6 +461,8 @@
                 float k = view.cam.dist * 0.0015f, cy = cosf(view.cam.yaw), sy = sinf(view.cam.yaw);
                 if (io.KeyShift) p.move[1] += d.y * k;
                 else p.move[0] += (d.x * cy + d.y * sy) * k, p.move[2] -= (-d.x * sy + d.y * cy) * k;
+            } else if (vpDown[0] && marquee) {
+                marqB = mp;
             } else if (vpDown[0] && propBrush) {
                 float g[3];
                 if (moved && ground_hit(view, vw, vh, mp.x - vx, mp.y - vy, g)) {
@@ -479,6 +495,23 @@
                 propBrush = false;
                 if (!brushAdded && !stageHist.undo.empty()) stageHist.undo.pop_back();
                 continue;
+            }
+            if (b == 0 && marquee) {
+                marquee = false;
+                if (io.MouseDragMaxDistanceSqr[0] > 25 * dpi * dpi) { /* a box: every prop whose foot is inside it */
+                    M4 pvp = view_proj(view, (int)vw, (int)vh);
+                    float x0 = std::min(marqA.x, marqB.x) - vx, x1 = std::max(marqA.x, marqB.x) - vx, y0 = std::min(marqA.y, marqB.y) - vy, y1 = std::max(marqA.y, marqB.y) - vy;
+                    std::set<int> g = io.KeyShift || io.KeyCtrl ? cur_props() : std::set<int>();
+                    for (int i = 0; i < (int)props.size(); i++) {
+                        float c[3] = {props[i].pos[0], props[i].pos[1], -props[i].pos[2]};
+                        ImVec2 sp;
+                        if (!to_screen(pvp, c, vw, vh, sp) || sp.x < x0 || sp.x > x1 || sp.y < y0 || sp.y > y1) continue;
+                        if (io.KeyCtrl && g.erase(i)) continue;
+                        g.insert(i);
+                    }
+                    set_props(g);
+                    continue;
+                }
             }
             if (b == 0 && propMoving) {
                 gzDrag = -1, propMoving = false;
@@ -532,9 +565,16 @@
                         if (all && mx >= lo[0] - pad && mx <= hi[0] + pad && my >= lo[1] - pad && my <= hi[1] + pad && area < best) best = area, ph = i;
                     }
                 }
-                propSel = ph;
-                if (ph >= 0) select_part(-1), propSel = ph;
-                else select_bone(hit);
+                if (ph >= 0 && (io.KeyShift || (io.KeyCtrl && selectMode))) { /* adds to the group, or takes out of it */
+                    std::set<int> g = cur_props();
+                    if (!g.erase(ph)) g.insert(ph);
+                    set_props(g);
+                } else {
+                    propSet.clear();
+                    propSel = ph;
+                    if (ph >= 0) select_part(-1), propSel = ph;
+                    else select_bone(hit);
+                }
                 scrollToSel = hit > 0 && ph < 0;
             }
             if (b == 1) ctxBone = hit, openViewMenu = true;
@@ -557,7 +597,12 @@
         if (chord(ImGuiKey_H)) hide_selected();
         if (chord(ImGuiMod_Alt | ImGuiKey_H)) show_all();
         if (chord(ImGuiKey_F)) frame_sel();
-        if (chord(ImGuiKey_Escape)) select_bone(-1), ownFrame = -1, pcatArm = -1;
+        if (chord(ImGuiKey_Escape)) select_bone(-1), ownFrame = -1, pcatArm = -1, propSet.clear(), marquee = false;
+        if (chord(ImGuiMod_Ctrl | ImGuiKey_A) && section == STAGES && stage_on() && !props.empty()) {
+            std::set<int> all;
+            for (int i = 0; i < (int)props.size(); i++) all.insert(i);
+            set_props(all);
+        }
         if (chord(ImGuiKey_F1)) helpOpen = !helpOpen;
         if (chord(ImGuiKey_Space)) section == EFFECTS ? void(fxPlaying = !fxPlaying) : void(view.playing = !view.playing);
         if (keys && !io.KeyMods && ImGui::IsKeyPressed(ImGuiKey_RightArrow)) step(1);
@@ -776,6 +821,11 @@
                 }
             }
             if (gz.on) gizmo_draw(dl, gz, ImVec2(vx, vy), gzDrag >= 0 ? gzDrag : gzHot, dpi);
+            if (marquee) {
+                ImVec2 lo(std::min(marqA.x, marqB.x), std::min(marqA.y, marqB.y)), hi(std::max(marqA.x, marqB.x), std::max(marqA.y, marqB.y));
+                dl->AddRectFilled(lo, hi, IM_COL32(110, 180, 255, 36));
+                dl->AddRect(lo, hi, IM_COL32(110, 180, 255, 220), 0, 0, 1.5f * dpi);
+            }
             /* what's being edited, while it is */
             if (partEditing && stagePart >= 0 && stagePart < (int)stageEdit.parts.size()) {
                 const StagePart &p = stageEdit.parts[stagePart];

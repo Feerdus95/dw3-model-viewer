@@ -810,7 +810,29 @@
         else std::swap(own.frames[i], own.frames[to]), ownFrame = to;
         ownDirty = true, fxDrawn = -1;
     };
+    auto set_props = [&](const std::set<int> &g) { /* the selection: none, one, or a group whose primary is its last */
+        if (!g.empty()) select_part(-1);
+        propSet.clear();
+        if (g.size() > 1) propSet = g, propSetPrim = *g.rbegin(), propSetN = props.size(), propSel = propSetPrim;
+        else propSel = g.empty() ? -1 : *g.begin();
+    };
+    auto cur_props = [&]() {
+        std::set<int> g;
+        if (propSet.size() > 1) g = propSet;
+        else if (propSel >= 0 && propSel < (int)props.size()) g.insert(propSel);
+        return g;
+    };
     auto prop_delete = [&](int i) {
+        if (propSet.size() > 1) {
+            stage_mark();
+            std::vector<StageProp> keep;
+            for (int k = 0; k < (int)props.size(); k++)
+                if (!propSet.count(k)) keep.push_back(props[k]);
+            note(NOTE_INFO, "Removed " + std::to_string(props.size() - keep.size()) + " props (Ctrl+Z brings them back)");
+            props = keep, stageDirty = true;
+            set_props({});
+            return;
+        }
         if (i < 0 || i >= (int)props.size()) return;
         stage_mark();
         props.erase(props.begin() + i);
@@ -818,6 +840,18 @@
         note(NOTE_INFO, "Removed the prop (Ctrl+Z brings it back)");
     };
     auto prop_duplicate = [&](int i) {
+        if (propSet.size() > 1) {
+            stage_mark();
+            std::set<int> made;
+            for (int k : std::set<int>(propSet)) {
+                StageProp c = props[k];
+                c.pos[0] += 300;
+                props.push_back(c);
+                made.insert((int)props.size() - 1);
+            }
+            set_props(made), stageDirty = true;
+            return;
+        }
         if (i < 0 || i >= (int)props.size()) return;
         stage_mark();
         StageProp c = props[i];
@@ -825,7 +859,33 @@
         props.push_back(c);
         propSel = (int)props.size() - 1, stageDirty = true;
     };
-    auto can_paste = [&]() { return section == EFFECTS ? !frameClip.empty() && fx.id >= 0 : stage_on() && !partClip.parts.empty(); };
+    auto prop_copy = [&]() {
+        std::set<int> g = cur_props();
+        if (g.empty()) return;
+        propClip.clear();
+        float c[3] = {0, 0, 0};
+        for (int k : g) propClip.push_back(props[k]), c[0] += props[k].pos[0], c[1] += props[k].pos[1], c[2] += props[k].pos[2];
+        for (int k = 0; k < 3; k++) propClipC[k] = c[k] / g.size();
+        clipIsProps = true;
+        note(NOTE_INFO, "Copied " + std::to_string(g.size()) + (g.size() == 1 ? " prop" : " props") + " (Ctrl+V puts them where the mouse is)");
+    };
+    auto prop_paste = [&]() { /* the copied group's middle goes to the mouse on the ground, else a step to the side */
+        if (propClip.empty() || !stage_on()) return;
+        ImVec2 mp = ImGui::GetIO().MousePos;
+        float g[3], at[3] = {propClipC[0] + 300, propClipC[1], propClipC[2]};
+        if (mp.x >= vpRect[0] && mp.x < vpRect[0] + vpRect[2] && mp.y >= vpRect[1] && mp.y < vpRect[1] + vpRect[3] &&
+            ground_hit(view, vpRect[2], vpRect[3], mp.x - vpRect[0], mp.y - vpRect[1], g))
+            at[0] = g[0], at[1] = 0, at[2] = -g[2];
+        stage_mark();
+        std::set<int> made;
+        for (StageProp p : propClip) {
+            for (int k = 0; k < 3; k++) p.pos[k] += at[k] - propClipC[k];
+            props.push_back(p);
+            made.insert((int)props.size() - 1);
+        }
+        set_props(made), stageDirty = true;
+    };
+    auto can_paste = [&]() { return section == EFFECTS ? !frameClip.empty() && fx.id >= 0 : stage_on() && (clipIsProps ? !propClip.empty() : !partClip.parts.empty()); };
     auto can_edit_sel = [&]() { return section == EFFECTS ? frame_ok() : stage_on() && (stagePart >= 0 || propSel >= 0); };
     auto do_copy = [&]() {
         if (section == EFFECTS) {
@@ -836,7 +896,10 @@
                 ImGui::SetClipboardText(("effect " + std::to_string(fx.id)).c_str());
                 note(NOTE_INFO, "Copied \"effect " + std::to_string(fx.id) + "\"");
             }
+        } else if (stage_on() && stagePart < 0 && propSel >= 0) {
+            prop_copy();
         } else if (stage_on() && stagePart >= 0) {
+            clipIsProps = false;
             part_copy(stagePart);
         } else if (scene.model && !stage_on() && scene.selected > 0) {
             ImGui::SetClipboardText(bone_info(scene.selected).c_str());
@@ -847,7 +910,7 @@
             note(NOTE_INFO, "Copied \"" + t + "\"");
         }
     };
-    auto do_paste = [&]() { section == EFFECTS ? frame_paste() : part_paste(); };
+    auto do_paste = [&]() { section == EFFECTS ? frame_paste() : clipIsProps ? prop_paste() : part_paste(); };
     auto do_duplicate = [&]() { section == EFFECTS ? frame_edit(ownFrame, 1) : propSel >= 0 ? prop_duplicate(propSel) : part_duplicate(stagePart); };
     auto do_delete = [&]() { section == EFFECTS ? frame_edit(ownFrame, 0) : propSel >= 0 ? prop_delete(propSel) : part_delete(stagePart); };
     auto own_save = [&]() {
@@ -1536,7 +1599,7 @@
         };
         for (int i = 0; i < (int)props.size(); i++) {
             const StageProp &p = props[i];
-            bool sel = i == propSel;
+            bool sel = i == propSel || (propSet.size() > 1 && propSet.count(i));
             float col[3] = {1.0f, 0.85f, 0.2f}, tint[3] = {p.tint[0] / 255.0f, p.tint[1] / 255.0f, p.tint[2] / 255.0f};
             if (!sel) col[0] = p.emitter ? 0.3f : p.model ? 0.5f : 0.6f, col[1] = p.emitter ? 0.8f : p.model ? 0.9f : 0.6f, col[2] = p.emitter ? 1.0f : p.model ? 0.5f : 0.6f;
             PropQuad q;
@@ -1904,6 +1967,9 @@
         snprintf(head, sizeof head, "Props (%d)", (int)props.size());
         heading(head);
         if (button(IC_STAGE "  Catalog...")) pcatOpen = true;
+        same_line_if_fits("Select");
+        if (ImGui::Checkbox("Select", &selectMode)) marquee = false;
+        tip("Drag a box over the view to pick every prop in it; then move, copy (Ctrl+C, Ctrl+V) or delete them together. Shift adds, Ctrl toggles. Ctrl+A picks all.");
         tip("Grass, flowers, petals and models as thumbnails: pick one, then click in the stage to place it");
         if (button(IC_ADD "  Billboard...")) pick_prop(0);
         tip("A PNG standing upright in the stage (grass, a flower, a rock), facing the camera. Its transparency cuts it out.");
@@ -1916,13 +1982,20 @@
         if (!props.empty()) {
             float lh = ImGui::GetTextLineHeightWithSpacing();
             if (ImGui::BeginChild("##props", ImVec2(0, std::min((int)props.size(), 6) * lh + 8 * dpi), ImGuiChildFlags_Borders)) {
-                for (int i = 0; i < (int)props.size(); i++) {
-                    const StageProp &p = props[i];
-                    ImGui::PushID(i);
-                    std::string l = std::string(p.model ? "Model  " : p.emitter ? "Emitter  " : "Billboard  ") + (p.model ? p.obj : p.image);
-                    if (ImGui::Selectable(l.c_str(), i == propSel)) propSel = i, select_part(-1);
-                    ImGui::PopID();
-                }
+                ImGuiListClipper clip;
+                clip.Begin((int)props.size());
+                while (clip.Step())
+                    for (int i = clip.DisplayStart; i < clip.DisplayEnd; i++) {
+                        const StageProp &p = props[i];
+                        ImGui::PushID(i);
+                        std::string l = std::string(p.model ? "Model  " : p.emitter ? "Emitter  " : "Billboard  ") + (p.model ? p.obj : p.image);
+                        if (ImGui::Selectable(l.c_str(), i == propSel || (propSet.size() > 1 && propSet.count(i)))) {
+                            std::set<int> g = ImGui::GetIO().KeyCtrl ? cur_props() : std::set<int>();
+                            if (!g.erase(i)) g.insert(i);
+                            set_props(g);
+                        }
+                        ImGui::PopID();
+                    }
             }
             ImGui::EndChild();
         }
@@ -1961,6 +2034,44 @@
             }
             ImGui::PopItemWidth();
             ImGui::TreePop();
+        }
+        if (propSet.size() > 1) {
+            ImGui::PushFont(g_fontBold);
+            ImGui::TextColored(C_SELECT, "%d props picked", (int)propSet.size());
+            ImGui::PopFont();
+            hint("Drag the arrows to move them all, the box scales them. Ctrl+C then Ctrl+V puts a copy where the mouse is on the ground; Del removes them.");
+            auto each = [&](auto f) {
+                for (int i : propSet)
+                    if (i >= 0 && i < (int)props.size()) f(props[i]);
+            };
+            if (ImGui::Button("Smaller")) stage_mark(), each([](StageProp &p) { (p.emitter ? p.radius : p.scale) *= 0.9f; }), stageDirty = true;
+            ImGui::SameLine();
+            if (ImGui::Button("Bigger")) stage_mark(), each([](StageProp &p) { (p.emitter ? p.radius : p.scale) *= 1.1f; }), stageDirty = true;
+            tip("Every one 10% smaller or bigger, each about its own foot");
+            static bool marked = false;
+            ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.55f);
+            float sw = props[propSel].sway, sh = props[propSel].tint[0] / 255.0f;
+            bool ch = ImGui::DragFloat("Sway", &sw, 0.01f, 0, 3, "%.2f");
+            if (ch) {
+                if (!marked) stage_mark(), marked = true;
+                each([&](StageProp &p) { if (!p.emitter) p.sway = sw; }), stageDirty = true;
+            }
+            if (ImGui::IsItemDeactivated()) marked = false;
+            tip("How far their tips swing in the wind, set on all of them");
+            ch = ImGui::DragFloat("Shade", &sh, 0.01f, 0, 1.5f, "%.2f");
+            if (ch) {
+                if (!marked) stage_mark(), marked = true;
+                each([&](StageProp &p) { for (float &c : p.tint) c = std::clamp(roundf(255 * sh), 0.0f, 255.0f); }), stageDirty = true;
+            }
+            if (ImGui::IsItemDeactivated()) marked = false;
+            tip("Their tint, 1 as the picture is");
+            ImGui::PopItemWidth();
+            if (ImGui::Button(IC_ADD "  Duplicate")) prop_duplicate(propSel);
+            tip("Ctrl+D");
+            ImGui::SameLine();
+            if (button(IC_DELETE "  Delete", 2)) prop_delete(propSel);
+            tip("Del; Ctrl+Z brings them back");
+            return;
         }
         if (propSel < 0 || propSel >= (int)props.size()) {
             hint("Click one in the view or in the list. Drag its arrows to place it anywhere; the box scales it. "
