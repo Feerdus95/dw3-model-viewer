@@ -1,6 +1,7 @@
 int main(int argc, char **argv) {
     std::string shot, open_path, data;
     std::string start_obj; /* an OBJ to import once the model is open */
+    std::vector<std::string> bounds; /* --bounds: a model file, or a fighter's name (DW3), whose posed box is printed */
     int shot_motion = 1, shot_key = 0, shot_cam = -1, shot_stage = 0, shot_fighter = 0;
     bool check = false, users = false, stages = false, seams = false;
     int effect = -1, xstage = -1, istage = -1;
@@ -16,6 +17,7 @@ int main(int argc, char **argv) {
         else if (a == "--import-obj" && i + 1 < argc) start_obj = argv[++i];
         else if (a == "--data" && i + 1 < argc) data = argv[++i];
         else if (a == "--check") check = true;
+        else if (a == "--bounds" && i + 1 < argc) bounds.push_back(argv[++i]);
         else if (a == "--import-stage" && i + 3 < argc) istage = atoi(argv[++i]), xmods = argv[++i], iobj = argv[++i];
         else if (a == "--export-stage" && i + 3 < argc) xstage = atoi(argv[++i]), xmods = argv[++i], xdir = argv[++i];
         else if (a == "--stages") stages = true;
@@ -28,8 +30,42 @@ int main(int argc, char **argv) {
     g_exe_dir = base ? base : "";
     find_data(data);
 
+    if (!bounds.empty()) attach_console();
     if (check || users || stages || seams || !shot.empty() || effect >= 0) attach_console();
     if (xstage >= 0 || istage >= 0) attach_console();
+    if (!bounds.empty()) { /* the model's box in the first motion's first key, in model units (y down) */
+        for (const std::string &b : bounds) {
+            std::vector<uint8_t> bytes;
+            Model m;
+            std::string label = b;
+            bool ok = false;
+            if (read_file(b, bytes)) ok = m.load(b, std::move(bytes));
+            else
+                for (const Fighter &f : g_game.fighters)
+                    if (f.name == b && read_file(fid_path(f.modelFid), bytes)) {
+                        ok = m.load(b, std::move(bytes), &f), label = b + " (file " + std::to_string(f.modelFid) + ")";
+                        break;
+                    }
+            if (!ok) {
+                printf("%s: %s\n", b.c_str(), m.error.empty() ? "not found" : m.error.c_str());
+                continue;
+            }
+            m.setMotion(1);
+            m.evaluate();
+            float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
+            for (size_t k = 1; k < m.bones.size(); k++) {
+                if (!m.pose[k].visible) continue;
+                const float *w = m.pose[k].world;
+                for (const Vec3s &pv : m.meshes[m.bones[k].mesh].verts)
+                    for (int i = 0; i < 3; i++) {
+                        float p = w[i] * pv.x + w[4 + i] * pv.y + w[8 + i] * pv.z + w[12 + i];
+                        lo[i] = std::min(lo[i], p), hi[i] = std::max(hi[i], p);
+                    }
+            }
+            printf("%s: width %.0f height %.0f depth %.0f  (y %.0f..%.0f)\n", label.c_str(), hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], lo[1], hi[1]);
+        }
+        return 0;
+    }
     if (istage >= 0) return import_stage_cli(istage, xmods, iobj);
     if (xstage >= 0) return export_stage_cli(xstage, xmods, xdir);
     if (stages) return check_stages();
