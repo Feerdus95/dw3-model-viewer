@@ -3,7 +3,10 @@
    src/main/{model,anim,texslot}.c. Each DW2 motion is laid end to end on the bones' key tracks (one key a frame), and
    played as a plain MotionStep run: holding on its last frame or looping to the frame the game's 0xFE names. */
 #include "model.h"
+#include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <fstream>
 
 namespace {
 struct Rd {
@@ -97,6 +100,9 @@ bool Model::load_dw2(const std::string &n, std::vector<uint8_t> bytes) {
             e.frame = 30000;
             bones[b].keys[t].push_back(e);
         }
+    tune.mesh.assign(bones.size(), 1.0f), tune.reach.assign(bones.size(), 1.0f);
+    for (size_t b = 1; b < bones.size(); b++) dw2BaseVerts.push_back(meshes[bones[b].mesh].verts), dw2BasePos.push_back(bones[b].keys[0]);
+    dw2BaseVerts.insert(dw2BaseVerts.begin(), std::vector<Vec3s>()), dw2BasePos.insert(dw2BasePos.begin(), std::vector<Key>());
     pose.assign(bones.size(), Pose{});
     for (Pose &p : pose) {
         p.scale = {4096, 4096, 4096};
@@ -110,4 +116,63 @@ bool Model::load_dw2(const std::string &n, std::vector<uint8_t> bytes) {
     if (!motions.empty()) setMotion(1);
     else computeWorld();
     return true;
+}
+
+static int16_t clamp16(float v) { return (int16_t)std::clamp((int)std::lround(v), -32768, 32767); }
+
+bool Model::dw2_tuned() const {
+    if (tune.scale != 1) return true;
+    for (float v : tune.mesh)
+        if (v != 1) return true;
+    for (float v : tune.reach)
+        if (v != 1) return true;
+    return false;
+}
+
+/* A bone's mesh is its base times the whole scale and its own mesh factor; its position keys (where its joint sits under its
+   parent) are the base times the whole scale and its parent's reach */
+void Model::dw2_retune() {
+    for (size_t b = 1; b < bones.size() && b < dw2BaseVerts.size(); b++) {
+        std::vector<Vec3s> &v = meshes[bones[b].mesh].verts;
+        float f = tune.scale * tune.mesh[b];
+        for (size_t i = 0; i < v.size(); i++)
+            v[i] = {clamp16(dw2BaseVerts[b][i].x * f), clamp16(dw2BaseVerts[b][i].y * f), clamp16(dw2BaseVerts[b][i].z * f)};
+        float g = tune.scale * tune.reach[bones[b].parent];
+        for (size_t k = 0; k < bones[b].keys[0].size(); k++) {
+            const Key &o = dw2BasePos[b][k];
+            bones[b].keys[0][k] = {clamp16(o.x * g), clamp16(o.y * g), clamp16(o.z * g), o.frame};
+        }
+    }
+    evaluate();
+}
+
+bool Model::dw2_load_tuning(const std::string &path) {
+    std::ifstream f(path);
+    if (!f) return false;
+    tune.scale = 1;
+    tune.mesh.assign(bones.size(), 1.0f), tune.reach.assign(bones.size(), 1.0f);
+    std::string w;
+    while (f >> w) {
+        if (w == "scale") f >> tune.scale;
+        else if (w == "bone") {
+            int b;
+            std::string what;
+            float v;
+            f >> b >> what >> v;
+            if (b >= 0 && b < (int)bones.size()) (what == "mesh" ? tune.mesh : tune.reach)[b] = v;
+        }
+    }
+    dw2_retune();
+    return true;
+}
+
+bool Model::dw2_save_tuning(const std::string &path) const {
+    std::ofstream f(path);
+    if (!f) return false;
+    f << "scale " << tune.scale << '\n';
+    for (size_t b = 0; b < bones.size(); b++) {
+        if (tune.mesh[b] != 1) f << "bone " << b << " mesh " << tune.mesh[b] << '\n';
+        if (tune.reach[b] != 1) f << "bone " << b << " reach " << tune.reach[b] << '\n';
+    }
+    return (bool)f;
 }

@@ -109,6 +109,7 @@ static bool open_model(Scene &s, View &v, const std::string &name, const std::st
     }
     s.fid = fid, s.path = path, s.fighters = fighters, s.fighter = fighter;
     s.model = std::move(m);
+    if (s.model->dw2) s.model->dw2_load_tuning(dw2_tuning_path(path));
     s.selected = -1;
     upload(s);
     frame_model(s, v);

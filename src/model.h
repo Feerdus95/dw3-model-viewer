@@ -93,6 +93,19 @@ struct Model {
     std::vector<std::vector<MotionStep>> motions; /* [i] is motion i + 1 */
     std::string error;
     bool dw2 = false; /* a Digimon World 2 model (load_dw2) */
+    /* its size, adjustable (dw2.cpp): the whole model by SCALE, each bone's own mesh by MESH[bone] (about its joint), and
+       where its children's joints sit by REACH[bone] (their offsets from it). All 1 is the model as the disc has it; the
+       bones' lists are indexed as bones, [0] the root */
+    struct Dw2Tuning {
+        float scale = 1;
+        std::vector<float> mesh, reach;
+    } tune;
+    std::vector<std::vector<Vec3s>> dw2BaseVerts; /* each bone's mesh as loaded */
+    std::vector<std::vector<Key>> dw2BasePos;     /* each bone's position keys as loaded */
+    void dw2_retune();                            /* the meshes and positions from the base and the tuning */
+    bool dw2_load_tuning(const std::string &path); /* tuning.txt: "scale F", "bone N mesh F", "bone N reach F"; false when none */
+    bool dw2_save_tuning(const std::string &path) const;
+    bool dw2_tuned() const;
 
     /* playback (FIGHTSTG_setMotion / stepMotion / poseBones) */
     std::vector<Pose> pose;

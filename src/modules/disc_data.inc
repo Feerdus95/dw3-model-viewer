@@ -139,3 +139,8 @@ static std::vector<Dw2Entry> dw2_scan() {
     std::sort(out.begin(), out.end(), [](const Dw2Entry &a, const Dw2Entry &b) { return a.fx != b.fx ? a.fx < b.fx : a.label < b.label; });
     return out;
 }
+
+/* a DW2 model's size tuning sits beside it: tuning.txt in its folder */
+static std::string dw2_tuning_path(const std::string &model) {
+    return std::filesystem::u8path(model).parent_path().u8string() + "/tuning.txt";
+}

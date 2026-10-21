@@ -80,6 +80,7 @@ int main(int argc, char **argv) {
                 printf("%s: %s\n", b.c_str(), m.error.empty() ? "not found" : m.error.c_str());
                 continue;
             }
+            if (m.dw2) m.dw2_load_tuning(dw2_tuning_path(b)); /* its size as tuning.txt has it */
             m.setMotion(shot_motion);
             for (int i = 0; i < shot_key; i++) { /* --motion and --key pose it as --shot does */
                 m.evaluate();
