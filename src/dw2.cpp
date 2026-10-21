@@ -75,17 +75,19 @@ bool Model::load_dw2(const std::string &n, std::vector<uint8_t> bytes) {
             for (int b = 1; b <= nb; b++)
                 for (int t = 0; t < 3; t++) {
                     Key k;
-                    k.x = (int16_t)r.s16(), k.y = (int16_t)r.s16(), k.z = (int16_t)r.s16(), k.frame = (int16_t)(base + f);
+                    k.x = (int16_t)r.s16(), k.y = (int16_t)r.s16(), k.z = (int16_t)r.s16(), k.frame = (int16_t)(2 * (base + f));
+                    bones[b].keys[t].push_back(k);
+                    k.frame++; /* the game steps a frame every 2 vsyncs (Anim_StepModelAnim), the viewer's tick is one */
                     bones[b].keys[t].push_back(k);
                 }
         std::vector<MotionStep> steps;
-        steps.push_back({0, (int16_t)m.frames, (int16_t)base, (int16_t)(base + m.frames)}); /* endFrame != 0: plain frames */
-        if (m.loop) steps.push_back({1, 0, (int16_t)0x8000, (int16_t)std::min(m.loopFrame, m.frames - 1)});
+        steps.push_back({0, (int16_t)(2 * m.frames), (int16_t)(2 * base), (int16_t)(2 * (base + m.frames))}); /* endFrame != 0: plain frames */
+        if (m.loop) steps.push_back({1, 0, (int16_t)0x8000, (int16_t)(2 * std::min(m.loopFrame, m.frames - 1))});
         else steps.push_back({1, 0, (int16_t)0xFFFF, 0});
         steps.push_back({0x7FFF, 0, 0, 0});
         motions.push_back(std::move(steps));
         base += m.frames;
-        if (base >= 29000) break;
+        if (base >= 14000) break;
     }
     if (!r.ok) { error = "DW2 model: cut short"; return false; }
     for (size_t b = 1; b < bones.size(); b++)
