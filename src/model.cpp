@@ -216,6 +216,7 @@ static bool read_motions(const Archive &a, std::vector<std::vector<MotionStep>> 
 }
 
 bool Model::load(const std::string &n, std::vector<uint8_t> bytes, const Fighter *f, int entry, int motionsAt) {
+    if (bytes.size() > 8 && !memcmp(bytes.data(), "DW2M", 4)) return load_dw2(n, std::move(bytes));
     name = n;
     fighter = f;
     file = std::move(bytes);

@@ -269,7 +269,7 @@
             &picked, win, ownRoot.c_str(), false);
     };
     auto pick_bin = [&]() {
-        static const SDL_DialogFileFilter BIN = {"The game's model files (.BIN)", "bin"};
+        static const SDL_DialogFileFilter BIN = {"The game's model files (.BIN, DW2: .DW2M)", "bin;dw2m"};
         SDL_ShowOpenFileDialog(
             [](void *u, const char *const *l, int) {
                 if (!l || !*l) return;

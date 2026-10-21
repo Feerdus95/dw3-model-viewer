@@ -105,6 +105,8 @@ struct Model {
        (an effect model's) the entry its motions are in */
     bool load(const std::string &name, std::vector<uint8_t> bytes, const Fighter *fighter = nullptr, int entry = -1,
               int motions = -1);
+    /* a Digimon World 2 model (dw2.cpp), as dw2-extractor writes it */
+    bool load_dw2(const std::string &name, std::vector<uint8_t> bytes);
     bool stepFace(); /* one battle frame of the face; true when VRAM changed */
     void setMotion(int m);  /* 1-based, as the game's */
     void evaluate();        /* the pose at the current keyframe */
