@@ -1,6 +1,7 @@
 int main(int argc, char **argv) {
     std::string shot, open_path, data;
     std::string start_obj; /* an OBJ to import once the model is open */
+    std::string uses; /* --uses: a DW3 fighter's name, whose action scripts' motions are printed */
     std::vector<std::string> bounds; /* --bounds: a model file, or a fighter's name (DW3), whose posed box is printed */
     int shot_motion = 1, shot_key = 0, shot_cam = -1, shot_stage = 0, shot_fighter = 0;
     bool check = false, users = false, stages = false, seams = false;
@@ -18,6 +19,7 @@ int main(int argc, char **argv) {
         else if (a == "--data" && i + 1 < argc) data = argv[++i];
         else if (a == "--check") check = true;
         else if (a == "--bounds" && i + 1 < argc) bounds.push_back(argv[++i]);
+        else if (a == "--uses" && i + 1 < argc) uses = argv[++i];
         else if (a == "--import-stage" && i + 3 < argc) istage = atoi(argv[++i]), xmods = argv[++i], iobj = argv[++i];
         else if (a == "--export-stage" && i + 3 < argc) xstage = atoi(argv[++i]), xmods = argv[++i], xdir = argv[++i];
         else if (a == "--stages") stages = true;
@@ -30,9 +32,37 @@ int main(int argc, char **argv) {
     g_exe_dir = base ? base : "";
     find_data(data);
 
-    if (!bounds.empty()) attach_console();
+    if (!bounds.empty() || !uses.empty()) attach_console();
     if (check || users || stages || seams || !shot.empty() || effect >= 0) attach_console();
     if (xstage >= 0 || istage >= 0) attach_console();
+    if (!uses.empty()) { /* which of the 62 motions a fighter's action scripts play, and which scripts */
+        for (const Fighter &f : g_game.fighters) {
+            std::vector<uint8_t> bytes;
+            Model m;
+            if (f.name != uses || !read_file(fid_path(f.modelFid), bytes) || !m.load(uses, std::move(bytes), &f)) continue;
+            printf("%s (file %d): %d motions, %d scripts\n", uses.c_str(), f.modelFid, (int)m.motions.size(), (int)m.scripts.size());
+            for (size_t k = 0; k < m.scripts.size(); k++) {
+                std::set<int> ms;
+                for (const ScriptLine &ln : m.scripts[k])
+                    if (ln.motion) ms.insert(ln.motion);
+                printf("  script %2d:", (int)k);
+                for (int v : ms) printf(" %d", v);
+                printf("\n");
+            }
+            for (size_t k = 0; k < m.motions.size(); k++) {
+                int n = 0, first = -1, last = -1;
+                for (const MotionStep &st : m.motions[k]) {
+                    if (st.index == 0x7FFF) break;
+                    if (first < 0) first = st.frame;
+                    last = st.frame + st.count, n += st.count;
+                }
+                printf("  motion %2d: %d frames, t %d-%d\n", (int)k + 1, n, first, last);
+            }
+            return 0;
+        }
+        printf("%s: no fighter of that name\n", uses.c_str());
+        return 1;
+    }
     if (!bounds.empty()) { /* the model's box in the first motion's first key, in model units (y down) */
         for (const std::string &b : bounds) {
             std::vector<uint8_t> bytes;
@@ -50,7 +80,11 @@ int main(int argc, char **argv) {
                 printf("%s: %s\n", b.c_str(), m.error.empty() ? "not found" : m.error.c_str());
                 continue;
             }
-            m.setMotion(1);
+            m.setMotion(shot_motion);
+            for (int i = 0; i < shot_key; i++) { /* --motion and --key pose it as --shot does */
+                m.evaluate();
+                m.advance(1);
+            }
             m.evaluate();
             float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
             for (size_t k = 1; k < m.bones.size(); k++) {
