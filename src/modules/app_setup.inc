@@ -208,7 +208,7 @@ int main(int argc, char **argv) {
     struct Picked { /* what the file dialogs gave, maybe from another thread */
         std::mutex m;
         std::vector<std::string> files;
-        std::string folder, data, obj, bin, prop, propTex;
+        std::string folder, data, obj, bin, prop, propTex, dw2;
     } picked;
     picked.obj = start_obj;
     std::set<int> ownIds = own_effects(ownRoot); /* the effects with own images in ownRoot */

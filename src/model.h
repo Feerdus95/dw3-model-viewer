@@ -92,6 +92,7 @@ struct Model {
     std::vector<Tim> tims;
     std::vector<std::vector<MotionStep>> motions; /* [i] is motion i + 1 */
     std::string error;
+    bool dw2 = false; /* a Digimon World 2 model (load_dw2) */
 
     /* playback (FIGHTSTG_setMotion / stepMotion / poseBones) */
     std::vector<Pose> pose;

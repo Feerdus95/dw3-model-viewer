@@ -1,9 +1,9 @@
     /* ===== the UI: sections, selection, editing, and each section's two
        panels (the browser on the left, the inspector on the right) ===== */
 
-    enum { FILES, STAGES, MODEL, MOTIONS, FIGHTER, EFFECTS, TEXTURES, SECTIONS };
-    static const char *SECTION_NAME[SECTIONS] = {"Files", "Stages", "Model", "Motions", "Fighter", "Effects", "Textures"};
-    static const char *SECTION_ICON[SECTIONS] = {IC_FILES, IC_STAGE, IC_MODEL, IC_MOTION, IC_FIGHTER, IC_EFFECT, IC_TEXTURE};
+    enum { FILES, STAGES, MODEL, MOTIONS, FIGHTER, EFFECTS, TEXTURES, DW2, SECTIONS };
+    static const char *SECTION_NAME[SECTIONS] = {"Files", "Stages", "Model", "Motions", "Fighter", "Effects", "Textures", "DW2"};
+    static const char *SECTION_ICON[SECTIONS] = {IC_FILES, IC_STAGE, IC_MODEL, IC_MOTION, IC_FIGHTER, IC_EFFECT, IC_TEXTURE, IC_FILES};
     static const char *SECTION_TIP[SECTIONS] = {
         "The game's models: Digimon, enemies and technique models",
         "The 57 fight stages: move, add and remove their parts, save them for the native port",
@@ -11,7 +11,8 @@
         "The open model's animations",
         "Who uses the open model: cameras and action scripts",
         "The battle's 2D effects, and their own images for the native port",
-        "The open model's texture pages, palettes and UVs"};
+        "The open model's texture pages, palettes and UVs",
+        "Digimon World 2: its Digimon and effect models, from the folder dw2-extractor made"};
     auto needs_model = [](int s) { return s == MODEL || s == MOTIONS || s == FIGHTER || s == TEXTURES; };
     int section = FILES;
     float browserW = g_cfg.bw * dpi, inspectorW = g_cfg.iw * dpi; /* 0: the first frame makes them a share of the window */
@@ -3354,8 +3355,83 @@
         }
     };
 
+    /* ===== Digimon World 2 ===== */
+    std::vector<Dw2Entry> dw2List;
+    bool dw2Listed = false;
+    char dw2Filter[64] = "";
+    int dw2Tab = 0; /* 0 Digimon, 1 effects */
+    auto pick_dw2_folder = [&]() {
+        SDL_ShowOpenFolderDialog(
+            [](void *u, const char *const *l, int) {
+                if (!l || !*l) return;
+                Picked *p = (Picked *)u;
+                std::lock_guard<std::mutex> lock(p->m);
+                p->dw2 = *l;
+            },
+            &picked, win, nullptr, false);
+    };
+    auto dw2_browser = [&]() {
+        if (!dw2Listed) dw2_load_dir(), dw2List = g_dw2.empty() ? std::vector<Dw2Entry>() : dw2_scan(), dw2Listed = true;
+        if (!picked.dw2.empty()) {
+            g_dw2 = picked.dw2, picked.dw2.clear();
+            dw2_save_dir(), dw2List = dw2_scan();
+        }
+        if (dw2List.empty()) {
+            hint("No Digimon World 2 models found%s.", g_dw2.empty() ? "" : (" in " + g_dw2).c_str());
+            hint("Run dw2-extractor (dw2model.py, then todw2m.py) on your own SLUS-01193 disc, and choose the folder it made: digimon/ and fx/ in it.");
+            if (button(IC_FOLDER "  Choose the folder...", 1)) pick_dw2_folder();
+            return;
+        }
+        if (ImGui::BeginTabBar("##dw2tabs")) {
+            if (ImGui::BeginTabItem("Digimon")) dw2Tab = 0, ImGui::EndTabItem();
+            if (ImGui::BeginTabItem("Effects")) dw2Tab = 1, ImGui::EndTabItem();
+            ImGui::EndTabBar();
+        }
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::InputTextWithHint("##dw2filter", IC_SEARCH "  Search: number or file", dw2Filter, sizeof dw2Filter);
+        std::string f = lower(dw2Filter);
+        if (ImGui::BeginTable("dw2files", 1, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY)) {
+            for (const Dw2Entry &en : dw2List) {
+                if ((int)en.fx != dw2Tab || (!f.empty() && lower(en.label).find(f) == std::string::npos)) continue;
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                bool sel = scene.model && scene.model->dw2 && scene.path == en.path && !view.stageView;
+                if (ImGui::Selectable(en.label.c_str(), sel, ImGuiSelectableFlags_SpanAllColumns) && !sel) open_file("DW2 " + en.label, en.path, -1);
+            }
+            ImGui::EndTable();
+        }
+    };
+    auto dw2_inspector = [&]() {
+        if (scene.model && scene.model->dw2 && !view.stageView) {
+            Model &m = *scene.model;
+            title("%s", m.name.c_str());
+            chip("Digimon World 2", C_DIM);
+            size_t polys = 0, verts = 0;
+            for (const Mesh &me : m.meshes) polys += me.polys.size(), verts += me.verts.size();
+            ImGui::Spacing();
+            field("Bones", "%d", (int)m.bones.size() - 1);
+            field("Polygons", "%d", (int)polys);
+            field("Vertices", "%d", (int)verts);
+            field("Motions", "%d", (int)m.motions.size());
+            heading("Look closer");
+            float w = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2;
+            for (int s : {MODEL, MOTIONS}) {
+                if (s == MOTIONS) ImGui::SameLine();
+                std::string l = std::string(SECTION_ICON[s]) + "  " + SECTION_NAME[s];
+                if (ImGui::Button(l.c_str(), ImVec2(w, 0))) section = s;
+                tip("%s", SECTION_TIP[s]);
+            }
+        } else {
+            title("No Digimon World 2 model open");
+            hint("Pick one on the left, or drop a .DW2M file on the window.");
+        }
+        heading("Folder");
+        hint("%s", g_dw2.empty() ? "None chosen" : g_dw2.c_str());
+        if (button(IC_FOLDER "  Choose the folder...", 0)) pick_dw2_folder();
+    };
+
     auto browser = [&]() {
-        static const char *TITLE[SECTIONS] = {"Models", "Stages", "Bones", "Motions", "Action scripts", "Effects", "Texture pages"};
+        static const char *TITLE[SECTIONS] = {"Models", "Stages", "Bones", "Motions", "Action scripts", "Effects", "Texture pages", "Digimon World 2"};
         panel_title(SECTION_ICON[section], TITLE[section]);
         switch (section) {
         case FILES: files_browser(); break;
@@ -3365,10 +3441,11 @@
         case FIGHTER: fighter_browser(); break;
         case EFFECTS: effects_browser(); break;
         case TEXTURES: textures_browser(); break;
+        case DW2: dw2_browser(); break;
         }
     };
     auto inspector = [&]() {
-        static const char *TITLE[SECTIONS] = {"Details", "Stage editor", "Model", "Playback", "Fighter", "Effect", "Texture"};
+        static const char *TITLE[SECTIONS] = {"Details", "Stage editor", "Model", "Playback", "Fighter", "Effect", "Texture", "Digimon World 2"};
         panel_title(IC_INFO, TITLE[section]);
         switch (section) {
         case FILES: files_inspector(); break;
@@ -3378,6 +3455,7 @@
         case FIGHTER: fighter_inspector(); break;
         case EFFECTS: effects_inspector(); break;
         case TEXTURES: textures_inspector(); break;
+        case DW2: dw2_inspector(); break;
         }
     };
 

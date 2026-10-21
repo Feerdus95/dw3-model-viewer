@@ -255,7 +255,7 @@
         float statusH = ImGui::GetFrameHeight() + 6 * dpi;
         float top = menuH + barH, bottom = ds.y - statusH;
         bool motionBar = scene.model && !view.stageView && !scene.model->motions.empty() &&
-                         (section == FILES || section == MODEL || section == MOTIONS || section == FIGHTER);
+                         (section == FILES || section == DW2 || section == MODEL || section == MOTIONS || section == FIGHTER);
         bool transportOn = (section == EFFECTS && fx.id >= 0) || motionBar;
         float transH = transportOn ? ImGui::GetFrameHeight() + 12 * dpi : 0;
         if (browserW <= 0) browserW = ds.x * 0.21f;

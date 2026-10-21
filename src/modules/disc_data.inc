@@ -101,3 +101,41 @@ static std::vector<Entry> scan_models() {
     return out;
 }
 
+
+/* --- Digimon World 2: the folder dw2-extractor made (digimon/ and fx/ in it, a .dw2m in each of their folders), kept in dw2_dir.txt --- */
+
+struct Dw2Entry {
+    std::string label, path;
+    bool fx = false;
+};
+static std::string g_dw2;
+
+static void dw2_load_dir() {
+    std::ifstream f(g_exe_dir + "dw2_dir.txt");
+    std::getline(f, g_dw2);
+    while (!g_dw2.empty() && (g_dw2.back() == '\r' || g_dw2.back() == '\n')) g_dw2.pop_back();
+}
+static void dw2_save_dir() { std::ofstream(g_exe_dir + "dw2_dir.txt") << g_dw2 << "\n"; }
+
+static std::vector<Dw2Entry> dw2_scan() {
+    namespace fs = std::filesystem;
+    std::vector<Dw2Entry> out;
+    std::error_code ec;
+    for (int fx = 0; fx < 2; fx++) {
+        fs::path root = fs::u8path(g_dw2) / (fx ? "fx" : "digimon");
+        for (fs::directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
+            if (!it->is_directory(ec)) continue;
+            std::string dir = it->path().filename().u8string();
+            fs::path file = it->path() / (dir + ".dw2m");
+            if (!fs::exists(file, ec)) continue;
+            Dw2Entry e;
+            size_t us = dir.find('_');
+            e.label = us == std::string::npos ? dir : dir.substr(0, us) + "  " + dir.substr(us + 1);
+            e.path = file.u8string();
+            e.fx = fx;
+            out.push_back(e);
+        }
+    }
+    std::sort(out.begin(), out.end(), [](const Dw2Entry &a, const Dw2Entry &b) { return a.fx != b.fx ? a.fx < b.fx : a.label < b.label; });
+    return out;
+}

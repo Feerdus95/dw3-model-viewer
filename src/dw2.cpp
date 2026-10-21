@@ -18,6 +18,7 @@ struct Rd {
 
 bool Model::load_dw2(const std::string &n, std::vector<uint8_t> bytes) {
     name = n;
+    dw2 = true;
     file = std::move(bytes);
     Rd r{file.data() + 4, file.data() + file.size()};
     int ver = r.u16(), nb = r.u16(), imgW = r.u16(), imgH = r.u16();

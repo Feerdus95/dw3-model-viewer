@@ -32,9 +32,9 @@ trademark of its owners.
   - a palette color changes (Textures: click one);
   - **Save to game** writes the model's file, same size, to the port's `data/mods/<file>.bin`;
     **Revert to the disc's** deletes it. A saved model is the one opened. Ctrl+Z undoes.
-  - **Digimon World 2 models** (`.dw2m`, open or drop it like a `.BIN`): bones, textures and motions of DW2's Digimon and effect models, as
-    `dw2-extractor/todw2m.py` writes them from your own disc (formats in `dw2-extractor/README.md`). Nothing DW3-specific works on them
-    (scripts, faces, edits).
+  - **DW2 tab** (Digimon World 2): lists the Digimon and effect models of the folder `dw2-extractor` made from your own SLUS-01193 disc
+    (`digimon/` and `fx/` in it, picked once and kept in `dw2_dir.txt`), and plays their motions. A `.dw2m` also opens by drop or
+    Ctrl+O. Scripts, faces and edits are Digimon World 2003's and don't apply to them. The DW3 tabs are as they were.
   - **Export OBJ / Import OBJ** (Model): one object per bone (`part_N`, at rest), the model's
     texture pages as PNGs. Move vertices, add or remove faces, change UVs in Blender; a bone
     whose faces changed gets a new mesh (up to 256 vertices, the model's own pages, a smooth
