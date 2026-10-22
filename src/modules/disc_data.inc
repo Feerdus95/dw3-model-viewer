@@ -140,6 +140,77 @@ static std::vector<Dw2Entry> dw2_scan() {
     return out;
 }
 
+/* What a DW2 model becomes in Digimon World 2003: dw2003.txt beside it names the converter that makes the DW2003 model file, where it goes,
+   and the fighter that file is (the one it is like, with its own name and cameras moved), so the same sections (Model, Motions, Fighter: the
+   scripts, the portraits) show it as the game will. Lines: `key value`; cam I px py pz rx ry rz moves the like's camera I's eye and target. */
+struct Dw2Link {
+    bool ok = false;
+    std::string python = "python", converter, tmpl, out, name, like;
+    int fid = 0;
+    bool eyes = false;
+    int eye[10] = {}; /* eyes X Y W H F0X F0Y F1X F1Y F2X F2Y: the eyes' part (FaceRect) of its own image, in the model's halfwords and rows */
+    struct Cam { int i, d[6]; };
+    std::vector<Cam> cams;
+};
+static Dw2Link dw2_link(const std::string &model) {
+    Dw2Link l;
+    std::ifstream f(std::filesystem::u8path(model).parent_path() / "dw2003.txt");
+    std::string line;
+    while (std::getline(f, line)) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+        size_t sp = line.find(' ');
+        if (line.empty() || line[0] == '#' || sp == std::string::npos) continue;
+        std::string k = line.substr(0, sp), v = line.substr(sp + 1);
+        if (k == "python") l.python = v;
+        else if (k == "converter") l.converter = v;
+        else if (k == "template") l.tmpl = v;
+        else if (k == "out") l.out = v;
+        else if (k == "name") l.name = v;
+        else if (k == "like") l.like = v;
+        else if (k == "fid") l.fid = atoi(v.c_str());
+        else if (k == "eyes") {
+            int *e = l.eye;
+            l.eyes = sscanf(v.c_str(), "%d %d %d %d %d %d %d %d %d %d", e, e + 1, e + 2, e + 3, e + 4, e + 5, e + 6, e + 7, e + 8, e + 9) == 10;
+        } else if (k == "cam") {
+            Dw2Link::Cam c = {};
+            if (sscanf(v.c_str(), "%d %d %d %d %d %d %d", &c.i, c.d, c.d + 1, c.d + 2, c.d + 3, c.d + 4, c.d + 5) == 7) l.cams.push_back(c);
+        }
+    }
+    l.ok = !l.out.empty() && l.fid > 0 && !l.like.empty();
+    return l;
+}
+
+/* the link's fighter, added to the fighters' list (when its file is there): whoever opens the converted file, from any section or by dropping it,
+   finds its scripts, cameras and portraits */
+static bool dw2_register(const Dw2Link &l) {
+    std::vector<uint8_t> bytes;
+    if (!l.ok || !read_file(l.out, bytes)) return false;
+    Archive a;
+    a.data = bytes.data(), a.size = bytes.size();
+    std::vector<std::array<int, 7>> deltas;
+    for (const Dw2Link::Cam &c : l.cams) deltas.push_back({c.i, c.d[0], c.d[1], c.d[2], c.d[3], c.d[4], c.d[5]});
+    bool added = g_game.addLike(l.like, l.fid, l.name.empty() ? l.like : l.name, a.count() - 2, 0, a.count() - 1, deltas);
+    /* the donor's face parts are rectangles of its own image: over this model's they'd paint its thighs. Its own eyes, when it has them */
+    for (Fighter &f : g_game.fighters)
+        if (f.modelFid == l.fid) {
+            for (int i = 0; i < 16; i++) f.faceUsed[i] = false;
+            if (l.eyes) {
+                uint8_t r[10];
+                for (int i = 0; i < 10; i++) r[i] = (uint8_t)l.eye[i];
+                memcpy(&f.face[0], r, sizeof r);
+                f.faceUsed[0] = true;
+            }
+        }
+    return added;
+}
+static std::vector<Dw2Entry> dw2_scan();
+static void dw2_register_all() {
+    dw2_load_dir();
+    if (g_dw2.empty()) return;
+    for (const Dw2Entry &e : dw2_scan())
+        if (!e.fx) dw2_register(dw2_link(e.path));
+}
+
 /* a DW2 model's size tuning sits beside it: tuning.txt in its folder */
 static std::string dw2_tuning_path(const std::string &model) {
     return std::filesystem::u8path(model).parent_path().u8string() + "/tuning.txt";

@@ -6,6 +6,8 @@ int main(int argc, char **argv) {
     int shot_motion = 1, shot_key = 0, shot_cam = -1, shot_stage = 0, shot_fighter = 0;
     bool check = false, users = false, stages = false, seams = false;
     int effect = -1, xstage = -1, istage = -1;
+    float orbit[6] = {}; /* --orbit yaw,pitch,dist,x,y,z (degrees, model units): the shot's camera */
+    bool has_orbit = false, shot_cull = false; /* --cull: back faces dropped, as the game draws */
     std::string xdir, xmods, iobj; /* --export-stage ID MODS OUT: the stage's OBJ as the game has it (the mod, if any) */
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -13,6 +15,8 @@ int main(int argc, char **argv) {
         else if (a == "--motion" && i + 1 < argc) shot_motion = atoi(argv[++i]);
         else if (a == "--key" && i + 1 < argc) shot_key = atoi(argv[++i]);
         else if (a == "--cam" && i + 1 < argc) shot_cam = atoi(argv[++i]);
+        else if (a == "--cull") shot_cull = true;
+        else if (a == "--orbit" && i + 1 < argc) has_orbit = sscanf(argv[++i], "%f,%f,%f,%f,%f,%f", orbit, orbit + 1, orbit + 2, orbit + 3, orbit + 4, orbit + 5) == 6;
         else if (a == "--stage" && i + 1 < argc) shot_stage = atoi(argv[++i]);
         else if (a == "--fighter" && i + 1 < argc) shot_fighter = atoi(argv[++i]);
         else if (a == "--import-obj" && i + 1 < argc) start_obj = argv[++i];
@@ -31,6 +35,7 @@ int main(int argc, char **argv) {
     const char *base = SDL_GetBasePath();
     g_exe_dir = base ? base : "";
     find_data(data);
+    dw2_register_all();
 
     if (!bounds.empty() || !uses.empty()) attach_console();
     if (check || users || stages || seams || !shot.empty() || effect >= 0) attach_console();
@@ -240,6 +245,7 @@ int main(int argc, char **argv) {
         if (name.size() == 8 && name.substr(4) == ".bin" && atoi(name.c_str()) > 0) {
             fid = atoi(name.c_str());
             name = fid_name(fid);
+            if (name[0] == '#' && !g_game.forFile(fid).empty()) name = g_game.forFile(fid)[0]->name + " (mod)"; /* a model that isn't on the disc: its fighter's name */
         }
         if (open_model(scene, view, name, path, status, fid, fighter)) view.stageView = false;
     };
@@ -609,9 +615,14 @@ int main(int argc, char **argv) {
         GL(glRenderbufferStorage)(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, W, H);
         GL(glFramebufferRenderbuffer)(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rb[1]);
         view.skeleton = false;
+        view.cull = shot_cull;
         view.stage = shot_stage;
         if (shot_cam >= 0 && !scene.fighters.empty() && shot_cam < (int)scene.fighters[scene.fighter]->cameras.size())
             apply_camera(view, *scene.fighters[scene.fighter], shot_cam);
+        if (has_orbit) {
+            view.cam.yaw = orbit[0] * 3.14159265f / 180, view.cam.pitch = orbit[1] * 3.14159265f / 180, view.cam.dist = orbit[2];
+            for (int k = 0; k < 3; k++) view.cam.target[k] = orbit[3 + k];
+        }
         render(scene, view, 0, 0, W, H);
         std::vector<uint32_t> px(W * H), flipped(W * H);
         GL(glReadPixels)(0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, px.data());

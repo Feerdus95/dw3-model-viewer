@@ -3,6 +3,7 @@
    (dw3_decomp: include/fightstg/model.h, stage.h, battle.h;
    src/fightstg/fighter_info.c, face.c, battle_script.c). No OpenGL here. */
 #pragma once
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -67,6 +68,10 @@ struct GameData {
        the battle table (463) and the English names (79, 163) */
     void load(const std::string &files);
     std::vector<const Fighter *> forFile(int fid) const;
+    /* a fighter FID's model file is, like the partner LIKE but under its own name and with its cameras' eye and target moved by DELTAS
+       (camera, then x y z of the eye and of the target): added, or the one already added, so a model that isn't on the disc has what a fighter has */
+    bool addLike(const std::string &like, int fid, const std::string &name, int modelEntry, int motionsEntry, int effectsEntry,
+                 const std::vector<std::array<int, 7>> &deltas);
     std::string fileLabel(int fid, const std::string &fileName) const; /* who uses a file */
 };
 

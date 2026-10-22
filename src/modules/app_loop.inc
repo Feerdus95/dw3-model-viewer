@@ -95,6 +95,7 @@
                     ask_first((stageDirty && stageId >= 0) || ownDirty, "Changing the data folder drops the changes you haven't saved. Go on?", [&, dir]() {
                         std::ofstream(g_exe_dir + "data_dir.txt") << dir << "\n";
                         find_data(dir);
+                        dw2_register_all();
                         scene.model.reset(), scene.fighters.clear(), scene.fid = -1;
                         fx = Effect(), listed = false, ownDirty = false;
                         stage_tables(), cat_free(), stageId = -1, stageFromId = -1, view.stageView = false, stageDirty = false;
@@ -434,6 +435,7 @@
                     }
                 } else if (gzDrag == 4 && moved) {
                     pe.scale = std::clamp(pe.scale * powf(1.01f, d.x - d.y), 0.05f, 20.0f);
+                    if (pe.follow) pe.reach = pe.scale;
                     did = true;
                 }
                 if (did) {

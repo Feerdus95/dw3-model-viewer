@@ -151,6 +151,7 @@ std::vector<uint32_t> decode_page(const std::vector<uint16_t> &vram, uint16_t tp
 
 /* Writes VECS over entry WHICH (0 vertices, 1 normals) of the mesh archive at MESHENTRY, in place: the count stays */
 void patch_vecs(std::vector<uint8_t> &file, int meshEntry, int which, const std::vector<Vec3s> &vecs);
+void patch_keys(std::vector<uint8_t> &file, int keyEntry, const std::vector<Key> &keys); /* a bone's position keys' x y z, in place */
 
 /* Writes the TIMS (their pixels changed) over their entries of the textures' archive at TEXENTRY: an RLEN one is
    packed again, and the archive and file grow as they need (replace_entries) */

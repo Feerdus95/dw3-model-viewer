@@ -546,6 +546,17 @@ void patch_vecs(std::vector<uint8_t> &file, int meshEntry, int which, const std:
     for (size_t k = 0; k < vecs.size(); k++) memcpy(p + 6 + k * 6, &vecs[k], 6);
 }
 
+void patch_keys(std::vector<uint8_t> &file, int keyEntry, const std::vector<Key> &keys) {
+    Archive a;
+    a.data = file.data(), a.size = file.size();
+    Archive ka;
+    ka.data = a.entry(keyEntry);
+    if (!ka.data) return;
+    ka.size = a.entry_size(keyEntry);
+    uint8_t *p = const_cast<uint8_t *>(ka.entry(0));
+    for (size_t k = 0; p && k < keys.size() && p + k * 8 + 8 <= ka.data + ka.size; k++) memcpy(p + k * 8, &keys[k], 6); /* x y z; the frame stays */
+}
+
 /* A TIM as its entry holds it: RLEN packed again when it was packed */
 static std::vector<uint8_t> encode_tim(const Tim &t, const uint8_t *orig) {
     std::vector<uint8_t> buf = t.buf;

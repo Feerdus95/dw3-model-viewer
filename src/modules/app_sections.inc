@@ -32,11 +32,15 @@
     /* a model's pieces (bones) adjusted: each bone's mesh moved, turned or scaled about its middle, in the bone's own axes */
     struct PieceEdit {
         float move[3] = {0, 0, 0}, turn = 0, scale = 1;
+        float reach = 1;     /* where the bones under this one sit from its joint (the limb's length), the mesh unchanged */
+        bool joint = true;   /* the mesh scales about the bone's joint (a limb stays attached), not its own centre */
+        bool follow = true;  /* a change of Scale carries Reach with it */
         bool gone = false; /* collapsed to a point: not drawn in the game */
-        bool any() const { return move[0] || move[1] || move[2] || turn || scale != 1 || gone; }
+        bool any() const { return move[0] || move[1] || move[2] || turn || scale != 1 || reach != 1 || gone; }
     };
     std::map<int, PieceEdit> charEdits;
     std::vector<std::vector<Vec3s>> charV0, charN0; /* each bone's vertices and normals as the file has them */
+    std::vector<std::vector<Key>> charK0;           /* ... and its position keys */
     /* a step of undo: the edits and palette, and (an OBJ import's) the model's file as it was, with its number */
     struct CharSnap {
         std::map<int, PieceEdit> e;
@@ -82,13 +86,14 @@
         const Model *m = scene.model.get();
         if (m == charOf && scene.path == charPath) return;
         charOf = m, charPath = scene.path, charDirty = charEditing = false;
-        charEdits.clear(), charUndo.clear(), charRedo.clear(), charV0.clear(), charN0.clear(), charPal.clear(), charPalShown.clear();
+        charEdits.clear(), charUndo.clear(), charRedo.clear(), charV0.clear(), charN0.clear(), charK0.clear(), charPal.clear(), charPalShown.clear();
         charClean = CharSnap(), charGen = charCleanGen = 0;
         palSession = false;
         if (!m) return;
         for (const Bone &b : m->bones) {
             charV0.push_back(b.mesh >= 0 ? m->meshes[b.mesh].verts : std::vector<Vec3s>());
             charN0.push_back(b.mesh >= 0 ? m->meshes[b.mesh].normals : std::vector<Vec3s>());
+            charK0.push_back(b.keys[0]);
         }
     };
     auto leave_stage = [&](std::function<void()> then) {
@@ -219,6 +224,42 @@
             stageHist.clear();
         });
     };
+    /* a DW2 model's size: the steps of undo are the whole tuning as it was */
+    std::vector<Model::Dw2Tuning> dw2Undo, dw2Redo;
+    const Model *dw2Of = nullptr;
+    std::string dw2OfPath;
+    bool dw2Editing = false;
+    auto dw2_sync = [&]() {
+        if (scene.model.get() == dw2Of && scene.path == dw2OfPath) return;
+        dw2Of = scene.model.get(), dw2OfPath = scene.path, dw2Editing = false, dw2Undo.clear(), dw2Redo.clear();
+    };
+    auto dw2_mark = [&]() {
+        dw2Undo.push_back(scene.model->tune);
+        if (dw2Undo.size() > 60) dw2Undo.erase(dw2Undo.begin());
+        dw2Redo.clear();
+    };
+    /* what a DW2 model becomes in DW2003 (dw2003.txt beside it): converted by its own converter, then opened in the same sections as any
+       fighter, with the scripts and portraits the game will give it */
+    auto dw2_convert = [&](const std::string &model) {
+        Dw2Link l = dw2_link(model);
+        if (!l.ok || l.converter.empty() || l.tmpl.empty()) return note(NOTE_ERROR, "dw2003.txt needs converter, template, out, fid and like");
+        std::string dir = std::filesystem::u8path(model).parent_path().u8string();
+        const char *args[] = {l.python.c_str(), l.converter.c_str(), dir.c_str(), l.tmpl.c_str(), l.out.c_str(), nullptr};
+        SDL_Process *pr = SDL_CreateProcess(args, false);
+        if (!pr) return note(NOTE_ERROR, "Can't run " + l.python + ": " + SDL_GetError());
+        int code = -1;
+        SDL_WaitProcess(pr, true, &code);
+        SDL_DestroyProcess(pr);
+        if (code == 0) note(NOTE_OK, "Converted to " + l.out);
+        else note(NOTE_ERROR, "The converter failed (exit " + std::to_string(code) + "): run it by hand to see why");
+    };
+    auto dw2_open_converted = [&](const std::string &model) {
+        Dw2Link l = dw2_link(model);
+        std::vector<uint8_t> bytes;
+        if (!l.ok || !read_file(l.out, bytes)) return note(NOTE_ERROR, l.ok ? "Convert it first: " + l.out + " isn't there" : "No dw2003.txt beside this model");
+        if (!dw2_register(l)) return note(NOTE_ERROR, "No partner named " + l.like + " in the fighters' file to be like");
+        open_file((l.name.empty() ? l.like : l.name) + " (DW2003)", l.out, l.fid);
+    };
     auto open_dropped = [&](std::string path) {
         leave_stage([&, path]() {
             open_entry(path, 0);
@@ -285,6 +326,14 @@
        (it keeps its size, so the animations and scripts still fit) as the port's mod file --- */
     auto char_apply = [&]() {
         Model &m = *scene.model;
+        auto fit16 = [](float x) { return (int16_t)std::clamp((int)lroundf(x), -32768, 32767); };
+        for (size_t b = 1; b < m.bones.size() && b < charK0.size(); b++) { /* each bone's joint: where its parent's Reach puts it */
+            m.bones[b].keys[0] = charK0[b];
+            auto pe = charEdits.find(m.bones[b].parent);
+            if (pe == charEdits.end() || pe->second.reach == 1) continue;
+            for (Key &k : m.bones[b].keys[0]) k.x = fit16(k.x * pe->second.reach), k.y = fit16(k.y * pe->second.reach), k.z = fit16(k.z * pe->second.reach);
+        }
+        m.evaluate();
         for (size_t b = 1; b < m.bones.size() && b < charV0.size(); b++) {
             Mesh &me = m.meshes[m.bones[b].mesh];
             me.verts = charV0[b], me.normals = charN0[b];
@@ -297,6 +346,7 @@
                 for (int i = 0; i < 3; i++) lo[i] = std::min(lo[i], p[i]), hi[i] = std::max(hi[i], p[i]);
             }
             float c[3] = {(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2};
+            if (e.joint) c[0] = c[1] = c[2] = 0;
             float s = e.gone ? 0.0f : e.scale, cs = cosf(e.turn * 0.017453293f), sn = sinf(e.turn * 0.017453293f);
             auto fit = [](float x) { return (int16_t)std::clamp((int)lroundf(x), -32768, 32767); };
             for (Vec3s &v : me.verts) {
@@ -355,6 +405,10 @@
             patch_vecs(bytes, me.entry, 0, me.verts);
             patch_vecs(bytes, me.entry, 1, me.normals);
         }
+        for (size_t b = 1; b < scene.model->bones.size() && b < charK0.size(); b++) /* the joints Reach moved */
+            if (scene.model->bones[b].keys[0].size() == charK0[b].size() &&
+                memcmp(scene.model->bones[b].keys[0].data(), charK0[b].data(), charK0[b].size() * sizeof(Key)) != 0)
+                patch_keys(bytes, scene.model->bones[b].keyEntry, scene.model->bones[b].keys[0]);
         std::map<int, Tim> tims; /* the TIMs with a changed color */
         for (const auto &kv : charPal)
             for (const Tim &t : scene.model->tims) {
@@ -429,11 +483,11 @@
     /* the edits changed or went back: unsaved only if they differ from what was saved */
     auto char_same_edits = [&](const std::map<int, PieceEdit> &a, const std::map<int, PieceEdit> &b) {
         auto v = [](const std::map<int, PieceEdit> &m) {
-            std::vector<std::array<float, 7>> out;
+            std::vector<std::array<float, 10>> out;
             for (const auto &kv : m)
                 if (kv.second.any())
                     out.push_back({(float)kv.first, kv.second.move[0], kv.second.move[1], kv.second.move[2], kv.second.turn, kv.second.scale,
-                                   (float)kv.second.gone});
+                                   (float)kv.second.gone, kv.second.reach, (float)kv.second.joint, (float)kv.second.follow});
             return out;
         };
         return v(a) == v(b);
@@ -591,6 +645,7 @@
     auto undo_own = [&]() { return section == EFFECTS; };
     auto can_undo = [&](bool redo) {
         if (undo_own()) return fx.id >= 0 && !(redo ? ownHist.redo : ownHist.undo).empty();
+        if (scene.model && scene.model->dw2 && (section == DW2 || section == MODEL)) return !(redo ? dw2Redo : dw2Undo).empty();
         if (section == MODEL && char_on()) return !(redo ? charRedo : charUndo).empty();
         return stage_on() && !(redo ? stageHist.redo : stageHist.undo).empty();
     };
@@ -602,6 +657,13 @@
             OwnSnap s = std::move(from.back());
             from.pop_back();
             own_restore(s);
+        } else if (scene.model && scene.model->dw2 && (section == DW2 || section == MODEL)) {
+            auto &from = redo ? dw2Redo : dw2Undo, &to = redo ? dw2Undo : dw2Redo;
+            to.push_back(scene.model->tune);
+            scene.model->tune = std::move(from.back());
+            from.pop_back();
+            scene.model->dw2_retune();
+            upload(scene);
         } else if (section == MODEL && char_on()) {
             auto &from = redo ? charRedo : charUndo, &to = redo ? charUndo : charRedo;
             CharSnap now{charEdits, charPal};
@@ -2391,6 +2453,71 @@
         }
     };
 
+    /* ===== a DW2 model's size: the whole model, and the selected bone's mesh and reach, live, kept in tuning.txt beside the model ===== */
+    auto dw2_size = [&]() {
+        Model &m = *scene.model;
+        dw2_sync();
+        heading("Size");
+        {
+                Model::Dw2Tuning &t = m.tune;
+                bool changed = false;
+                auto slider_done = [&]() { /* a drag is a step of undo, none if it changed nothing */
+                    if (ImGui::IsItemActivated()) dw2_mark(), dw2Editing = true;
+                    if (ImGui::IsItemDeactivated() && dw2Editing) {
+                        if (!ImGui::IsItemDeactivatedAfterEdit() && !dw2Undo.empty()) dw2Undo.pop_back();
+                        dw2Editing = false;
+                    }
+                };
+                float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
+                for (size_t b = 1; b < m.bones.size(); b++) {
+                    if (!m.pose[b].visible) continue;
+                    const float *w = m.pose[b].world;
+                    for (const Vec3s &pv : m.meshes[m.bones[b].mesh].verts)
+                        for (int i = 0; i < 3; i++) {
+                            float p = w[i] * pv.x + w[4 + i] * pv.y + w[8 + i] * pv.z + w[12 + i];
+                            lo[i] = std::min(lo[i], p), hi[i] = std::max(hi[i], p);
+                        }
+                }
+                float height = hi[1] - lo[1];
+                static float target = 2771; /* ExVeemon's mean height over its idle, in model units (see the plan) */
+                ImGui::SetNextItemWidth(-FLT_MIN);
+                changed |= ImGui::SliderFloat("##dw2scale", &t.scale, 0.2f, 3.0f, "Whole model  x %.3f", ImGuiSliderFlags_Logarithmic);
+                slider_done();
+                tip("Everything: the meshes and the distances between joints (Ctrl+click to type a value)");
+                field("Height now", "%.0f", height);
+                ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.5f);
+                ImGui::InputFloat("##dw2target", &target, 0, 0, "%.0f");
+                ImGui::SameLine();
+                if (ImGui::Button("Set height") && height > 1 && target > 1) dw2_mark(), t.scale *= target / height, changed = true;
+                tip("Scales the whole model so it is this tall in the pose shown. 2771 is ExVeemon's average over its idle");
+                int sb = scene.selected;
+                if (sb > 0 && sb < (int)m.bones.size()) {
+                    ImGui::PushFont(g_fontBold);
+                    ImGui::TextColored(C_SELECT, "%s", thing_name(sb).c_str());
+                    ImGui::PopFont();
+                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    changed |= ImGui::SliderFloat("##dw2mesh", &t.mesh[sb], 0.2f, 3.0f, "Its mesh  x %.3f", ImGuiSliderFlags_Logarithmic);
+                    slider_done();
+                    tip("This bone's mesh alone, about its joint; the bones under it keep their place");
+                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    changed |= ImGui::SliderFloat("##dw2reach", &t.reach[sb], 0.2f, 3.0f, "Its reach  x %.3f", ImGuiSliderFlags_Logarithmic);
+                    slider_done();
+                    tip("How far the bones under it sit from its joint: longer or shorter limbs, without growing the mesh");
+                    if (ImGui::Button("Reset this bone")) dw2_mark(), t.mesh[sb] = t.reach[sb] = 1, changed = true;
+                    ImGui::SameLine();
+                } else {
+                    hint("Click a bone in the view or the Model tab to tune it alone.");
+                }
+                if (ImGui::Button("Reset all")) dw2_mark(), t.scale = 1, std::fill(t.mesh.begin(), t.mesh.end(), 1.0f), std::fill(t.reach.begin(), t.reach.end(), 1.0f), changed = true;
+                if (button(IC_SAVE "  Save", 0)) {
+                    if (m.dw2_save_tuning(dw2_tuning_path(scene.path))) note(NOTE_OK, "Saved the size to " + dw2_tuning_path(scene.path));
+                    else note(NOTE_ERROR, "Can't write " + dw2_tuning_path(scene.path));
+                }
+                tip("Writes tuning.txt beside the model: the converter reads the same file");
+                if (changed) m.dw2_retune(), upload(scene);
+        }
+    };
+
     /* ===== Model ===== */
     auto model_browser = [&]() {
         if (stage_on()) hint("Stage %d's model: its bones are the parts' pieces.", stageId);
@@ -2507,9 +2634,24 @@
                             ImGui::TextUnformatted("Scale");
                             tip("In the view: drag the box.");
                         },
-                        [&]() { changed |= ImGui::DragFloat("##v", &pe.scale, 0.01f, 0.05f, 20, "%.2f"); }, [&]() { pe.scale = 1; });
+                        [&]() {
+                            if (ImGui::DragFloat("##v", &pe.scale, 0.01f, 0.05f, 20, "%.2f")) changed = true, pe.reach = pe.follow ? pe.scale : pe.reach;
+                        },
+                        [&]() { pe.scale = 1, pe.reach = pe.follow ? 1 : pe.reach; });
+                    row("reach",
+                        [&]() {
+                            ImGui::AlignTextToFramePadding();
+                            ImGui::TextUnformatted("Reach");
+                            tip("Where the bones under this one sit from its joint: the limb's length. The mesh stays as it is.");
+                        },
+                        [&]() { changed |= ImGui::DragFloat("##v", &pe.reach, 0.01f, 0.05f, 20, "%.2f"); }, [&]() { pe.reach = 1; });
                     ImGui::EndTable();
                 }
+                bool joint = pe.joint, follow = pe.follow;
+                if (ImGui::Checkbox("Scale about the joint", &joint)) char_mark(), pe.joint = joint, changed = true;
+                tip("The mesh grows from the bone's joint, so a limb's segments stay attached. Off: from the mesh's own centre.");
+                if (ImGui::Checkbox("Reach follows Scale", &follow)) char_mark(), pe.follow = follow, changed = true;
+                tip("Scale changes Reach too: the bones under this one move with the mesh. Off: Reach is its own.");
                 bool gone = pe.gone;
                 if (ImGui::Checkbox("Not drawn in the game", &gone)) char_mark(), pe.gone = gone, changed = true;
                 tip("Collapses the piece to a point, the way to remove it without touching the animations");
@@ -2523,6 +2665,7 @@
         } else {
             hint("Click the model in the view, or a bone on the left, to see it here.");
         }
+        if (m.dw2) dw2_size();
         if (char_on()) {
             heading("In the game");
             ImGui::BeginDisabled(!charDirty);
@@ -2871,6 +3014,11 @@
     /* ===== Fighter ===== */
     auto fighter_browser = [&]() {
         Model &mm = *scene.model;
+        if (mm.dw2) {
+            hint("A DW2 model has no action scripts or portraits of its own: the DW2003 version does.");
+            if (button(IC_PLAY "  Open the DW2003 version", 1)) dw2_open_converted(scene.path);
+            return;
+        }
         if (scene.fighters.empty()) return hint("No fighter uses this file: it has no action scripts.");
         const Fighter &f = *scene.fighters[scene.fighter];
         hint("Play a script to see it as the battle runs it. Click a line to play its motion, look through its camera or see its effect.");
@@ -2948,6 +3096,10 @@
         ImGui::EndChild();
     };
     auto fighter_inspector = [&]() {
+        if (scene.model && scene.model->dw2) {
+            title("Digimon World 2");
+            return hint("Its fighter (scripts, cameras, portraits) is the DW2003 version's: open it from the Digimon World 2 tab or from the list on the left.");
+        }
         if (scene.fighters.empty()) {
             title("No fighter");
             return hint("No fighter uses this file in the fighters' file (SMDLDATA.PRO): it has no name, face, cameras or action scripts there.");
@@ -3387,9 +3539,11 @@
             if (ImGui::BeginTabItem("Effects")) dw2Tab = 1, ImGui::EndTabItem();
             ImGui::EndTabBar();
         }
+        bool open = scene.model && scene.model->dw2 && !view.stageView;
         ImGui::SetNextItemWidth(-FLT_MIN);
         ImGui::InputTextWithHint("##dw2filter", IC_SEARCH "  Search: number or file", dw2Filter, sizeof dw2Filter);
         std::string f = lower(dw2Filter);
+        ImGui::BeginChild("##dw2list", ImVec2(0, open ? ImGui::GetContentRegionAvail().y * 0.4f : 0));
         if (ImGui::BeginTable("dw2files", 1, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY)) {
             for (const Dw2Entry &en : dw2List) {
                 if ((int)en.fx != dw2Tab || (!f.empty() && lower(en.label).find(f) == std::string::npos)) continue;
@@ -3399,6 +3553,11 @@
                 if (ImGui::Selectable(en.label.c_str(), sel, ImGuiSelectableFlags_SpanAllColumns) && !sel) open_file("DW2 " + en.label, en.path, -1);
             }
             ImGui::EndTable();
+        }
+        ImGui::EndChild();
+        if (open) { /* the model's bones, as in Model */
+            heading("Bones");
+            model_browser();
         }
     };
     auto dw2_inspector = [&]() {
@@ -3413,63 +3572,19 @@
             field("Polygons", "%d", (int)polys);
             field("Vertices", "%d", (int)verts);
             field("Motions", "%d", (int)m.motions.size());
-            /* its size: the whole model, and the selected bone's mesh and reach, applied live and kept in tuning.txt beside the model */
-            heading("Size");
-            {
-                Model::Dw2Tuning &t = m.tune;
-                bool changed = false;
-                float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
-                for (size_t b = 1; b < m.bones.size(); b++) {
-                    if (!m.pose[b].visible) continue;
-                    const float *w = m.pose[b].world;
-                    for (const Vec3s &pv : m.meshes[m.bones[b].mesh].verts)
-                        for (int i = 0; i < 3; i++) {
-                            float p = w[i] * pv.x + w[4 + i] * pv.y + w[8 + i] * pv.z + w[12 + i];
-                            lo[i] = std::min(lo[i], p), hi[i] = std::max(hi[i], p);
-                        }
-                }
-                float height = hi[1] - lo[1];
-                static float target = 2771; /* ExVeemon's mean height over its idle, in model units (see the plan) */
-                ImGui::SetNextItemWidth(-FLT_MIN);
-                changed |= ImGui::SliderFloat("##dw2scale", &t.scale, 0.2f, 3.0f, "Whole model  x %.3f", ImGuiSliderFlags_Logarithmic);
-                tip("Everything: the meshes and the distances between joints (Ctrl+click to type a value)");
-                field("Height now", "%.0f", height);
-                ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.5f);
-                ImGui::InputFloat("##dw2target", &target, 0, 0, "%.0f");
-                ImGui::SameLine();
-                if (ImGui::Button("Set height") && height > 1 && target > 1) t.scale *= target / height, changed = true;
-                tip("Scales the whole model so it is this tall in the pose shown. 2771 is ExVeemon's average over its idle");
-                int sb = scene.selected;
-                if (sb > 0 && sb < (int)m.bones.size()) {
-                    ImGui::PushFont(g_fontBold);
-                    ImGui::TextColored(C_SELECT, "%s", thing_name(sb).c_str());
-                    ImGui::PopFont();
-                    ImGui::SetNextItemWidth(-FLT_MIN);
-                    changed |= ImGui::SliderFloat("##dw2mesh", &t.mesh[sb], 0.2f, 3.0f, "Its mesh  x %.3f", ImGuiSliderFlags_Logarithmic);
-                    tip("This bone's mesh alone, about its joint; the bones under it keep their place");
-                    ImGui::SetNextItemWidth(-FLT_MIN);
-                    changed |= ImGui::SliderFloat("##dw2reach", &t.reach[sb], 0.2f, 3.0f, "Its reach  x %.3f", ImGuiSliderFlags_Logarithmic);
-                    tip("How far the bones under it sit from its joint: longer or shorter limbs, without growing the mesh");
-                    if (ImGui::Button("Reset this bone")) t.mesh[sb] = t.reach[sb] = 1, changed = true;
-                    ImGui::SameLine();
-                } else {
-                    hint("Click a bone in the view or the Model tab to tune it alone.");
-                }
-                if (ImGui::Button("Reset all")) t.scale = 1, std::fill(t.mesh.begin(), t.mesh.end(), 1.0f), std::fill(t.reach.begin(), t.reach.end(), 1.0f), changed = true;
-                if (button(IC_SAVE "  Save", 0)) {
-                    if (m.dw2_save_tuning(dw2_tuning_path(scene.path))) note(NOTE_OK, "Saved the size to " + dw2_tuning_path(scene.path));
-                    else note(NOTE_ERROR, "Can't write " + dw2_tuning_path(scene.path));
-                }
-                tip("Writes tuning.txt beside the model: the converter reads the same file");
-                if (changed) m.dw2_retune(), upload(scene);
-            }
-            heading("Look closer");
-            float w = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2;
-            for (int s : {MODEL, MOTIONS}) {
-                if (s == MOTIONS) ImGui::SameLine();
-                std::string l = std::string(SECTION_ICON[s]) + "  " + SECTION_NAME[s];
-                if (ImGui::Button(l.c_str(), ImVec2(w, 0))) section = s;
-                tip("%s", SECTION_TIP[s]);
+            model_inspector(); /* the selected bone, and the size: as in Model */
+            heading("In Digimon World 2003");
+            Dw2Link l = dw2_link(scene.path);
+            if (!l.ok) {
+                hint("No dw2003.txt beside this model, so it has no converter, no file or fighter in DW2003 yet.");
+            } else {
+                field("File", "%s", nice_path(l.out).c_str());
+                field("Fighter", "%s, like %s", l.name.c_str(), l.like.c_str());
+                if (button(IC_RESTART "  Convert", 0)) dw2_convert(scene.path);
+                tip("Runs the converter on this model and its tuning.txt: it writes the file above");
+                same_line_if_fits(IC_PLAY "  Open the DW2003 version");
+                if (button(IC_PLAY "  Open the DW2003 version", 1)) dw2_open_converted(scene.path);
+                tip("The converted file with its fighter, in the same sections: its action scripts, its portraits and cameras, its motions");
             }
         } else {
             title("No Digimon World 2 model open");

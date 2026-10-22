@@ -101,6 +101,7 @@ void GameData::load(const std::string &files) {
             fighters.push_back(f);
         }
     }
+    fighters.reserve(fighters.size() + 16);
 
     /* FILE_FIGHT_STAGES: FightStageInfo, 0x58 bytes each, its LightSet at 0x18 */
     std::vector<uint8_t> s = load_fid(files, 459);
@@ -119,6 +120,29 @@ void GameData::load(const std::string &files) {
         for (int k = 0; k < 3; k++) l.ambient[k] = (float)(int32_t)rd32(&s[o + 0x48 + k * 4]);
         stages.push_back(l);
     }
+}
+
+bool GameData::addLike(const std::string &like, int fid, const std::string &name, int modelEntry, int motionsEntry, int effectsEntry,
+                       const std::vector<std::array<int, 7>> &deltas) {
+    const Fighter *src = nullptr;
+    for (const Fighter &f : fighters)
+        if (!f.enemy && f.name == like && f.modelFid != fid) src = &f;
+    if (!src) return false;
+    Fighter f = *src;
+    f.modelFid = f.motionsFid = f.effectsFid = fid;
+    f.modelEntry = modelEntry, f.motionsEntry = motionsEntry, f.effectsEntry = effectsEntry;
+    f.name = name;
+    for (const auto &d : deltas)
+        if (d[0] >= 0 && d[0] < (int)f.cameras.size())
+            for (int k = 0; k < 3; k++) f.cameras[d[0]].pos[k] += d[1 + k], f.cameras[d[0]].ref[k] += d[4 + k];
+    for (Fighter &o : fighters)
+        if (o.modelFid == fid) {
+            o = f;
+            return true;
+        }
+    if (fighters.size() == fighters.capacity()) return false; /* the scenes point into the list: it never moves */
+    fighters.push_back(f);
+    return true;
 }
 
 std::vector<const Fighter *> GameData::forFile(int fid) const {
