@@ -321,6 +321,38 @@ static int preset_selftest() {
            "switching changes neither the fighter's cameras nor the preset");
     }
     {
+        /* the battle camera: fades as FIGHTSTG_updateBattleCamera runs them, and the 14 words of an explicit camera as the script gives them */
+        CamTrack k;
+        int a[14] = {}, b[14] = {};
+        b[0] = 1000, b[13] = 280, b[6] = -400;
+        k.cut(a, 3);
+        k.fade(b, 43, 4);
+        int step = (0x100000 / 43) >> 8, ticks = 0;
+        bool mid = true;
+        for (; k.t != 0x1000 && ticks < 100; ticks++) {
+            k.tick();
+            if (k.t != 0x1000) mid = mid && k.cur[0] == ((1000 * k.t) >> 12) && k.cur[6] == ((-400 * k.t) >> 12) && k.shown() == -1;
+        }
+        ok(step == 95 && ticks == 44 && mid, "a fade of 43 frames takes 44 and each word is lerped as the GTE does");
+        ok(!memcmp(k.cur, b, sizeof b) && k.shown() == 4, "it ends on the view, which is the fighter's camera once it is there");
+        k.fade(a, 0, 7);
+        ok(!memcmp(k.cur, a, sizeof a) && k.t == 0x1000, "a time of 0 is a cut");
+        int w[14] = {0, 64, -8864, 0, 0, 5120, 0, 3136, 0, 0, 0, 0, 0, 280};
+        float eye[3], ref[3];
+        cam_eff(w, eye, ref);
+        ok(eye[0] == 0 && eye[1] == 3200 && eye[2] == -8864 && ref[1] == 3136 && ref[2] == 5120, "the translation is added to the eye and the target");
+        w[7] = 0, w[10] = -1024, w[0] = 1, w[1] = 0, w[2] = 0, w[3] = 0, w[4] = 0, w[5] = 0, w[6] = 0, w[8] = 0;
+        cam_eff(w, eye, ref);
+        ok(fabsf(eye[0]) < 1e-3f && fabsf(eye[1]) < 1e-3f && fabsf(eye[2] - 1) < 1e-3f, "a quarter turn about y, as RotMatrixYXZ in the PSX's space");
+        GameCamera gc = t->cameras[9];
+        cam_words(gc, w);
+        cam_eff(w, eye, ref);
+        View v1, v2;
+        apply_cam_words(v1, *t, w, 9);
+        apply_camera(v2, *t, 9);
+        ok(v1.cam.dist == v2.cam.dist && v1.cam.yaw == v2.cam.yaw && v1.cam.pitch == v2.cam.pitch && v1.fov == v2.fov, "a fighter's camera through the words is the same view");
+    }
+    {
         std::string keep = g_context;
         g_context = "no.such.mod"; /* no dump for it: nothing is inferred */
         ok(!strcmp(fighter_origin(t->id), "unknown") && !strcmp(fighter_origin(-5), "unknown"), "without a dump of the context an origin is unknown");

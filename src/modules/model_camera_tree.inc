@@ -65,15 +65,11 @@ static CameraRole camera_role(bool enemy, int i) {
     }
 }
 
-/* Looks through camera C as fighter F's frame has it; INDEX is the fighter's camera it is, or -1 (a candidate) */
-static void apply_game_camera(View &v, const Fighter &f, const GameCamera &c, int index) {
-    auto local = [&](const int16_t *p, float *out) {
-        float b[3] = {(float)p[0], (float)p[1], (float)p[2]};
-        battle_to_view(f, b, out);
-    };
+/* Looks through an eye and a target (in fighter F's battle space) with projection PROJ; INDEX is the fighter's camera it is, or -1 */
+static void apply_cam_eff(View &v, const Fighter &f, const float eyeB[3], const float refB[3], float proj, int index) {
     float eye[3], ref[3];
-    local(c.pos, eye);
-    local(c.ref, ref);
+    battle_to_view(f, eyeB, eye);
+    battle_to_view(f, refB, ref);
     float d[3] = {eye[0] - ref[0], eye[1] - ref[1], eye[2] - ref[2]};
     float len = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
     if (len < 1) return;
@@ -81,10 +77,67 @@ static void apply_game_camera(View &v, const Fighter &f, const GameCamera &c, in
     v.cam.dist = len;
     v.cam.pitch = asinf(d[1] / len);
     v.cam.yaw = atan2f(d[0], d[2]);
-    if (c.proj > 0) v.fov = 2 * atanf(120.0f / c.proj);
+    if (proj > 0) v.fov = 2 * atanf(120.0f / proj);
     v.gameCamera = index;
 }
+
+/* Looks through camera C as fighter F's frame has it; INDEX is the fighter's camera it is, or -1 (a candidate) */
+static void apply_game_camera(View &v, const Fighter &f, const GameCamera &c, int index) {
+    float eye[3] = {(float)c.pos[0], (float)c.pos[1], (float)c.pos[2]}, ref[3] = {(float)c.ref[0], (float)c.ref[1], (float)c.ref[2]};
+    apply_cam_eff(v, f, eye, ref, c.proj, index);
+}
 static void apply_camera(View &v, const Fighter &f, int index) { apply_game_camera(v, f, f.cameras[index], index); }
+
+/* The battle camera's view as the script's camera command has it (FIGHTSTG_runScriptCamera), in its 14 words: eye 0-2, target 3-5,
+   translation 6-8, rotation 9-11, roll 12, projection 13. A fighter's own camera is the same with 6-12 at 0. The eye and the target
+   are in the coordinate system the translation and rotation make (GsSetRefView2 with a super coordinate), so they come to the
+   world as R * p + t, R = RotMatrixYXZ = Ry * Rx * Rz in the PSX's space (y and z negated from the words; angles 4096 to a turn).
+   Rotation and roll are read as libgs does and have not been checked on screen; the viewer cannot draw the roll. */
+static void cam_words(const GameCamera &c, int w[14]) {
+    memset(w, 0, 14 * sizeof(int));
+    for (int i = 0; i < 3; i++) w[i] = c.pos[i], w[3 + i] = c.ref[i];
+    w[13] = c.proj;
+}
+static void cam_eff(const int w[14], float eye[3], float ref[3]) {
+    const float k = 6.2831853f / 4096;
+    float rx = w[9] * k, ry = -w[10] * k, rz = -w[11] * k;
+    float cx = cosf(rx), sx = sinf(rx), cy = cosf(ry), sy = sinf(ry), cz = cosf(rz), sz = sinf(rz);
+    for (int o = 0; o < 2; o++) {
+        const int *p = w + 3 * o;
+        float x = (float)p[0], y = -(float)p[1], z = -(float)p[2]; /* the PSX's space */
+        float x1 = cz * x - sz * y, y1 = sz * x + cz * y;          /* Rz */
+        float y2 = cx * y1 - sx * z, z2 = sx * y1 + cx * z;        /* Rx */
+        float x3 = cy * x1 + sy * z2, z3 = -sy * x1 + cy * z2;     /* Ry */
+        float *out = o ? ref : eye;
+        out[0] = x3 + (float)w[6], out[1] = -(y2 - (float)w[7]), out[2] = -(z3 - (float)w[8]);
+    }
+}
+static void apply_cam_words(View &v, const Fighter &f, const int w[14], int index) {
+    float eye[3], ref[3];
+    cam_eff(w, eye, ref);
+    apply_cam_eff(v, f, eye, ref, (float)w[13], index);
+}
+
+/* The battle camera's task (FIGHTSTG_updateBattleCamera): a cut puts the view; a fade of TIME frames goes from where it is to the
+   view by TSTEP = 0x100000 / TIME per frame (>> 8), t from 0 to 0x1000, each word lerped on its own (FIGHTSTG_lerpVector:
+   from + (to - from) * t >> 12, on the GTE). One frame is one tick of the viewer's clock. */
+struct CamTrack {
+    int cur[14] = {}, from[14] = {}, to[14] = {}, t = 0x1000, step = 0, idx = -1;
+    bool set = false;
+    void cut(const int *w, int index) { memcpy(cur, w, sizeof cur), memcpy(to, w, sizeof to), t = 0x1000, idx = index, set = true; }
+    void fade(const int *w, int time, int index) {
+        if (time <= 0 || !set) return cut(w, index);
+        memcpy(from, cur, sizeof from), memcpy(to, w, sizeof to);
+        step = std::max(1, (0x100000 / time) >> 8), t = 0, idx = index;
+    }
+    void tick() {
+        if (t == 0x1000) return;
+        t += step;
+        if (t >= 0x1000) return memcpy(cur, to, sizeof cur), void(t = 0x1000);
+        for (int i = 0; i < 14; i++) cur[i] = from[i] + (((to[i] - from[i]) * t) >> 12);
+    }
+    int shown() const { return t == 0x1000 ? idx : -1; } /* the fighter's camera it is, once it is there */
+};
 
 /* A/B on the same frame: A is the camera the script last asked for (ORIG, -1 none), B the candidate. Only the view moves: no
    script, motion, timing or preset is touched, so switching back and forth shows the same instant through the two cameras */

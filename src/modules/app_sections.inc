@@ -2824,6 +2824,10 @@
         Camera cam;
         float fov = 0.8f;
         int camIdx = -1;
+        /* the battle camera twice, on the same script: A with the cameras the script asks for, B with the candidate in their place */
+        CamTrack a, b;
+        float camAcc = 0;
+        bool rollNoted = false;
     } run;
     bool lockCam = true;
     /* A candidate camera (Camera workbench): another fighter's camera, adjusted, in the place of the camera the script asks for, at the
@@ -2953,6 +2957,14 @@
         Effect *e = shot_effect(id);
         return e ? e->duration : 0;
     };
+    /* the camera on screen: the words of the track that is selected (B with the candidate on, else A) */
+    auto show_cam = [&]() {
+        const Fighter *f = scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter];
+        const CamTrack &tr = cand.on ? run.b : run.a;
+        if (!f || !tr.set) return;
+        apply_cam_words(view, *f, tr.cur, tr.shown());
+        snap_cam();
+    };
     auto run_script = [&](int i) {
         if (!scene.model || i < 0 || i >= (int)scene.model->scripts.size()) return;
         run = ScriptRun{true, i, 0, 0, false};
@@ -2966,19 +2978,35 @@
            for an enemy of 2 cameras, the most common */
         const Fighter *f = scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter];
         cand.orig = f && !f->enemy && f->cameras.size() > 1 ? 1 : -1;
-        if (lockCam && f && cand.orig >= 0) {
-            if (cand.on) apply_game_camera(view, *f, cand.c, -1);
-            else apply_camera(view, *f, cand.orig);
-            snap_cam();
+        if (f && cand.orig >= 0) {
+            int w[14];
+            cam_words(f->cameras[cand.orig], w), run.a.cut(w, cand.orig);
+            cam_words(cand.c, w), run.b.cut(w, -1);
+            if (lockCam) show_cam();
         }
     };
-    /* A (the script's camera) or B (the candidate) now, on the frame that is showing */
+    /* A (the script's camera) or B (the candidate) now, on the frame that is showing: while a script plays, the two cameras
+       go on side by side (also through a fade), so the switch lands where each one is */
     auto set_ab = [&](bool b) {
         const Fighter *f = scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter];
         if (!f || cand.fighter < 0 || cand.fighter >= (int)g_game.fighters.size() || g_game.fighters[cand.fighter].enemy != f->enemy) return;
         cand.on = b;
-        ab_view(view, *f, b, cand.c, cand.orig);
-        if (run.on) snap_cam();
+        if (run.on) show_cam();
+        else ab_view(view, *f, b, cand.c, cand.orig);
+    };
+    /* the candidate was edited: B follows it (a fade in progress ends where the edit is) */
+    auto cand_edited = [&]() {
+        const Fighter *f = scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter];
+        if (!f) return;
+        if (run.on) {
+            int w[14];
+            cam_words(cand.c, w);
+            if (run.b.t == 0x1000) run.b.cut(w, -1);
+            else memcpy(run.b.to, w, sizeof w);
+            if (cand.on) show_cam();
+        } else if (cand.on) {
+            apply_game_camera(view, *f, cand.c, -1);
+        }
     };
     auto run_step = [&](float dt) {
         float ticks = view.playing ? dt * 60 * view.speed : 0;
@@ -3009,6 +3037,13 @@
         const std::vector<ScriptLine> &sc = m.scripts[run.script];
         const Fighter *f = scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter];
         float budget = ticks;
+        /* the battle camera's fades, a frame at a time */
+        run.camAcc += ticks;
+        int frames = (int)run.camAcc;
+        run.camAcc -= frames;
+        bool fading = run.a.t != 0x1000 || run.b.t != 0x1000;
+        for (int i = 0; i < std::min(frames, 4096); i++) run.a.tick(), run.b.tick();
+        if (fading && lockCam) show_cam();
         for (int guard = 0; guard < 200; guard++) {
             if (run.wait > 0) {
                 float use = std::min(run.wait, budget);
@@ -3027,12 +3062,29 @@
                 return;
             }
             if (ln.motion > 0 && ln.motion <= (int)m.motions.size()) m.setMotion(ln.motion);
-            if (f && (ln.camera >= 0 || (cand.every && ln.camMode))) {
+            if (f && ln.camMode) {
+                /* A: what the game does with the command (a fade of camTime frames, or a cut); B: the candidate in its place, at the
+                   fighter's own shots and, with "also at the cuts", at the rest */
                 int c = ln.camera >= 100 ? ln.camera - 100 : ln.camera;
                 bool own = ln.camera >= 0 && c < (int)f->cameras.size() && (ln.camera >= 100) == f->enemy;
-                if (own) cand.orig = c;
-                if (cand.on && (own || cand.every)) apply_game_camera(view, *f, cand.c, -1), snap_cam();
-                else if (own) apply_camera(view, *f, c), snap_cam();
+                int w[14], idx = -1;
+                bool act = true;
+                if (ln.camMode == 2) {
+                    memcpy(w, ln.camRaw, sizeof w);
+                    if ((w[12] || w[9] || w[10] || w[11]) && !run.rollNoted) {
+                        run.rollNoted = true;
+                        note(NOTE_INFO, "This script has a camera with a rotation or a roll: they are applied as the game's library does, unchecked, and a roll is not drawn.");
+                    }
+                } else if (own) {
+                    cam_words(f->cameras[c], w), idx = c, cand.orig = c;
+                } else if (ln.camMode == 3 && !f->enemy && f->cameras.size() > 1) { /* the battle's default view */
+                    cam_words(f->cameras[1], w), idx = 1, cand.orig = 1;
+                } else {
+                    act = false; /* the other side's shot: its fighter is not here */
+                }
+                if (act) run.a.fade(w, ln.camTime, idx);
+                if (own || cand.every) cam_words(cand.c, w), run.b.fade(w, ln.camTime, -1);
+                show_cam();
             }
             if (ln.emStart && f) start_fx_model(ln, *f);
             if (ln.fxStart) {
@@ -3136,7 +3188,7 @@
             if (ch) {
                 for (int k = 0; k < 3; k++) cand.c.pos[k] = (int16_t)pos[k], cand.c.ref[k] = (int16_t)ref[k];
                 cand.c.proj = (int16_t)proj;
-                if (cand.on) apply_game_camera(view, f, cand.c, -1), run.on ? snap_cam() : void();
+                cand_edited();
             }
             if (button(IC_CAMERA "  Look through it")) apply_game_camera(view, f, cand.c, -1);
             ImGui::SameLine();
@@ -3146,7 +3198,7 @@
                 double k;
                 if (fit_camera(donor, cand.c, f, fitted, k)) {
                     cand.before = cand.c, cand.c = fitted, cand.fitK = k;
-                    if (cand.on) apply_game_camera(view, f, cand.c, -1), run.on ? snap_cam() : void();
+                    cand_edited();
                     note(NOTE_INFO, "Fitted: the donor's framing, scaled by " + std::to_string(k).substr(0, 5) + " to this model. Check it in the script.");
                 } else {
                     note(NOTE_WARN, "A model's box couldn't be read, so there is nothing to fit by.");
@@ -3158,7 +3210,7 @@
                 if (button("Undo the fit")) {
                     if (cand.before.proj) cand.c = cand.before;
                     cand.fitK = 0;
-                    if (cand.on) apply_game_camera(view, f, cand.c, -1), run.on ? snap_cam() : void();
+                    cand_edited();
                 }
                 ImGui::TextColored(C_WARN, "Fitted (x%.2f): a proposal, not checked", cand.fitK);
             }
@@ -3391,7 +3443,7 @@
                 for (int k = 0; k < (int)sc.size(); k++) {
                     const ScriptLine &ln = sc[k];
                     ImGui::PushID(k);
-                    bool active = ln.motion > 0 || ln.camera >= 0 || ln.effect >= 0;
+                    bool active = ln.motion > 0 || ln.camera >= 0 || ln.effect >= 0 || ln.camMode == 2;
                     bool now = run.on && run.script == i && k == run.pc - 1;
                     if (!active) ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
                     if (ImGui::Selectable(ln.text.c_str(), now) && active) {
@@ -3401,6 +3453,8 @@
                         if (c >= 0 && c < (int)f.cameras.size() && (ln.camera >= 100) == f.enemy) {
                             if (cand.on) apply_game_camera(view, f, cand.c, -1);
                             else apply_camera(view, f, c);
+                        } else if (ln.camMode == 2) {
+                            apply_cam_words(view, f, ln.camRaw, -1); /* an explicit camera, as it is once its fade is over */
                         }
                     }
                     if (!active) ImGui::PopStyleColor();

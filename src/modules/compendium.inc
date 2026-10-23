@@ -446,7 +446,7 @@ static int dump_compendium(const std::string &outArg, const std::string &exe, co
         .str("derived_rule", "derived blocks are computed by the viewer (battle_to_view, apply_camera) and are never read back as native values")
         .str("fov", "2*atan(120/proj)").done() + ",\n";
     json += "\"provenance_values\":" + strs({"extracted", "decoded", "derived", "inferred", "visually_verified"}) + ",\n";
-    json += "\"playback_limitations\":" + strs({"the script player leaves out jumps and moves, the other side of the fight, sounds, fades, stages and models a script adds"}) + ",\n";
+    json += "\"playback_limitations\":" + strs({"the script player leaves out jumps and moves, the other side of the fight, sounds, stages and models a script adds", "the player plays a script's camera commands as the game does: a cut or a fade of N frames (a linear lerp of each of the 14 words, FIGHTSTG_lerpVector) to an explicit view, a fighter's camera or the battle's default view; the other side's shots are not played", "an explicit camera's translation is added to its eye and target and its rotation applied as RotMatrixYXZ does in libgs (not checked on screen); its roll is not drawn"}) + ",\n";
     json += "\"models\":" + lines(modelRecs) + ",\n\"fighters\":" + lines(fighterRecs) + ",\n\"cameras\":" + lines(camRecs) + ",\n\"scripts\":" + lines(scriptRecs) + "\n}\n";
 
     /* ---- audit.md ---- */
@@ -500,7 +500,7 @@ static int dump_compendium(const std::string &outArg, const std::string &exe, co
     kvp("fighters.without_script_table", (long long)noScripts.size());
     kvp("problems", (long long)problems.size());
     md += "```\n\n## Reading these\n\n- A shot by id is the script asking for a fighter's camera: a partner's shots 1-4 are its cameras 8-11, an enemy's 1-3 its cameras 0-2. A shot of the other side (`camera_shot_other_side`) is the opposing fighter's camera in the real fight, and that fighter is not known here, so it is counted but not tied to any camera record.\n";
-    md += "- An explicit camera carries its own eye, target and projection (words 0-5 and 13 are read; the other words are kept as the script has them).\n";
+    md += "- An explicit camera carries its own eye, target and projection (words 0-5 and 13 are in `pos`, `ref` and `proj`; all 14 are kept in `words`: translation 6-8, rotation 9-11, roll 12).\n";
     md += "- `used_by` in a camera record is only its own side's scripts. A shot nobody calls may still be a battle view or portrait: only the shots (role group 2) are counted as never called.\n";
     md += "- A script slot with offset 0 in its archive's table has no script (`absent`): the viewer's `read_scripts` still reads the table itself as a command there, so those show as \"unknown command 72\" in the Fighter section; the dump does not count them as scripts.\n";
     md += "- A script is tied to a technique only through TechData.script, and the slot names 2-5 are the viewer's own. Scripts with neither are listed below, not guessed.\n\n";
