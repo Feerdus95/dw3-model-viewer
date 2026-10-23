@@ -170,6 +170,65 @@ static int workbench_selftest() {
     wb_put(cand2, choreo2, noSeq);
     ok(!choreo2.has && !choreo2.on, "without a sequence B cannot be showing one");
 
+    /* Undo / Redo while a script plays: B follows, the script does not move */
+    {
+        const Fighter *f = nullptr;
+        for (const Fighter &x : g_game.fighters)
+            if (!f && !x.enemy && x.cameras.size() >= 3) f = &x;
+        ok(f != nullptr, "a partner with cameras to test with");
+        if (f) {
+            Scene scene;
+            scene.model = std::make_unique<Model>();
+            scene.fighters = {f};
+            ScriptLine l0;
+            l0.camera = 0, l0.camMode = 1, l0.camTime = 0;
+            scene.model->scripts = {{l0, l0, l0}};
+            View view;
+            ScriptRun run;
+            Candidate cd;
+            ChoreoUi ch;
+            int fi = (int)(f - &g_game.fighters[0]);
+            cd.fighter = fi, cd.cam = 1, cd.c = f->cameras[1];
+            run.on = true, run.script = 0, run.pc = 2, run.wait = 5, run.camOrd = 1;
+            int wa[14], wcand0[14], wcand1[14];
+            cam_words(f->cameras[0], wa), cam_words(f->cameras[1], wcand0), cam_words(f->cameras[2], wcand1);
+            run.a.cut(wa, 0);
+            run.b.cut(wcand0, -1);
+            WbSnap s0 = wb_take(cd, ch);
+            cd.c = f->cameras[2];
+            cams_cand_edited(view, scene, run, cd, ch);
+            WbSnap s1 = wb_take(cd, ch);
+            ok(!memcmp(run.b.cur, wcand1, sizeof wcand1), "(setup) an edit of the candidate moved B");
+            cams_restore(view, scene, run, cd, ch, s0);
+            ok(!memcmp(&cd.c, &s0.c.c, sizeof cd.c) && !memcmp(run.b.cur, wcand0, sizeof wcand0) && run.b.t == 0x1000, "undoing an edit puts B back on the candidate as it was");
+            ok(run.on && run.pc == 2 && run.wait == 5 && run.camOrd == 1 && !memcmp(run.a.cur, wa, sizeof wa) && run.a.idx == 0, "and the script, its waits and A are where they were");
+            cams_restore(view, scene, run, cd, ch, s1);
+            ok(!memcmp(run.b.cur, wcand1, sizeof wcand1) && run.pc == 2 && run.wait == 5, "redo follows it the same way");
+            /* in the middle of a fade of B: it goes on, to the restored camera */
+            run.b.cut(wcand1, -1);
+            run.b.fade(wcand0, 20, -1);
+            run.b.tick();
+            int t = run.b.t;
+            cams_restore(view, scene, run, cd, ch, s0);
+            ok(run.b.t == t && !memcmp(run.b.to, wcand0, sizeof wcand0), "a fade in progress goes on, towards the restored camera");
+            /* B was showing a sequence that undo takes away */
+            ch.has = ch.on = true;
+            ch.app = seq(2).app;
+            WbSnap withSeq = wb_take(cd, ch);
+            run.b.cut(wcand1, -1);
+            cams_restore(view, scene, run, cd, ch, s0); /* s0 has no sequence */
+            ok(!ch.has && !ch.on && !memcmp(run.b.cur, wcand0, sizeof wcand0), "undoing a sequence away makes B the candidate again");
+            cams_restore(view, scene, run, cd, ch, withSeq);
+            ok(ch.has && wb_same(wb_take(cd, ch), withSeq) && run.pc == 2, "and redoing it brings the sequence back, the script untouched");
+            /* not running: with B showing, the view follows the restore */
+            run.on = false, cd.on = true, ch.has = ch.on = false;
+            cams_restore(view, scene, run, cd, ch, s1);
+            Camera at1 = view.cam;
+            cams_restore(view, scene, run, cd, ch, s0);
+            ok(memcmp(&at1, &view.cam, sizeof at1) != 0, "with no script and B showing, the view takes the restored candidate");
+        }
+    }
+
     /* clear */
     h = WbHist();
     h.edit(state(1), false);

@@ -116,3 +116,13 @@ struct WbHist {
         return (wb_same(now.c, cleanC) ? 0 : WB_CAND) | (wb_same(now.s, cleanS) ? 0 : WB_SEQ);
     }
 };
+
+/* Undo / Redo to TO: the workbench goes back to it and B follows: the sequence's cameras again (or the candidate's when there is none now),
+   the candidate's edit. The script is not touched: its progress, its waits and A stay where they are. */
+static void cams_restore(View &view, const Scene &scene, ScriptRun &run, Candidate &cand, ChoreoUi &choreo, const WbSnap &to) {
+    bool hadSeq = choreo.has;
+    wb_put(cand, choreo, to);
+    cams_choreo_refresh(view, scene, run, cand, choreo); /* with a sequence: its cameras again, B rebuilt */
+    if (hadSeq && !choreo.has) cams_rebuild_b(view, scene, run, cand, choreo); /* the sequence is gone: B was showing it, now it is the candidate */
+    cams_cand_edited(view, scene, run, cand, choreo);
+}

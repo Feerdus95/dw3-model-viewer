@@ -22,10 +22,15 @@
         }
         b_source();
         auto tab_camera = [&]() {
-            auto pick = cand_pick;
+            auto pick = [&](int fi, int ci) {
+                wb_begin();
+                cand_pick(fi, ci);
+                wb_end();
+            };
             if (!cand_ensure(f)) return hint("This fighter is not in the fighters' list.");
             hint("A and B are under the view (key B): B replaces the camera the script asks for with the candidate, at the same moments.");
-            ImGui::Checkbox("Also at the cuts the player skips", &cand.every);
+            bool every = cand.every;
+            if (ImGui::Checkbox("Also at the cuts the player skips", &every)) wb_begin(), cand.every = every, wb_end();
             tip("The script's explicit cameras and the other side's shots: the player doesn't move the view for them, the candidate does");
             const Fighter &donor = g_game.fighters[cand.fighter];
             /* origin (where a fighter comes from) is not the context (the data set loaded): shown only with a mod's context loaded; the Library's filter row sets it */
@@ -52,10 +57,12 @@
             }
             /* the native values, as the game stores them (battle space) */
             int pos[3] = {cand.c.pos[0], cand.c.pos[1], cand.c.pos[2]}, ref[3] = {cand.c.ref[0], cand.c.ref[1], cand.c.ref[2]}, proj = cand.c.proj;
+            WbSnap wbBefore = wb_now();
             bool ch = ImGui::DragInt3("Eye", pos, 4);
             ch |= ImGui::DragInt3("Target", ref, 4);
             ch |= ImGui::DragInt("Projection", &proj, 1, 1, 32767);
             if (ch) {
+                wb_widget(wbBefore);
                 for (int k = 0; k < 3; k++) cand.c.pos[k] = (int16_t)pos[k], cand.c.ref[k] = (int16_t)ref[k];
                 cand.c.proj = (int16_t)proj;
                 cand_edited();
@@ -67,7 +74,9 @@
                 GameCamera fitted;
                 double k;
                 if (fit_camera(donor, cand.c, f, fitted, k)) {
+                    wb_begin();
                     cand.before = cand.c, cand.c = fitted, cand.fitK = k;
+                    wb_end();
                     cand_edited();
                     note(NOTE_INFO, "Fitted: the donor's framing, scaled by " + std::to_string(k).substr(0, 5) + " to this model. Check it in the script.");
                 } else {
@@ -78,8 +87,10 @@
             if (cand.fitK > 0) {
                 ImGui::SameLine();
                 if (button("Undo the fit")) {
+                    wb_begin();
                     if (cand.before.proj) cand.c = cand.before;
                     cand.fitK = 0;
+                    wb_end();
                     cand_edited();
                 }
                 ImGui::TextColored(C_WARN, "Fitted (x%.2f): a proposal, not checked", cand.fitK);
@@ -151,9 +162,11 @@
                 tip("Scales the donor's cameras to this model as one sequence (the same similarity as the candidate's Fit); rotation, roll and projection are carried as they are");
                 ImGui::BeginDisabled(choreo.donorScript < 0 || choreo.targetScript < 0);
                 if (button(IC_PLAY "  Build and play", 1)) {
+                    wb_begin();
                     choreo.app = app_new(dn, choreo.donorScript, f, choreo.targetScript, choreo.fit);
                     choreo.has = choreo.on = true;
                     choreo.active.clear();
+                    wb_end();
                     choreo_refresh();
                     run_script(choreo.targetScript);
                     set_ab(true);
@@ -166,6 +179,7 @@
                 heading("The sequence");
                 for (const std::string &w : app.warn) ImGui::TextColored(C_WARN, "%s", w.c_str());
                 bool changed = false;
+                WbSnap wbBefore = wb_now();
                 bool fitted = app.fitK > 0;
                 if (ImGui::Checkbox("Fitted to this model", &fitted)) {
                     const Fighter *d = fighter_by_id(app.donor, false);
@@ -229,7 +243,7 @@
                     ImGui::PopID();
                 }
                 for (const std::string &n : choreo.notes) hint("%s", n.c_str());
-                if (changed) choreo_refresh();
+                if (changed) wb_widget(wbBefore), choreo_refresh();
 
             }
         };

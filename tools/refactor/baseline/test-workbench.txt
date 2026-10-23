@@ -33,5 +33,14 @@ ok    and does while there is one
 ok    put back is what was taken, both parts
 ok    A/B showing, the script's last camera and script are not touched
 ok    without a sequence B cannot be showing one
+ok    a partner with cameras to test with
+ok    (setup) an edit of the candidate moved B
+ok    undoing an edit puts B back on the candidate as it was
+ok    and the script, its waits and A are where they were
+ok    redo follows it the same way
+ok    a fade in progress goes on, towards the restored camera
+ok    undoing a sequence away makes B the candidate again
+ok    and redoing it brings the sequence back, the script untouched
+ok    with no script and B showing, the view takes the restored candidate
 ok    clear forgets the history and the clean points
 all hold

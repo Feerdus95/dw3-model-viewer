@@ -103,7 +103,9 @@
                 for (int k = 0; k < (int)g_game.fighters.size(); k++)
                     if (&g_game.fighters[k] == fighter_by_id(p.donor, p.donorEnemy, false)) di = k;
                 if (di < 0) return;
+                wb_begin();
                 cand.fighter = di, cand.cam = p.donorIdx, cand.c = p.c, cand.every = p.every, cand.fitK = p.fitK, cand.on = true; /* the snapshot, not the donor's */
+                wb_end();
                 form.load(p);
                 pre.active = p.id();
                 run_script(p.scriptIdx);
@@ -180,9 +182,11 @@
                 return t;
             },
             [&](Application &a) {
+                wb_begin();
                 choreo.app = a;
                 choreo.has = choreo.on = true;
                 choreo.active = a.id();
+                wb_end();
                 form.load(a);
                 choreo_refresh();
                 run_script(a.scriptIdx);

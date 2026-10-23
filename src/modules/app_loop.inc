@@ -608,6 +608,7 @@
         if (chord(ImGuiMod_Ctrl | ImGuiKey_D)) do_duplicate();
         if (chord(ImGuiMod_Ctrl | ImGuiKey_S)) do_save();
         if (chord(ImGuiMod_Ctrl | ImGuiKey_O)) pick_bin();
+        wb_settle();
         if (chord(ImGuiMod_Ctrl | ImGuiKey_B)) showBrowser = !showBrowser;
         if (chord(ImGuiMod_Ctrl | ImGuiKey_I)) showInspector = !showInspector;
         if (chord(ImGuiKey_Delete)) do_delete();
