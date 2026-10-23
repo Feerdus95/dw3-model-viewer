@@ -448,12 +448,17 @@ void Model::evaluate() {
 }
 
 /* The second half of FIGHTSTG_stepMotion: on by the frames gone by */
-void Model::advance(int ticks) {
+void Model::advance(int ticks, bool once) {
     if (motionDone || keyframeCount <= 0) return;
     keyframe += ticks;
     if (keyframe >= keyframeCount) keyframe = keyframeCount - 1;
     switch (keyframes[keyframe]) {
     case 0x8000:
+        if (once && blendTargets[keyframe] < keyframe) {
+            keyframe--;
+            motionDone = true;
+            break;
+        }
         keyframe = blendTargets[keyframe];
         if (keyframe >= keyframeCount) keyframe = keyframeCount - 1;
         break;

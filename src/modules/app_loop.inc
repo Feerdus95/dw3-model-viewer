@@ -35,7 +35,7 @@
             view.ticks -= n;
             bool faced = false;
             for (int i = 0; i < std::min(n, 8); i++) {
-                m.advance(1);
+                m.advance(1, !view.loop && !run.on); /* Loop off: one pass, also for a motion that loops inside its keys */
                 if (m.motionDone && view.loop && !run.on) m.setMotion(m.motion);
                 m.evaluate();
                 if (view.face) faced |= m.stepFace();
