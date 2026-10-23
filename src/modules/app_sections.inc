@@ -2846,7 +2846,8 @@
         std::vector<Preset> list;
         char name[64] = "", notes[256] = "";
         int status = 0;
-        std::string ctx; /* the list shows only this context's presets; empty all */
+        std::string ctx;    /* the list shows only this context's presets; empty all */
+        std::string origin; /* only the fighters of this origin (donors and, by the preset's fighter, presets); empty all */
         struct In {
             Preset p;
             bool dup, take;
@@ -3097,12 +3098,26 @@
             tip("The script's explicit cameras and the other side's shots: the player doesn't move the view for them, the candidate does");
             const Fighter &donor = g_game.fighters[cand.fighter];
             ImGui::SetNextItemWidth(-1);
-            if (ImGui::BeginCombo("##donor", (donor.name + " (fighter " + std::to_string(donor.id) + ")").c_str())) {
+            /* origin (where a fighter comes from) is not the context (the data set loaded): shown only with a mod's context loaded */
+            const bool modded = g_context != "base_game";
+            auto origin_tag = [&](const Fighter &d) { return modded ? std::string(", origin: ") + fighter_origin(d.id) : std::string(); };
+            if (modded) {
+                ImGui::SetNextItemWidth(-1);
+                if (ImGui::BeginCombo("##oflt", pre.origin.empty() ? "Origin: all" : ("Origin: " + pre.origin).c_str())) {
+                    if (ImGui::Selectable("Origin: all", pre.origin.empty())) pre.origin.clear();
+                    for (const char *o : {"base_game", "modified_base", "mod", "unknown"})
+                        if (ImGui::Selectable(o, pre.origin == o)) pre.origin = o;
+                    ImGui::EndCombo();
+                }
+                tip("Where a fighter comes from, as this context's compendium dump says (needs --dump-compendium --context %s --base DIR); unknown without it", g_context.c_str());
+            }
+            if (ImGui::BeginCombo("##donor", (donor.name + " (fighter " + std::to_string(donor.id) + origin_tag(donor) + ")").c_str())) {
                 for (int i = 0; i < (int)g_game.fighters.size(); i++) {
                     const Fighter &d = g_game.fighters[i];
                     if (d.enemy != f.enemy || d.cameras.empty()) continue;
+                    if (modded && !pre.origin.empty() && pre.origin != fighter_origin(d.id) && i != cand.fighter) continue;
                     ImGui::PushID(i);
-                    if (ImGui::Selectable((d.name + " (fighter " + std::to_string(d.id) + ")").c_str(), i == cand.fighter)) pick(i, cand.cam);
+                    if (ImGui::Selectable((d.name + " (fighter " + std::to_string(d.id) + origin_tag(d) + ")").c_str(), i == cand.fighter)) pick(i, cand.cam);
                     ImGui::PopID();
                 }
                 ImGui::EndCombo();
@@ -3217,11 +3232,12 @@
             for (int i = 0; i < (int)pre.list.size(); i++) {
                 Preset &p = pre.list[i];
                 if (p.fighter != f.id || (!pre.ctx.empty() && p.context != pre.ctx)) continue;
+                if (modded && !pre.origin.empty() && pre.origin != fighter_origin(p.fighter)) continue;
                 mine++;
                 ImGui::PushID(i);
                 char l[256];
                 snprintf(l, sizeof l, "%s%s  [%s]  script %d, %s%s%s%s###p", p.warn.empty() ? "" : IC_WARN " ", p.name.empty() ? "(no name)" : p.name.c_str(), p.status.c_str(), p.scriptIdx,
-                         p.donor_ref().c_str() + 4, p.every ? ", cuts" : "", p.context == "base_game" ? "" : ", ", p.context == "base_game" ? "" : p.context.c_str());
+                         p.donor_ref().c_str() + 4, p.every ? ", cuts" : "", p.context == "base_game" ? "" : ", context ", p.context == "base_game" ? "" : p.context.c_str());
                 if (ImGui::Selectable(l, pre.active == p.id()) && p.warn.empty()) {
                     int di = -1;
                     for (int k = 0; k < (int)g_game.fighters.size(); k++)

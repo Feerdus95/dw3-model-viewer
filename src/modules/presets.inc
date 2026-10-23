@@ -31,6 +31,32 @@ static const char *const PRESET_STATUS[3] = {"candidate", "approved", "rejected"
 
 static std::filesystem::path preset_path() { return std::filesystem::path(g_data).parent_path() / "compendium" / "presets.json"; }
 
+/* Where a fighter comes from (base_game, modified_base, mod), as this context's compendium dump says (compendium/<context>/compendium.json,
+   made with --dump-compendium --context C --base DIR). Nothing is inferred: with no dump, a dump of another context or no entry for the
+   fighter, it is "unknown". The disc is not read again. */
+static std::string preset_text(const std::filesystem::path &path);
+static const char *fighter_origin(int id) {
+    static std::map<int, std::string> origin;
+    static bool loaded = false;
+    if (!loaded) {
+        loaded = true;
+        std::filesystem::path p = std::filesystem::path(g_data).parent_path() / "compendium";
+        if (g_context != "base_game") p /= g_context;
+        std::string text = preset_text(p / "compendium.json");
+        const char *s = text.c_str();
+        Json root;
+        const Json *ctx = nullptr;
+        if (!text.empty() && json_parse(s, root) && root.type == '{' && (ctx = root.get("context")) && ctx->get("id") && ctx->get("id")->str == g_context)
+            if (const Json *fs = root.get("fighters"))
+                for (const auto &it : fs->items) {
+                    const Json *i = it.second.get("native_id"), *o = it.second.get("origin");
+                    if (i && o && i->type == 'n' && o->type == 's') origin[(int)i->num] = o->str;
+                }
+    }
+    auto it = origin.find(id);
+    return it == origin.end() ? "unknown" : it->second.c_str();
+}
+
 static const Fighter *fighter_by_id(int id, bool enemy, bool anySide = true) {
     for (const Fighter &f : g_game.fighters)
         if (f.id == id && (anySide || f.enemy == enemy)) return &f;
@@ -293,6 +319,12 @@ static int preset_selftest() {
         ok(same(v, a1), "A with no camera asked for yet leaves the view as it is");
         ok(camsBefore.size() == t->cameras.size() && !memcmp(camsBefore.data(), t->cameras.data(), camsBefore.size() * sizeof(GameCamera)) && preset_json({p}) == presetsBefore,
            "switching changes neither the fighter's cameras nor the preset");
+    }
+    {
+        std::string keep = g_context;
+        g_context = "no.such.mod"; /* no dump for it: nothing is inferred */
+        ok(!strcmp(fighter_origin(t->id), "unknown") && !strcmp(fighter_origin(-5), "unknown"), "without a dump of the context an origin is unknown");
+        g_context = keep;
     }
     std::filesystem::path dir = std::filesystem::temp_directory_path() / "dw3mv_preset_test", file = dir / "presets.json";
     std::filesystem::remove_all(dir);
