@@ -1,0 +1,23 @@
+exit 0
+ok    A takes the fighter's own camera, and it is the one B is compared with
+ok    B takes the candidate, as a cut when the command has no time
+ok    an explicit shot fades A over its time, and B stays where it is
+ok    a rotation or a roll is said once
+ok    with "also at the cuts" B fades to the candidate there too (and is not said again)
+ok    the fade of 10 frames ends in 11 ticks, on the words
+ok    the other side's shot leaves A as it was
+ok    the view shows A or B as selected
+ok    and back to A is the same view
+ok    B rebuilt is the last target up to the line the script is at, as a cut
+ok    at the start B is the candidate
+ok    B follows an edit of the candidate
+ok    a fade in progress goes on, to the edit
+ok    without a candidate there is no B
+ok    with one, B is on
+ok    an explicit effective shot gives its words and its own time
+ok    a shot of the default view is the partner's camera 2
+ok    a shot of a fighter's camera is that one
+ok    a command past the application's shots leaves B as it is
+ok    B starts at the battle's default view with an application
+ok    and at the candidate without
+all hold

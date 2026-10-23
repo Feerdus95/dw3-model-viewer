@@ -179,3 +179,119 @@ static void cams_command(View &view, const Scene &scene, ScriptRun &run, Candida
     if (cams_b_target(cand, choreo, f, ln, ord, bw, bt)) run.b.fade(bw, bt, -1);
     cams_show(view, scene, run, cand);
 }
+
+/* --test-cameras: A and B on a synthetic script, on a real partner's cameras. Headless: no window, no GL. */
+static int cams_selftest() {
+    int bad = 0;
+    auto ok = [&](bool c, const char *what) { printf("%s  %s\n", c ? "ok  " : "FAIL", what), bad += !c; };
+    const Fighter *f = nullptr;
+    for (const Fighter &x : g_game.fighters)
+        if (!f && !x.enemy && x.cameras.size() >= 3) f = &x;
+    if (!f) return printf("no partner with cameras to test with\n"), 1;
+    Scene scene;
+    scene.model = std::make_unique<Model>();
+    scene.fighters = {f};
+    auto line = [](int camera, int mode, int time) {
+        ScriptLine l;
+        l.camera = camera, l.camMode = mode, l.camTime = time;
+        return l;
+    };
+    ScriptLine raw = line(-1, 2, 10);
+    int rawW[14] = {-4000, 300, -9000, 0, 0, 100, 500, 2000, 6000, 0, -182, 0, 7, 280};
+    memcpy(raw.camRaw, rawW, sizeof rawW);
+    scene.model->scripts = {{line(0, 1, 0), raw, line(1, 1, 0)}};
+    const std::vector<ScriptLine> &sc = scene.model->scripts[0];
+    int w0[14], w1[14], wc[14];
+    cam_words(f->cameras[0], w0), cam_words(f->cameras[1], w1);
+
+    View view;
+    ScriptRun run;
+    Candidate cand;
+    ChoreoUi choreo;
+    cand.c = f->cameras[2], cam_words(cand.c, wc);
+    cand.fighter = (int)(f - &g_game.fighters[0]);
+    run.on = true;
+    int notes = 0;
+    auto noted = [&] { notes++; };
+
+    /* the fighter's own shot: A takes the camera, B the candidate */
+    cams_command(view, scene, run, cand, choreo, *f, sc[0], noted);
+    ok(!memcmp(run.a.cur, w0, sizeof w0) && run.a.idx == 0 && cand.orig == 0, "A takes the fighter's own camera, and it is the one B is compared with");
+    ok(!memcmp(run.b.cur, wc, sizeof wc) && run.b.t == 0x1000, "B takes the candidate, as a cut when the command has no time");
+    /* an explicit shot: A fades; B stays unless "also at the cuts" */
+    cams_command(view, scene, run, cand, choreo, *f, sc[1], noted);
+    ok(run.a.t == 0 && !memcmp(run.a.to, rawW, sizeof rawW) && run.b.t == 0x1000, "an explicit shot fades A over its time, and B stays where it is");
+    ok(notes == 1, "a rotation or a roll is said once");
+    run.a.t = 0x1000, run.camOrd = 1;
+    cand.every = true;
+    cams_command(view, scene, run, cand, choreo, *f, sc[1], noted);
+    ok(run.b.t == 0 && !memcmp(run.b.to, wc, sizeof wc) && notes == 1, "with \"also at the cuts\" B fades to the candidate there too (and is not said again)");
+    int ticks = 0;
+    while (run.a.t != 0x1000 && ticks < 100) run.a.tick(), run.b.tick(), ticks++;
+    ok(ticks == 11 && !memcmp(run.a.cur, rawW, sizeof rawW) && !memcmp(run.b.cur, wc, sizeof wc), "the fade of 10 frames ends in 11 ticks, on the words");
+    cand.every = false;
+
+    /* the other side's shot: nothing for A */
+    int before[14];
+    memcpy(before, run.a.cur, sizeof before);
+    ScriptLine other = line(100, 1, 0);
+    cams_command(view, scene, run, cand, choreo, *f, other, noted);
+    ok(!memcmp(run.a.cur, before, sizeof before), "the other side's shot leaves A as it was");
+
+    /* the view follows the selected track */
+    run.a.cut(w0, 0), run.b.cut(wc, -1);
+    cand.on = false;
+    cams_show(view, scene, run, cand);
+    Camera atA = view.cam;
+    cand.on = true;
+    cams_show(view, scene, run, cand);
+    ok(memcmp(&atA, &view.cam, sizeof atA) != 0 && run.camSet, "the view shows A or B as selected");
+    cand.on = false;
+    cams_show(view, scene, run, cand);
+    ok(!memcmp(&atA, &view.cam, sizeof atA), "and back to A is the same view");
+
+    /* B rebuilt at the point the script has reached */
+    cand.every = true, cand.on = false;
+    run.pc = 3, run.script = 0, run.a.cut(w0, 0), run.b.cut(w0, -1);
+    cams_rebuild_b(view, scene, run, cand, choreo);
+    ok(!memcmp(run.b.cur, wc, sizeof wc) && run.b.t == 0x1000, "B rebuilt is the last target up to the line the script is at, as a cut");
+    cand.every = false;
+    run.pc = 0, cams_rebuild_b(view, scene, run, cand, choreo);
+    ok(!memcmp(run.b.cur, wc, sizeof wc), "at the start B is the candidate");
+
+    /* an edit of the candidate: B follows, a fade in progress ends where the edit is */
+    cand.c = f->cameras[1], cam_words(cand.c, wc);
+    cams_cand_edited(view, scene, run, cand, choreo);
+    ok(!memcmp(run.b.cur, wc, sizeof wc), "B follows an edit of the candidate");
+    run.b.cut(w0, -1), run.b.fade(w1, 20, -1);
+    cams_cand_edited(view, scene, run, cand, choreo);
+    ok(run.b.t == 0 && !memcmp(run.b.to, wc, sizeof wc), "a fade in progress goes on, to the edit");
+
+    /* A/B: the candidate must be of the model's side */
+    run.on = false, cand.on = false;
+    cand.fighter = -1;
+    cams_set_ab(view, scene, run, cand, choreo, true);
+    ok(!cand.on, "without a candidate there is no B");
+    cand.fighter = (int)(f - &g_game.fighters[0]);
+    cams_set_ab(view, scene, run, cand, choreo, true);
+    ok(cand.on, "with one, B is on");
+
+    /* the application as B */
+    choreo.on = choreo.has = true;
+    choreo.eff.assign(3, EffShot());
+    choreo.eff[0].kind = 2, choreo.eff[0].time = 7, memcpy(choreo.eff[0].w, rawW, sizeof rawW);
+    choreo.eff[1].kind = 0, choreo.eff[1].time = 3;
+    choreo.eff[2].kind = 1, choreo.eff[2].camId = 1, choreo.eff[2].time = 5;
+    int w[14], t;
+    ok(cams_b_target(cand, choreo, *f, sc[0], 0, w, t) && t == 7 && !memcmp(w, rawW, sizeof rawW), "an explicit effective shot gives its words and its own time");
+    ok(cams_b_target(cand, choreo, *f, sc[0], 1, w, t) && t == 3 && !memcmp(w, w1, sizeof w1), "a shot of the default view is the partner's camera 2");
+    ok(cams_b_target(cand, choreo, *f, sc[0], 2, w, t) && t == 5 && !memcmp(w, ([&] { int x[14]; cam_words(f->cameras[8], x); return std::vector<int>(x, x + 14); }()).data(), sizeof w), "a shot of a fighter's camera is that one");
+    ok(!cams_b_target(cand, choreo, *f, sc[0], 3, w, t), "a command past the application's shots leaves B as it is");
+    cams_b_start(cand, choreo, *f, w);
+    ok(!memcmp(w, w1, sizeof w1), "B starts at the battle's default view with an application");
+    choreo.on = false;
+    cams_b_start(cand, choreo, *f, w);
+    ok(!memcmp(w, wc, sizeof wc), "and at the candidate without");
+    printf("%s\n", bad ? "FAILED" : "all hold");
+    return bad != 0;
+}

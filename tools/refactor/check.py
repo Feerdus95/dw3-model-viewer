@@ -7,7 +7,7 @@ What is compared:
   build        build.py's result, and the warnings a full compile of main.cpp gives (messages, not their places)
   preprocessed main.cpp preprocessed with build.py's own flags (-E -P) and the macros it defines (-dM): both as streams of tokens,
                so only a difference in what the compiler is given shows, not in how the lines are cut
-  tests        the exact output of --test-presets and --test-templates
+  tests        the exact output of --test-presets, --test-templates and --test-cameras (the last one from R2 on)
   dump         sha256 of compendium.json and audit.md from --dump-compendium (given --exe)
   cli          the exact output of --apply-template and --check-framing for WarGreymon script 11 -> MetalGarurumon script 11
 Exit status 0 when everything matches. The window is never opened: every one of these flags returns before SDL_Init.
@@ -75,7 +75,7 @@ def collect(sles):
     out["preprocessed.txt"] = f"exit {rc}/{rc2}\ntokens {len(tk.split())}\nsha256 {sha(tk)}\nmacros {len(macros.splitlines())}\nmacros sha256 {sha(chr(10).join(sorted(macros.splitlines())))}\n"
     out["_preprocessed_full.txt"] = tk  # kept aside by the caller, not committed
 
-    for name, flag in (("test-presets.txt", "--test-presets"), ("test-templates.txt", "--test-templates")):
+    for name, flag in (("test-presets.txt", "--test-presets"), ("test-templates.txt", "--test-templates"), ("test-cameras.txt", "--test-cameras")):
         rc, text = run([EXE, flag])
         out[name] = f"exit {rc}\n{text}"
     rc, text = run([EXE, "--apply-template", *PAIR])
@@ -118,6 +118,7 @@ def main():
         print(("same  " if same else "DIFF  ") + name)
         if not same:
             bad += 1
+            (Path(tempfile.gettempdir()) / f"dw3mv_check_fail_{name}").write_text(text, encoding="utf-8")  # what was captured, for looking into it
             import difflib
             for l in list(difflib.unified_diff((want or "").splitlines(), text.splitlines(), "baseline", "now", lineterm=""))[:40]:
                 print("   " + l)
