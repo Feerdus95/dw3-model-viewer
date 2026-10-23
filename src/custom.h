@@ -13,6 +13,21 @@
 #include <string>
 #include <vector>
 
+/* A small JSON reader: numbers, strings, arrays and objects (the presets' too) */
+struct Json {
+    char type = 0; /* 'n', 's', '[', '{', 0 null */
+    double num = 0;
+    std::string str;
+    std::vector<std::pair<std::string, Json>> items; /* an array's keys are empty */
+
+    const Json *get(const char *key) const {
+        for (const auto &it : items)
+            if (it.first == key) return &it.second;
+        return nullptr;
+    }
+};
+bool json_parse(const char *&p, Json &j);
+
 struct CustomFrame {
     std::string file;
     int ticks = 2;

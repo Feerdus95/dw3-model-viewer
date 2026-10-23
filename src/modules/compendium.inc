@@ -139,6 +139,7 @@ static int dump_compendium(const std::string &outArg, const std::string &exe) {
         }
         archiveUsers[{f->effectsFid, f->effectsEntry}]++;
         std::vector<std::vector<ScriptLine>> sc = read_scripts(a.entry(f->effectsEntry), a.entry_size(f->effectsEntry));
+        if (sc.empty()) problem(who + " (" + f->name + "): effects entry " + std::to_string(f->effectsFid) + "." + std::to_string(f->effectsEntry) + " has no script table (its first offset is 0), so it has no scripts");
         for (size_t i = 0; i < sc.size(); i++) {
             Scr &s = scripts[{f->effectsFid, f->effectsEntry, (int)i}];
             if (s.lines.empty()) {

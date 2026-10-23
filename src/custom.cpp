@@ -11,26 +11,23 @@
 
 /* --- a small JSON reader: numbers, strings, arrays and objects --- */
 
-struct Json {
-    char type = 0; /* 'n', 's', '[', '{', 0 null */
-    double num = 0;
-    std::string str;
-    std::vector<std::pair<std::string, Json>> items; /* an array's keys are empty */
-
-    const Json *get(const char *key) const {
-        for (const auto &it : items)
-            if (it.first == key) return &it.second;
-        return nullptr;
-    }
-};
-
 static void ws(const char *&p) {
     while (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t') p++;
 }
 
 static bool parse_string(const char *&p, std::string &out) {
     for (p++; *p && *p != '"'; p++) {
-        if (*p == '\\' && p[1]) p++;
+        if (*p == '\\' && p[1]) {
+            p++;
+            if (*p == 'n') { out += '\n'; continue; }
+            if (*p == 't') { out += '\t'; continue; }
+            if (*p == 'r') { out += '\r'; continue; }
+            if (*p == 'u' && p[1] && p[2] && p[3] && p[4]) { /* only the ASCII this tool's writers make */
+                out += (char)strtol(std::string(p + 1, 4).c_str(), nullptr, 16);
+                p += 4;
+                continue;
+            }
+        }
         out += *p;
     }
     if (*p != '"') return false;
@@ -38,7 +35,7 @@ static bool parse_string(const char *&p, std::string &out) {
     return true;
 }
 
-static bool parse(const char *&p, Json &j) {
+bool json_parse(const char *&p, Json &j) {
     ws(p);
     if (*p == '[' || *p == '{') {
         char close = *p == '[' ? ']' : '}';
@@ -53,7 +50,7 @@ static bool parse(const char *&p, Json &j) {
                 if (*p++ != ':') return false;
             }
             j.items.emplace_back(key, Json());
-            if (!parse(p, j.items.back().second)) return false;
+            if (!json_parse(p, j.items.back().second)) return false;
             ws(p);
             if (*p == ',') p++;
             else if (*p != close) return false;
@@ -106,7 +103,7 @@ bool CustomEffect::load(const std::string &d) {
         std::string text((std::istreambuf_iterator<char>(f)), {});
         const char *p = text.c_str();
         Json root;
-        if (!parse(p, root) || root.type != '{') {
+        if (!json_parse(p, root) || root.type != '{') {
             error = dir + "/effect.json isn't JSON";
         } else {
             hasJson = true;
@@ -236,7 +233,7 @@ bool props_load(const std::string &dir, std::vector<StageProp> &props, PropsMeta
     std::string text((std::istreambuf_iterator<char>(f)), {});
     const char *p = text.c_str();
     Json root;
-    if (!parse(p, root) || root.type != '{') return false;
+    if (!json_parse(p, root) || root.type != '{') return false;
     meta.wind = jnum(root, "wind", 1);
     meta.leaves = (int)jnum(root, "leaves", -1);
     if (const Json *fg = root.get("fog"); fg && fg->type == '{') {

@@ -2834,7 +2834,22 @@
         int fighter = -1, cam = 0;
         GameCamera c = {};
         int orig = -1;
+        int script = -1;             /* the script last played, of OF: what a preset is made for */
+        const Fighter *of = nullptr;
     } cand;
+    /* the presets (presets.json), read when first wanted */
+    struct PresetUi {
+        bool loaded = false, blocked = false;
+        std::string error, msg, active, inFile;
+        std::vector<Preset> list;
+        char name[64] = "", notes[256] = "";
+        int status = 0;
+        struct In {
+            Preset p;
+            bool dup, take;
+        };
+        std::vector<In> in;
+    } pre;
     /* the technique whose look a script's own (9999) sprite effect takes: TechData.scriptEffect. The Fight
        command is no technique: its effect is 2 */
     int ownTech = 0;
@@ -2937,6 +2952,7 @@
     auto run_script = [&](int i) {
         if (!scene.model || i < 0 || i >= (int)scene.model->scripts.size()) return;
         run = ScriptRun{true, i, 0, 0, false};
+        cand.script = i, cand.of = scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter];
         shots.clear();
         shotOwnFx.clear(), ownIds = own_effects(ownRoot); /* the mod's files may have changed since */
         free_fx_models();
@@ -3100,6 +3116,175 @@
             if (button(IC_CAMERA "  Look through it")) apply_game_camera(view, f, cand.c, -1);
             ImGui::SameLine();
             if (button("Reset to the donor's")) pick(cand.fighter, cand.cam);
+
+            /* --- presets: the candidate kept for this fighter, this script and this donor camera --- */
+            heading("Presets");
+            if (!pre.loaded) {
+                pre.loaded = true;
+                std::string text = preset_text(preset_path());
+                std::vector<std::string> skipped;
+                if (!text.empty() && !preset_parse(text, pre.list, pre.error, skipped)) pre.blocked = true, pre.list.clear(), pre.error = "presets.json: " + pre.error + ". It is left as it is; nothing is saved over it.";
+                for (const std::string &s : skipped) pre.msg += s + "\n";
+            }
+            if (!pre.error.empty()) ImGui::TextColored(C_WARN, "%s", pre.error.c_str());
+            if (!pre.msg.empty()) ImGui::TextWrapped("%s", pre.msg.c_str());
+            auto persist = [&]() { preset_persist(pre.list, pre.error); }; /* (the modals' callbacks outlive this frame: they call preset_persist on PRE, not this) */
+            auto make = [&]() {
+                Preset p;
+                p.name = pre.name, p.notes = pre.notes, p.status = PRESET_STATUS[std::clamp(pre.status, 0, 2)];
+                p.fighter = f.id;
+                p.scriptFid = f.effectsFid, p.scriptEntry = f.effectsEntry, p.scriptIdx = cand.script;
+                p.donor = donor.id, p.donorEnemy = donor.enemy, p.donorIdx = cand.cam;
+                p.c = cand.c, p.every = cand.every;
+                preset_check(p);
+                return p;
+            };
+            bool canSave = !pre.blocked && cand.script >= 0 && cand.of == &f;
+            ImGui::SetNextItemWidth(-1);
+            ImGui::InputTextWithHint("##pname", "Name", pre.name, sizeof pre.name);
+            ImGui::SetNextItemWidth(-1);
+            ImGui::InputTextWithHint("##pnotes", "Notes", pre.notes, sizeof pre.notes);
+            ImGui::SetNextItemWidth(-1);
+            ImGui::Combo("##pstatus", &pre.status, "Candidate\0Approved\0Rejected\0");
+            tip("The status is of this combination only: this fighter, this script and this donor camera");
+            ImGui::BeginDisabled(!canSave);
+            if (button(IC_SAVE "  Save as preset", 1)) {
+                Preset p = make();
+                auto it = std::find_if(pre.list.begin(), pre.list.end(), [&](const Preset &o) { return o.id() == p.id(); });
+                auto put = [&, p, idx = (int)(it - pre.list.begin()), has = it != pre.list.end()]() {
+                    if (has && idx < (int)pre.list.size()) pre.list[idx] = p;
+                    else pre.list.push_back(p);
+                    pre.active = p.id();
+                    preset_persist(pre.list, pre.error);
+                };
+                if (it == pre.list.end()) put();
+                else {
+                    ask.title = "Replace the preset", ask.text = "\"" + it->name + "\" is already saved for this fighter, script and donor camera. Replace it with the one on screen?";
+                    ask.ok = "Replace", ask.danger = true, ask.open = true, ask.then = put;
+                }
+            }
+            ImGui::EndDisabled();
+            if (!canSave && !pre.blocked) hint("Play one of this fighter's scripts first: a preset is made for the script it was seen with.");
+            if (canSave) hint("For script %d, donor %s", cand.script, comp::cam_id(donor.id, donor.enemy, cand.cam).c_str());
+
+            int mine = 0;
+            for (int i = 0; i < (int)pre.list.size(); i++) {
+                Preset &p = pre.list[i];
+                if (p.fighter != f.id) continue;
+                mine++;
+                ImGui::PushID(i);
+                char l[256];
+                snprintf(l, sizeof l, "%s%s  [%s]  script %d, %s%s###p", p.warn.empty() ? "" : IC_WARN " ", p.name.empty() ? "(no name)" : p.name.c_str(), p.status.c_str(), p.scriptIdx,
+                         p.donor_ref().c_str() + 4, p.every ? ", cuts" : "");
+                if (ImGui::Selectable(l, pre.active == p.id()) && p.warn.empty()) {
+                    int di = -1;
+                    for (int k = 0; k < (int)g_game.fighters.size(); k++)
+                        if (&g_game.fighters[k] == fighter_by_id(p.donor, p.donorEnemy, false)) di = k;
+                    if (di >= 0) {
+                        cand.fighter = di, cand.cam = p.donorIdx, cand.c = p.c, cand.every = p.every, cand.on = true; /* the snapshot, not the donor's */
+                        snprintf(pre.name, sizeof pre.name, "%s", p.name.c_str());
+                        snprintf(pre.notes, sizeof pre.notes, "%s", p.notes.c_str());
+                        pre.status = p.status == PRESET_STATUS[1] ? 1 : p.status == PRESET_STATUS[2] ? 2 : 0;
+                        pre.active = p.id();
+                        run_script(p.scriptIdx);
+                    }
+                }
+                if (!p.warn.empty()) {
+                    std::string t;
+                    for (const std::string &w : p.warn) t += w + "\n";
+                    tip("Can't be used here:\n%s", t.c_str());
+                } else {
+                    tip("Click to load it and play its script");
+                }
+                if (ImGui::BeginPopupContextItem()) {
+                    if (ImGui::MenuItem(IC_DELETE "  Delete the preset")) {
+                        std::string id = p.id();
+                        ask.title = "Delete the preset", ask.text = "Delete \"" + p.name + "\"? It can't be undone.", ask.ok = "Delete", ask.danger = true, ask.open = true;
+                        ask.then = [&, id]() {
+                            pre.list.erase(std::remove_if(pre.list.begin(), pre.list.end(), [&](const Preset &o) { return o.id() == id; }), pre.list.end());
+                            if (pre.active == id) pre.active.clear();
+                            preset_persist(pre.list, pre.error);
+                        };
+                    }
+                    ImGui::EndPopup();
+                }
+                ImGui::PopID();
+            }
+            if (!mine) hint("No preset for this fighter yet.");
+            else hint("Right-click a preset to delete it.");
+
+            if (button(IC_IMPORT "  Import...")) {
+                static const SDL_DialogFileFilter JSONF = {"Presets", "json"};
+                SDL_ShowOpenFileDialog(
+                    [](void *u, const char *const *list, int) {
+                        if (!list || !*list) return;
+                        Picked *p = (Picked *)u;
+                        std::lock_guard<std::mutex> lock(p->m);
+                        p->presetIn = *list;
+                    },
+                    &picked, win, &JSONF, 1, nullptr, false);
+            }
+            ImGui::SameLine();
+            if (button(IC_SAVE "  Export...")) {
+                static const SDL_DialogFileFilter JSONF = {"Presets", "json"};
+                SDL_ShowSaveFileDialog(
+                    [](void *u, const char *const *list, int) {
+                        if (!list || !*list) return;
+                        Picked *p = (Picked *)u;
+                        std::lock_guard<std::mutex> lock(p->m);
+                        p->presetOut = *list;
+                    },
+                    &picked, win, &JSONF, 1, "presets.json");
+            }
+            tip("Export writes every preset; import reads a file of presets and shows what it would add before it changes anything");
+            std::string inPath, outPath;
+            {
+                std::lock_guard<std::mutex> lock(picked.m);
+                inPath.swap(picked.presetIn), outPath.swap(picked.presetOut);
+            }
+            if (!outPath.empty()) {
+                std::string err;
+                pre.msg = preset_save(std::filesystem::u8path(outPath), pre.list, err) ? "Exported " + std::to_string(pre.list.size()) + " presets to " + outPath : err;
+            }
+            if (!inPath.empty()) {
+                std::vector<Preset> got;
+                std::vector<std::string> skipped;
+                std::string err;
+                pre.in.clear(), pre.msg.clear();
+                if (!preset_parse(preset_text(std::filesystem::u8path(inPath)), got, err, skipped)) pre.msg = "Not imported: " + err;
+                else {
+                    for (const Preset &g : got) {
+                        bool dup = std::any_of(pre.list.begin(), pre.list.end(), [&](const Preset &o) { return o.id() == g.id(); });
+                        pre.in.push_back({g, dup, !dup});
+                    }
+                    pre.inFile = inPath;
+                    for (const std::string &s : skipped) pre.msg += s + "\n";
+                    if (pre.in.empty()) pre.msg += "The file has no presets.";
+                }
+            }
+            if (!pre.in.empty()) {
+                ImGui::TextWrapped("Import from %s", pre.inFile.c_str());
+                for (int i = 0; i < (int)pre.in.size(); i++) {
+                    auto &e = pre.in[i];
+                    ImGui::PushID(1000 + i);
+                    std::string label = (e.p.name.empty() ? "(no name)" : e.p.name) + "  " + e.p.fighter_ref() + ", " + e.p.script_ref() + (e.dup ? "  - already yours: replace it" : "");
+                    ImGui::Checkbox(label.c_str(), &e.take);
+                    for (const std::string &w : e.p.warn) ImGui::TextColored(C_WARN, "  %s", w.c_str());
+                    ImGui::PopID();
+                }
+                if (button("Import the ticked", 1)) {
+                    for (auto &e : pre.in) {
+                        if (!e.take) continue;
+                        auto it = std::find_if(pre.list.begin(), pre.list.end(), [&](const Preset &o) { return o.id() == e.p.id(); });
+                        if (it != pre.list.end()) *it = e.p;
+                        else pre.list.push_back(e.p);
+                    }
+                    pre.in.clear();
+                    if (!pre.blocked) persist();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Cancel")) pre.in.clear();
+            }
         }
         if (run.on && button(IC_PAUSE "  Stop the script")) run.on = false, free_fx_models();
         ImGui::BeginChild("scripts");
