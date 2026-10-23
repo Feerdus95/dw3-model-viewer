@@ -96,6 +96,7 @@ static int dump_compendium(const std::string &outArg, const std::string &exe) {
         return 1;
     }
     std::vector<std::string> problems; /* anything unresolved, in the order it was met */
+    std::vector<std::string> noScripts; /* fighters whose effects entry has no script table (first offset 0): not an error in itself */
     auto problem = [&](const std::string &s) { problems.push_back(s); };
     if (!exe.empty()) read_techs({exe});
     else read_techs({g_data + "/../SLES_039.36"});
@@ -139,7 +140,7 @@ static int dump_compendium(const std::string &outArg, const std::string &exe) {
         }
         archiveUsers[{f->effectsFid, f->effectsEntry}]++;
         std::vector<std::vector<ScriptLine>> sc = read_scripts(a.entry(f->effectsEntry), a.entry_size(f->effectsEntry));
-        if (sc.empty()) problem(who + " (" + f->name + "): effects entry " + std::to_string(f->effectsFid) + "." + std::to_string(f->effectsEntry) + " has no script table (its first offset is 0), so it has no scripts");
+        if (sc.empty()) noScripts.push_back("fighter:" + std::to_string(f->id) + " (" + f->name + "), effects entry " + std::to_string(f->effectsFid) + "." + std::to_string(f->effectsEntry));
         for (size_t i = 0; i < sc.size(); i++) {
             Scr &s = scripts[{f->effectsFid, f->effectsEntry, (int)i}];
             if (s.lines.empty()) {
@@ -412,6 +413,7 @@ static int dump_compendium(const std::string &outArg, const std::string &exe) {
     kvp("commands.camera_shot_other_side", camCross);
     kvp("commands.unknown", unknownCmd);
     kvp("techniques.read", (long long)g_techs.size());
+    kvp("fighters.without_script_table", (long long)noScripts.size());
     kvp("problems", (long long)problems.size());
     md += "```\n\n## Reading these\n\n- A shot by id is the script asking for a fighter's camera: a partner's shots 1-4 are its cameras 8-11, an enemy's 1-3 its cameras 0-2. A shot of the other side (`camera_shot_other_side`) is the opposing fighter's camera in the real fight, and that fighter is not known here, so it is counted but not tied to any camera record.\n";
     md += "- An explicit camera carries its own eye, target and projection (words 0-5 and 13 are read; the other words are kept as the script has them).\n";
