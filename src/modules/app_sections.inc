@@ -23,8 +23,10 @@
 #include "ui/fighter_state.inc" /* Fighter: script roles and the state of the player, the workbench and the choreography */
 #include "ui/script_player.inc" /* Fighter: the script player */
 #include "ui/ab_controls.inc" /* A/B under the view */
-#include "ui/fighter_browser.inc" /* Fighter: the browser (its two big blocks are included in its body) */
+#include "ui/fighter_browser.inc" /* Fighter: the browser (the scripts and the player's options) */
 #include "ui/fighter_inspector.inc" /* Fighter: the inspector */
+#include "ui/cameras_library.inc" /* Cameras: the Library */
+#include "ui/cameras_workbench.inc" /* Cameras: the Workbench */
 #include "ui/effects.inc" /* Effects */
 #include "ui/textures.inc" /* Textures */
 #include "ui/dw2.inc" /* DW2 */

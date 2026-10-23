@@ -64,7 +64,7 @@
             }
             tip("frame %d%s%s", m->frame, m->blending ? " (blending)" : "", m->motionDone ? ", done" : "");
         }
-        if (!fxMode && section == FIGHTER && !scene.fighters.empty() && !m->dw2) ab_bar();
+        if (!fxMode && (section == FIGHTER || section == CAMERAS) && !scene.fighters.empty() && !m->dw2) ab_bar();
     };
     auto step = [&](int dir) {
         if (section == EFFECTS && fx.id >= 0) {

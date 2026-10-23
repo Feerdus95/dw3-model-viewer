@@ -65,7 +65,7 @@
             if (scene.fid >= 0) field("File number", "%d", scene.fid);
             heading("Look closer");
             float w = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2;
-            for (int s : {MODEL, MOTIONS, FIGHTER, TEXTURES}) {
+            for (int s : {MODEL, MOTIONS, FIGHTER, CAMERAS, TEXTURES}) {
                 if (s == MOTIONS || s == TEXTURES) ImGui::SameLine();
                 std::string l = std::string(SECTION_ICON[s]) + "  " + SECTION_NAME[s];
                 if (ImGui::Button(l.c_str(), ImVec2(w, 0))) section = s;

@@ -256,9 +256,9 @@
         float statusH = ImGui::GetFrameHeight() + 6 * dpi;
         float top = menuH + barH, bottom = ds.y - statusH;
         bool motionBar = scene.model && !view.stageView && !scene.model->motions.empty() &&
-                         (section == FILES || section == DW2 || section == MODEL || section == MOTIONS || section == FIGHTER);
+                         (section == FILES || section == DW2 || section == MODEL || section == MOTIONS || section == FIGHTER || section == CAMERAS);
         bool transportOn = (section == EFFECTS && fx.id >= 0) || motionBar;
-        bool abBar = motionBar && section == FIGHTER && !scene.fighters.empty() && !scene.model->dw2;
+        bool abBar = motionBar && (section == FIGHTER || section == CAMERAS) && !scene.fighters.empty() && !scene.model->dw2;
         float transH = transportOn ? ImGui::GetFrameHeight() * (abBar ? 2 : 1) + (abBar ? 16 : 12) * dpi : 0;
         if (browserW <= 0) browserW = ds.x * 0.21f;
         if (inspectorW <= 0) inspectorW = ds.x * 0.25f;
@@ -614,7 +614,7 @@
         if (chord(ImGuiKey_H)) hide_selected();
         if (chord(ImGuiMod_Alt | ImGuiKey_H)) show_all();
         if (chord(ImGuiKey_F)) frame_sel();
-        if (chord(ImGuiKey_B) && section == FIGHTER) set_ab(!cand.on);
+        if (chord(ImGuiKey_B) && (section == FIGHTER || section == CAMERAS)) set_ab(!cand.on);
         if (chord(ImGuiKey_Escape)) select_bone(-1), ownFrame = -1, pcatArm = -1, propSet.clear(), marquee = false;
         if (chord(ImGuiMod_Ctrl | ImGuiKey_A) && section == STAGES && stage_on() && !props.empty()) {
             std::set<int> all;
