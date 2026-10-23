@@ -170,32 +170,37 @@ static std::string preset_text(const std::filesystem::path &path) {
     return std::string((std::istreambuf_iterator<char>(f)), {});
 }
 
-/* Writes LIST over PATH only once what was written reads back as the same presets: a temp file beside it, then a rename */
-static bool preset_save(const std::filesystem::path &path, const std::vector<Preset> &list, std::string &err) {
+/* Writes TEXT over PATH only once what was written reads back (READS_BACK says so, or why not): a temp file beside it, then a rename;
+   the file as it was stays beside it as .bak, one step back for whatever this save changes or deletes */
+static bool save_atomic(const std::filesystem::path &path, const std::string &text, const std::function<bool(const std::string &, std::string &)> &readsBack, std::string &err) {
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
     std::filesystem::path tmp = path;
     tmp += ".tmp";
-    std::string text = preset_json(list);
     {
         std::ofstream f(tmp, std::ios::binary);
         f.write(text.data(), (std::streamsize)text.size());
         if (!f) return err = "can't write " + tmp.string(), false;
     }
-    std::string back = preset_text(tmp);
-    std::vector<Preset> check;
-    std::vector<std::string> skipped;
     std::string perr;
-    if (!preset_parse(back, check, perr, skipped) || check.size() != list.size() || !skipped.empty()) {
+    if (!readsBack(preset_text(tmp), perr)) {
         std::filesystem::remove(tmp, ec);
         return err = "what was written did not read back" + (perr.empty() ? "" : ": " + perr) + "; " + path.string() + " is as it was", false;
     }
-    /* the file as it was stays beside it as presets.json.bak: one step back for whatever this save changes or deletes */
     if (std::filesystem::exists(path)) std::filesystem::copy_file(path, path.string() + ".bak", std::filesystem::copy_options::overwrite_existing, ec);
     ec.clear();
     std::filesystem::rename(tmp, path, ec);
     if (ec) return err = "can't replace " + path.string() + ": " + ec.message(), false;
     return true;
+}
+
+/* Writes LIST over PATH only once what was written reads back as the same presets */
+static bool preset_save(const std::filesystem::path &path, const std::vector<Preset> &list, std::string &err) {
+    return save_atomic(path, preset_json(list), [&](const std::string &back, std::string &perr) {
+        std::vector<Preset> check;
+        std::vector<std::string> skipped;
+        return preset_parse(back, check, perr, skipped) && check.size() == list.size() && skipped.empty();
+    }, err);
 }
 
 /* The presets to their file; ERROR holds why not, or is cleared */

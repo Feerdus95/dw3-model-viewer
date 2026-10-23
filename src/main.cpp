@@ -62,6 +62,7 @@
 #include "modules/model_camera_tree.inc"
 #include "modules/compendium.inc"
 #include "modules/presets.inc"
+#include "modules/templates.inc"
 #include "modules/app_setup.inc"
 #include "modules/app_sections.inc"
 #include "modules/app_loop.inc"
