@@ -332,6 +332,7 @@ std::vector<std::vector<ScriptLine>> read_scripts(const uint8_t *a, size_t size)
 /* --- the face (FIGHTSTG_updateFace, getEyesFrame, moveFacePart) --- */
 
 bool step_face(const Fighter &f, FaceState &s, int motion, int texX, int texY, std::vector<uint16_t> &vram) {
+    motion--; /* the viewer's motions count from 1 (setMotion), the game's from 0: getEyesFrame's numbers are the game's */
     int eyes = motion >= 4 && motion <= 11 ? 2 : motion == 2 ? 1 : 0;
     if (eyes == 0) {
         switch (s.blinkTimer >> 1) {
