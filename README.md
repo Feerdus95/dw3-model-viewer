@@ -58,6 +58,9 @@ trademark of its owners.
   - each of a fighter's motions (62 for the Digimon);
   - play, pause, step one keyframe, restart, loop, speed from 0.05x to 4x, and a
     keyframe slider;
+  - **Loop** on restarts a motion that ends; off plays it once and holds its last
+    keyframe, also a motion that repeats itself inside its own keys. (A motion that has
+    no end key just holds its last keyframe either way.)
   - the blends between motions play as the game plays them.
 - **Fighter** (from the battle's fighters' file, SMDLDATA.PRO):
   - each fighter that uses the model, partner or enemy;
@@ -91,6 +94,26 @@ trademark of its owners.
     folder: those (the mod) or the original sprites.
 
   <img src="docs/img/fighter.png" alt="Kumamon through one of its battle cameras, with its action scripts grouped by what they are" width="720">
+- **Cameras** (the camera workbench, in a section of its own; it needs a fighter's model open):
+  - the **Library** on the left holds your **presets** (one camera of another fighter, as seen
+    with a script) and **applications** (a donor script's whole camera sequence put on another
+    script). Both can be filtered by context, origin (with a mod's context) and status
+    (candidate, approved, rejected), loaded with a click, saved with a name, notes and status,
+    replaced or deleted after a confirmation, duplicated (applications), imported and exported;
+  - the **Workbench** on the right has three tabs: **Camera** (the candidate: another
+    fighter's camera, adjustable eye, target and projection, **Fit to this model**, **Undo the
+    fit**, and "Also at the cuts the player skips"), **Sequence** (build an application from a
+    donor script and a target script, then per shot: on or off, which command it goes to,
+    overrides of eye, target, translation and projection) and **Details** (name, notes,
+    status, and the Save buttons);
+  - **A/B** on the playback bar (key **B**): A is the script's own camera, B is the candidate
+    or the sequence (one explicit choice, "B shows"). Both run through the script together, so
+    switching lands on the same frame, also in the middle of a fade, and changes only the view;
+  - **Ctrl+Z / Ctrl+Y** undo and redo what the workbench holds (a drag is one step, up to
+    100); **Ctrl+S** saves what B shows (the preset or the sequence); the status bar says
+    "unsaved" with what is not saved: the candidate camera, the sequence, or both;
+  - the files are `presets.json` and `applications.json` in `data/compendium/`, each save
+    keeps the one before as `.bak`, and the game's own data is never written.
 - **Effects** (the battle's 2D effects: hit sparks, techniques' sprites):
   - every sprite effect, played as the battle plays it: each of its sprite
     animations' frames, palettes, offsets, scales and rotations, blended as the PSX
@@ -231,6 +254,15 @@ If it fails:
 
 Or double-click `dw3mv.exe` in the `build` folder.
 
+### Diagnostics for developers
+
+`DW3MV_TIMING=<file>` makes the viewer append how long each step of its start took (milliseconds
+since `main`: the data, the window, the shaders, ImGui, the first frame, the models' list) to that
+file, and `DW3MV_TIMING_EXIT=1` closes it after the third frame. Nothing happens when they are not set.
+
+`python tools/refactor/check.py verify` rebuilds and compares the build, the self-tests and the
+dump with what `tools/refactor/baseline` holds.
+
 ### Making a release
 
     python tools/package.py v0.1.0
@@ -248,6 +280,10 @@ here, so that the prompt waits for it.)
 - **"SDL3.dll was not found"**: `SDL3.dll` must be next to `dw3mv.exe`.
 - **"This needs a graphics card with OpenGL 3.3"**: update the graphics driver. On a
   remote desktop or a virtual machine there may be no OpenGL 3.3.
+- **The list of models is slow to appear**: the first time, and whenever a file in `data/files` changes,
+  the viewer reads them to tell which are models, in the background, and says "Listing the models...".
+  It keeps the answer in `models_cache.txt` next to the exe; that file is rebuilt by itself when anything
+  changes, so it can be deleted at any time.
 - **The list of models is empty**: `data/` is missing; run `setup_disc.py` again, or
   pick it with **File > Change the data folder...** (it's remembered in `data_dir.txt`).
   Otherwise the viewer looks for it next to the exe, or next to its `build` folder.
@@ -273,6 +309,7 @@ playback bar under it for motions and effects. Drag a panel's inner edge to resi
   the game steps them.
 - **Fighter**: the action scripts, the fighter (pick one when several use the model) and
   its cameras (**Free camera**, or any drag in the view, goes back to orbiting).
+- **Cameras**: the camera presets and applications, and the workbench that makes them (see above).
 - **Effects**: the 2D effects and their own images for the native port.
 - **Textures**: the texture pages in the view, with the UVs over them; click a polygon
   to select its bone. **Save BMP** writes the page shown next to `dw3mv.exe`, named
@@ -293,9 +330,10 @@ under the mouse. Right-click anything, in the view or a list, for its actions.
 | F | frame the selection (or everything) |
 | H, Alt+H | hide the selection, show everything |
 | Space, Left / Right | play / pause, step |
+| B | in Fighter and Cameras, switch the view between A (the script's camera) and B (the candidate or the sequence) |
 | Ctrl+C, Ctrl+V, Ctrl+D, Del | copy, paste, duplicate, delete a stage's part or an own images' frame |
-| Ctrl+Z, Ctrl+Y | undo, redo the stage's, the model's or the own images' edits |
-| Ctrl+S | save the stage, or the own images |
+| Ctrl+Z, Ctrl+Y | undo, redo the stage's, the model's or the own images' edits; in Cameras and Fighter, the camera workbench's |
+| Ctrl+S | save the stage, or the own images; in Cameras, the preset or the sequence B shows |
 | F1 | every control |
 
 The window's size, position and panel widths are remembered (`settings.ini`, next to the exe).
@@ -305,19 +343,47 @@ with changes you haven't saved, quitting, or reverting a stage asks first.
 
 ### Command line
 
+With a file it opens the viewer; every other form below opens no window (it is a window app: in cmd or PowerShell, pipe the output, as in
+`dw3mv.exe --check | more`, so that the prompt waits for it). `--data DIR` reads `data/` (the
+`files` folder and `names.txt`) from DIR.
+
     dw3mv [file.bin]                      opens the viewer, and the model
-    dw3mv --data DIR                      reads data/ (files and names.txt) from DIR
+
+**Reports** (they print and change nothing):
+
     dw3mv --check                         reads every model, prints a line for each
-    dw3mv --effect ID                     saves 2D effect ID's frames as PNGs in
-                                          effects/effect_ID next to the exe
-    dw3mv --effect-users                  prints which Digimon's action scripts start
-                                          each 2D effect
-    dw3mv --stages                        builds every stage back (and through an
-                                          OBJ) and checks what changed: nothing
-    dw3mv --shot out.bmp [--motion N] [--key K] [--cam N] [--stage N] [--fighter N] file.bin
-                                          draws one frame to a BMP and exits: at a
-                                          motion's keyframe, through a fighter's
+    dw3mv --effect-users                  which Digimon's action scripts start each 2D effect
+    dw3mv --uses FIGHTER                  the motions each of a fighter's scripts plays, and each motion's frames
+    dw3mv --bounds MODEL|FIGHTER ...      a model's posed box (width, height, depth); --motion and --key pose it
+    dw3mv --stages                        builds every stage back (and through an OBJ) and checks what changed: nothing
+    dw3mv --seams                         how each bone's mesh meets its parent's (a developer's diagnostic)
+    dw3mv --fit DONOR TARGET [CAMERA]     a partner's camera as Fit puts it on another partner's model
+    dw3mv --apply-template DONOR DSCRIPT TARGET TSCRIPT
+                                          a donor script's camera sequence on a target script: which donor
+                                          shot goes to which command, and the camera each command gets.
+                                          Only prints: nothing is saved. TSCRIPT as ? lists the target's
+                                          scripts that have camera commands
+    dw3mv --check-framing DONOR DSCRIPT TARGET TSCRIPT
+                                          where each model falls on a 320x240 screen through the donor's
+                                          camera and through the one the application gives the target
+
+**Files they write:**
+
+    dw3mv --shot out.bmp [--motion N] [--key K] [--cam N] [--stage N] [--fighter N] [--cull] [--orbit yaw,pitch,dist,x,y,z] file.bin
+                                          one frame to a BMP: at a motion's keyframe, through a fighter's
                                           camera, with a stage's lights
+    dw3mv --effect ID                     a 2D effect's frames as PNGs in effects/effect_ID next to the exe
+    dw3mv --export-stage ID MODS OUT      a stage as an OBJ (with its MTL and PNGs) in OUT, the mod's if it has one
+    dw3mv --import-stage ID MODS OBJ      the OBJ's objects become stage ID's parts, saved in MODS as the Stages
+                                          section's Save does (this one changes the mods folder)
+    dw3mv --dump-compendium [--out DIR] [--exe SLES_039.36] [--context ID] [--base DIR]
+                                          writes compendium.json and audit.md (models, fighters, cameras, scripts;
+                                          the same data gives the same bytes) in data/compendium, or DIR.
+                                          A mod's --context needs --base, the disc's data to compare with
+
+**Self-tests** (they print `ok` / `FAIL` lines and end with an exit code; they use a temporary folder and
+leave your data alone): `--test-presets`, `--test-templates`, `--test-cameras`, `--test-library`,
+`--test-stage`, `--test-workbench`.
 
 By default `data/` is the one picked with **File > Change the data folder...** (kept in `data_dir.txt`), or next to the exe, or next to its `build` folder.
 
@@ -351,8 +417,10 @@ The reading is a port of what the game itself does, from the dw3_decomp decompil
 
 - **Export and replacement** of models and textures, beyond saving a texture as a BMP.
 - **Reading the disc without Python**: dropping the disc image on the viewer.
-- **Playing a whole action script**: its effects in place, sounds and the other side's
-  model; for now a script's motions, cameras and effects play one at a time.
+- **Playing a whole action script**: sounds, the jumps and moves, and the other side's
+  model and its shots; a script's motions, cameras, sprite effects and effect models play.
+- **The camera's roll**: a camera command's roll is read and kept, but the view does not draw it.
+- **A timeline for a sequence**: its shots are edited one by one, not on a strip.
 - **Names in other languages**: they are the English ones.
 
 ## License
