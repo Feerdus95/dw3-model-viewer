@@ -573,7 +573,7 @@ static int templates_selftest() {
     got.clear();
     ok(!app_parse(v2, got, err, skipped) && err.find("schema_version 2") != std::string::npos, "an unknown schema version is refused, naming it");
     std::filesystem::path dir = std::filesystem::temp_directory_path() / "dw3mv_app_test", file = dir / "applications.json";
-    std::filesystem::remove_all(dir);
+    remove_tree(dir);
     ok(app_save(file, {a}, err), "saves");
     std::string first = preset_text(file);
     Application twin = a;
@@ -584,7 +584,7 @@ static int templates_selftest() {
     a2.status = "rejected";
     ok(app_save(file, {a2}, err) && preset_text(file) == app_json({a2}) && !std::filesystem::exists(dir / "applications.json.tmp") && preset_text(file.string() + ".bak") == first,
        "replaces the file byte for byte, leaves no temp and keeps the previous one as .bak");
-    std::filesystem::remove_all(dir);
+    remove_tree(dir);
     printf("%s\n", bad ? "FAILED" : "all hold");
     return bad != 0;
 }

@@ -170,6 +170,17 @@ static std::string preset_text(const std::filesystem::path &path) {
     return std::string((std::istreambuf_iterator<char>(f)), {});
 }
 
+/* The tests' temp folder, removed without throwing: on Windows a scanner or an indexer can hold a file there for a moment ("directory not
+   empty"), so it is tried again a few times */
+static void remove_tree(const std::filesystem::path &dir) {
+    for (int i = 0; i < 20; i++) {
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+        if (!ec || !std::filesystem::exists(dir)) return;
+        SDL_Delay(50);
+    }
+}
+
 /* Writes TEXT over PATH only once what was written reads back (READS_BACK says so, or why not): a temp file beside it, then a rename;
    the file as it was stays beside it as .bak, one step back for whatever this save changes or deletes */
 static bool save_atomic(const std::filesystem::path &path, const std::string &text, const std::function<bool(const std::string &, std::string &)> &readsBack, std::string &err) {
@@ -364,7 +375,7 @@ static int preset_selftest() {
         g_context = keep;
     }
     std::filesystem::path dir = std::filesystem::temp_directory_path() / "dw3mv_preset_test", file = dir / "presets.json";
-    std::filesystem::remove_all(dir);
+    remove_tree(dir);
     ok(preset_save(file, {p}, err), "saves");
     std::string first = preset_text(file);
     Preset p2 = p;
@@ -372,7 +383,7 @@ static int preset_selftest() {
     ok(preset_save(file, {p2}, err) && preset_text(file) != first && !std::filesystem::exists(dir / "presets.json.tmp"), "replaces the file and leaves no temp");
     ok(preset_text(file) == preset_json({p2}), "the file is the json, byte for byte");
     ok(preset_text(file.string() + ".bak") == first, "the previous file is kept as .bak");
-    std::filesystem::remove_all(dir);
+    remove_tree(dir);
     printf("%s\n", bad ? "FAILED" : "all hold");
     return bad != 0;
 }
