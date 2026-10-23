@@ -1096,6 +1096,7 @@
         GL(glViewport)(0, 0, ww, wh);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         SDL_GL_SwapWindow(win);
+        { static int frames = 0; if (frames < 3 && ++frames) startup_mark(frames == 1 ? "first frame shown" : "frame"); if (frames == 3 && getenv("DW3MV_TIMING_EXIT")) running = false; }
     }
     if (shot.empty()) {
         g_cfg.max = (SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED) != 0;

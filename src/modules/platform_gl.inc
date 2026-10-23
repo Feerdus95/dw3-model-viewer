@@ -43,3 +43,13 @@ static bool gl_load() {
     return true;
 }
 
+/* DW3MV_TIMING=<file>: appends how long each step of the start took (ms since main), to find what is slow */
+static void startup_mark(const char *what) {
+    static const char *path = getenv("DW3MV_TIMING");
+    static auto t0 = std::chrono::steady_clock::now();
+    if (!path) return;
+    FILE *f = fopen(path, "a");
+    if (!f) return;
+    fprintf(f, "%7.1f ms  %s\n", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count(), what);
+    fclose(f);
+}

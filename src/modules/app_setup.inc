@@ -1,4 +1,5 @@
 int main(int argc, char **argv) {
+    startup_mark("main");
     std::string shot, open_path, data;
     std::string start_obj; /* an OBJ to import once the model is open */
     std::string uses; /* --uses: a DW3 fighter's name, whose action scripts' motions are printed */
@@ -64,7 +65,9 @@ int main(int argc, char **argv) {
     const char *base = SDL_GetBasePath();
     g_exe_dir = base ? base : "";
     find_data(data);
+    startup_mark("data found, GameData loaded");
     if (!compendium && !testPresets && !testTemplates && !testCameras && !testLibrary && !testStage && !testWorkbench && fitArgs.empty() && tplArgs.empty()) dw2_register_all(); /* the compendium is the disc's: a converted DW2 model is the user's own */
+    startup_mark("DW2 models registered");
 
     if (!bounds.empty() || !uses.empty()) attach_console();
     if (check || users || stages || seams || !shot.empty() || effect >= 0) attach_console();
@@ -224,6 +227,7 @@ int main(int argc, char **argv) {
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4);
     SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
+    startup_mark("SDL_Init");
     cfg_load();
     SDL_Window *win = SDL_CreateWindow("DW3 Model Viewer", g_cfg.w, g_cfg.h,
                                        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
@@ -240,10 +244,12 @@ int main(int argc, char **argv) {
         }
         if (g_cfg.max) SDL_MaximizeWindow(win);
     }
+    startup_mark("window");
     SDL_GLContext ctx = win ? SDL_GL_CreateContext(win) : nullptr;
     if (!ctx || !gl_load()) {
         return fatal((std::string("This needs a graphics card with OpenGL 3.3.\n") + SDL_GetError()).c_str());
     }
+    startup_mark("GL context");
     SDL_GL_SetSwapInterval(1);
     g_mesh = compile(MESH_VS, MESH_FS);
     g_line = compile(LINE_VS, LINE_FS);
@@ -251,6 +257,7 @@ int main(int argc, char **argv) {
     g_prop = compile(PROP_VS, PROP_FS);
     g_pgpu = compile(PGPU_VS, PROP_FS);
     if (!g_mesh || !g_line || !g_sprite || !g_prop || !g_pgpu) return 1;
+    startup_mark("shaders compiled");
     GL(glGenVertexArrays)(1, &g_pgVao);
     GL(glGenVertexArrays)(1, &g_pgVao0); /* particles: no attributes, each is its number */
     GL(glGenVertexArrays)(1, &g_lineVao);
@@ -290,6 +297,7 @@ int main(int argc, char **argv) {
     };
     if (!open_path.empty()) open_entry(open_path, shot_fighter);
 
+    startup_mark("model opened (if one was asked)");
     /* the Effects tab: a sprite effect on a 320x240 screen, its origin in the middle */
     Effect fx;
     std::vector<int> fxIds = effect_ids();
@@ -324,8 +332,10 @@ int main(int argc, char **argv) {
     Picked picked; /* what the file dialogs gave (library_ui.inc) */
     picked.obj = start_obj;
     std::set<int> ownIds = own_effects(ownRoot); /* the effects with own images in ownRoot */
+    startup_mark("own effects listed");
     read_techs({g_data + "/../SLES_039.36", ownRoot + "/../../SLES_039.36"});
 
+    startup_mark("techniques read");
     /* the Stages tab: a fight stage, edited (stage.h), saved for the native
        port in its data/mods (ownRoot's parent): <fid>.bin and the stages'
        table, 0459.bin */
@@ -653,6 +663,7 @@ int main(int argc, char **argv) {
         return 0;
     }
 
+    startup_mark("before ImGui");
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO &io = ImGui::GetIO();
@@ -661,8 +672,10 @@ int main(int argc, char **argv) {
     if (dpi <= 0) dpi = 1;
     ui_theme(dpi);
     ui_fonts(dpi);
+    startup_mark("fonts added");
     ImGui_ImplSDL3_InitForOpenGL(win, ctx);
     ImGui_ImplOpenGL3_Init("#version 330");
+    startup_mark("ImGui initialised");
 
     GLuint texView = 0;
     std::string texKey;

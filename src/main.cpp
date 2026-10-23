@@ -32,6 +32,7 @@
 #include "viewer_types.h"
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
