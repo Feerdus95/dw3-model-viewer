@@ -1,0 +1,26 @@
+exit 0
+ok    an application from a donor script resolves and has a Fit
+ok    the map is by order
+ok    writes and reads back, and resolves
+ok    the file is the same bytes when read and written again
+ok    name, notes, status, an off shot and an override are kept
+ok    one effective camera for each command of the target's script
+ok    an off shot leaves the target's own command as it is
+ok    an override replaces the shot, with its own time
+ok    a fitted shot keeps the donor's over
+ok    the fitted camera sees the world where the similarity puts the donor's
+ok    on the screen the model's center falls where the donor's did
+ok    rotation, roll and projection are carried as they are
+ok    the same with a rotation: the offset goes into the translation
+ok    without a Fit the donor's words are used as they were
+ok    a Fit of a model to itself changes nothing
+ok    a donor shot with no command to go to is said, not forced
+ok    the target's script is as the data has it
+ok    a missing donor is reported and the snapshot kept
+ok    a mod's context is another application and says what it needs
+ok    a donor script that changed since the save is said
+ok    an unknown schema version is refused, naming it
+ok    saves
+ok    a variant is another application and is kept
+ok    replaces the file byte for byte, leaves no temp and keeps the previous one as .bak
+all hold

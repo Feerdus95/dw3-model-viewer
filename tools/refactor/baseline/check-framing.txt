@@ -1,0 +1,8 @@
+exit 0
+WarGreymon box 3884 x 5361 x 3894, MetalGarurumon box 4706 x 4218 x 6348, scale 1.166. Pixels from the center of a 320 x 240 screen.
+  shot 1 (command 1, fit): donor  centre   -4.5, -19.5  size  171.3 x  232.8  inside 88%
+                                         target centre  -13.3, -29.8  size  200.1 x  176.2  inside 100%
+  shot 2 (command 2, fit): donor  centre  -35.5,-297.3  size  335.6 x  717.9  inside 38%
+                                         target centre  -67.7,-361.7  size  404.2 x  704.5  inside 38%
+  shot 3 (command 3, fit): donor  centre   -3.9,-154.1  size   93.0 x  139.8  inside 50%
+                                         target centre   -6.5,-154.7  size  108.2 x  120.1  inside 38%

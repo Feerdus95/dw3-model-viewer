@@ -1,0 +1,22 @@
+Manual smoke list for the refactor (about 10 minutes). Do it on the build of the commit being checked and note anything that differs from
+the build of the tag pre-refactor. The headless checks (tools/refactor/check.py) cover logic; this covers what is drawn.
+
+Start: build\dw3mv.exe, with the data folder set. Nothing is saved to the game in any step unless it says so.
+
+ 1. Files        The model list loads; click a Digimon: it opens in the view; the motion bar shows under the view.
+ 2. Menus        File / Edit / View / Help open; View > Browser panel and Inspector panel hide and show (Ctrl+B / Ctrl+I); F1 opens the controls.
+ 3. Model        Bones list: the eye hides a bone, a click selects it, its name shows over it; "Selected bone" fills in the right panel.
+ 4. Motions      Pick another motion: it plays; Space pauses; the arrow keys step; the speed slider changes the rate.
+ 5. Fighter      WarGreymon: the scripts list is grouped; "Play the script" on script 11 plays it (motions, cameras, effects).
+ 6. Fighter (A/B)  Candidate camera: pick a donor (Agumon) and a camera, tick "Use the candidate"/B: the framing changes, the pose does not;
+                 A / B and key B switch, also while it plays; Fit to this model / Undo the fit; Save as preset, then click it in the list.
+ 7. Fighter (Choreography)  Donor WarGreymon script 11, target MetalGarurumon script 11 (open MetalGarurumon first): Build and play;
+                 open a shot, Override, Reset the shot; Save as application, Duplicate (right-click), Delete (confirm).
+ 8. Cameras list  In the right panel: Free camera, a Battle view, a Portrait, a Battle shot each look through that camera.
+ 9. Effects      Original > Common: an effect plays; the effect bar (tick slider) works; the mods tab lists the mods' effects.
+10. Textures     The texture pages list; a TIM shows with its palette; click a polygon: its bone is selected.
+11. Stages       Stage 1 opens; click a part: it is selected; Ctrl+drag moves it; Ctrl+Z undoes it (do not save).
+12. DW2          The DW2 tab opens its folder section without errors (a DW2 folder is optional).
+13. Quit         Close the window: no "unsaved" prompt unless something was edited.
+
+Write what you see for each (ok / differs / n.a.). Anything that differs is a regression of the step, not a thing to fix inside it.

@@ -1,0 +1,13 @@
+exit 0
+WarGreymon script 11 -> MetalGarurumon script 11 (script:550.39:11): 5 donor shots, scale 1.166
+  donor 1 (line 5, explicit, over 0) eye -3968,4032,-2560 target 768,2752,6528 proj 280 -> command 1
+  donor 2 (line 19, explicit, over 0) eye -2560,4160,576 target 576,5440,6592 proj 280 -> command 2
+  donor 3 (line 20, explicit, over 43) eye -7680,9408,-9472 target 576,10944,6592 proj 280 -> command 3
+  donor 4 (line 30, shot, over 0) -> command 4
+  donor 5 (line 40, default_view, over 0) -> command 5
+  command 1 (line 7): fit, over 0, explicit eye -4653,3695,-1446 target 871,2202,9153 proj 280
+  command 2 (line 17): fit, over 0, explicit eye -3010,3845,2212 target 647,5337,9228 proj 280
+  command 3 (line 19): fit, over 43, explicit eye -8982,9965,-9507 target 647,11757,9228 proj 280
+  command 4 (line 29): script, over 0, shot
+  command 5 (line 40): template, over 0, default_view
+  note: donor shot 4 is a shot of the other side: command 4 keeps the script's camera

@@ -1,0 +1,6 @@
+build.py exit 0, ends with its ok line: yes
+main.cpp full compile exit 0, 4 diagnostics
+warning: flag ' ' results in undefined behavior with 's' conversion specifier [-Wformat]
+warning: more '%' conversions than data arguments [-Wformat-insufficient-args]
+warning: unknown escape sequence '\s' [-Wunknown-escape-sequence]
+warning: unused function 'psim_at' [-Wunused-function]

@@ -1,0 +1,6 @@
+exit 0
+compendium: 434 models, 248 fighters, 1139 cameras, 4410 scripts, 0 problems 
+{
+ "compendium.json": "e3a874a215e929b5be820357819e79620bf5ffd7a2e7212979fbd7b0beeaaf1d",
+ "audit.md": "068ee583ce29630bed092ed6fbd6f9381f705e31d07fe7f58ef14c8451a14f6e"
+}

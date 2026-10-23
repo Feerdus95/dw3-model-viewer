@@ -1,0 +1,33 @@
+exit 0
+ok    writes and reads back
+ok    native values kept (the edit too, not the donor's)
+ok    name, notes, status, flag, id kept
+ok    resolves against the disc
+ok    an unknown schema version is refused, naming it
+ok    a missing donor is reported, not replaced
+ok    another donor camera is another preset
+ok    another script is another preset
+ok    a mod's context is kept and makes another preset
+ok    a preset of a mod that is not loaded says which context it needs
+ok    the fit a preset started from is kept
+ok    fitting a camera to its own model changes nothing
+ok    fitting to another model keeps the projection
+ok    the same for an enemy
+ok    the model's box center lands where the donor's did
+ok    A is the camera the script asked for, exactly
+ok    B is the candidate (its edit included)
+ok    back and forth lands on the same A
+ok    A with no camera asked for yet leaves the view as it is
+ok    switching changes neither the fighter's cameras nor the preset
+ok    a fade of 43 frames takes 44 and each word is lerped as the GTE does
+ok    it ends on the view, which is the fighter's camera once it is there
+ok    a time of 0 is a cut
+ok    the translation is added to the eye and the target
+ok    a quarter turn about y, as RotMatrixYXZ in the PSX's space
+ok    a fighter's camera through the words is the same view
+ok    without a dump of the context an origin is unknown
+ok    saves
+ok    replaces the file and leaves no temp
+ok    the file is the json, byte for byte
+ok    the previous file is kept as .bak
+all hold
