@@ -962,7 +962,7 @@
         /* --- the first steps, while nothing is open --- */
         if (!mode2d && !scene.model) {
             ImGui::SetNextWindowPos(vc, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-            ImGui::SetNextWindowSize(ImVec2(std::min(vw - 40 * dpi, 500 * dpi), 0));
+            ImGui::SetNextWindowSize(ImVec2(std::max(std::min(vw - 40 * dpi, 500 * dpi), std::min(ds.x - 40 * dpi, 340 * dpi)), 0)); /* wider than a narrow view, over the panels' edges */
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(22 * dpi, 18 * dpi));
             ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 10 * dpi);
             ImGui::Begin("##welcome", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
@@ -993,7 +993,7 @@
         /* --- asking first --- */
         if (ask.open) ImGui::OpenPopup("##ask"), ask.open = false;
         ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-        ImGui::SetNextWindowSize(ImVec2(440 * dpi, 0));
+        ImGui::SetNextWindowSize(ImVec2(std::min(440 * dpi, ds.x - 40 * dpi), 0));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(20 * dpi, 16 * dpi));
         if (ImGui::BeginPopupModal("##ask", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
             ImGui::PushFont(g_fontTitle);
@@ -1069,7 +1069,7 @@
         }
         /* --- the log --- */
         if (logOpen) {
-            ImGui::SetNextWindowSize(ImVec2(640 * dpi, 320 * dpi), ImGuiCond_Appearing);
+            ImGui::SetNextWindowSize(ImVec2(std::min(640 * dpi, ds.x - 40 * dpi), std::min(320 * dpi, ds.y - 60 * dpi)), ImGuiCond_Appearing);
             ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
             if (ImGui::Begin(IC_INFO "  Activity###log", &logOpen, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings)) {
                 auto stamp = [](double t) {
@@ -1124,6 +1124,7 @@
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         if (!uiShot.empty()) {
             static int uiFrames = 0;
+            if (uiFrames == 2) aboutOpen = uiWin == "about", helpOpen = uiWin == "help", logOpen = uiWin == "log", catOpen = uiWin == "catalog", pcatOpen = uiWin == "pcat";
             if (uiTab >= 0 && uiFrames < 3) camTabGo = uiTab;
             if (uiTab >= 0 && section == FILES) filesTabGo = uiTab;
             if (++uiFrames == 8) { /* the window as drawn: ImGui's frame is in the back buffer */

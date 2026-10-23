@@ -5,6 +5,7 @@ int main(int argc, char **argv) {
     std::string uiShot; /* --ui-shot FILE: the whole window, after a few frames, to a BMP (a developer's check of the panels at a size) */
     int uiSection = -1, uiTab = -1, uiW = 0, uiH = 0, uiStage = -1, uiFx = -1; /* --stage-open N, --fx-open N: that stage, that effect open */
     float uiPanels[2] = {};
+    std::string uiWin; /* --window about|help|log|catalog|pcat: that window open in the --ui-shot */
     std::string uses; /* --uses: a DW3 fighter's name, whose action scripts' motions are printed */
     std::vector<std::string> bounds; /* --bounds: a model file, or a fighter's name (DW3), whose posed box is printed */
     int shot_motion = 1, shot_key = 0, shot_cam = -1, shot_stage = 0, shot_fighter = 0;
@@ -26,6 +27,7 @@ int main(int argc, char **argv) {
         else if (a == "--section" && i + 1 < argc) uiSection = atoi(argv[++i]);
         else if (a == "--tab" && i + 1 < argc) uiTab = atoi(argv[++i]);
         else if (a == "--stage-open" && i + 1 < argc) uiStage = atoi(argv[++i]);
+        else if (a == "--window" && i + 1 < argc) uiWin = argv[++i];
         else if (a == "--fx-open" && i + 1 < argc) uiFx = atoi(argv[++i]);
         else if (a == "--win" && i + 1 < argc) sscanf(argv[++i], "%dx%d", &uiW, &uiH);
         else if (a == "--panels" && i + 1 < argc) sscanf(argv[++i], "%f,%f", uiPanels, uiPanels + 1);
