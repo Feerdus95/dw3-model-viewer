@@ -83,3 +83,50 @@ static std::string take_picked(Picked &picked, std::string Picked::*field) {
     out.swap(picked.*field);
     return out;
 }
+
+/* --test-library: the helpers on a list of presets, headless */
+static int library_selftest() {
+    int bad = 0;
+    auto ok = [&](bool c, const char *what) { printf("%s  %s\n", c ? "ok  " : "FAIL", what), bad += !c; };
+    auto mk = [](int script, const char *name) {
+        Preset p;
+        p.fighter = 1, p.scriptIdx = script, p.name = name;
+        return p;
+    };
+    Ask ask;
+    std::vector<Preset> list;
+    std::string active;
+    int persisted = 0;
+    auto done = [&](const Preset &p) { active = p.id(), persisted++; };
+    auto text = [](const Preset &o) { return "replace " + o.name; };
+    keep_or_ask<Preset>(ask, list, mk(1, "a"), "Replace", text, done);
+    ok(list.size() == 1 && persisted == 1 && !ask.open && active == list[0].id(), "a new one is added, with no question");
+    keep_or_ask<Preset>(ask, list, mk(2, "b"), "Replace", text, done);
+    ok(list.size() == 2 && persisted == 2 && !ask.open, "another id is another entry");
+    keep_or_ask<Preset>(ask, list, mk(1, "a2"), "Replace", text, done);
+    ok(list.size() == 2 && list[0].name == "a" && persisted == 2 && ask.open && ask.title == "Replace" && ask.text == "replace a" && ask.ok == "Replace" && ask.danger,
+       "the same id asks first, naming what is there, and changes nothing yet");
+    ask.then();
+    ok(list.size() == 2 && list[0].name == "a2" && persisted == 3 && active == list[0].id(), "confirmed, it replaces in place and persists");
+    std::string id1 = list[0].id();
+    ask_delete(ask, list, active, id1, "Delete", "sure?", [&] { persisted++; });
+    ok(list.size() == 2 && ask.title == "Delete" && ask.text == "sure?" && ask.ok == "Delete" && ask.danger, "delete asks first and changes nothing yet");
+    ask.then();
+    ok(list.size() == 1 && list[0].name == "b" && active.empty() && persisted == 4, "confirmed, it deletes, forgets the active one and persists");
+    active = list[0].id();
+    ask_delete(ask, list, active, "preset:nothing", "Delete", "x", [&] { persisted++; });
+    ask.then();
+    ok(list.size() == 1 && active == list[0].id(), "an id that is not there deletes nothing and keeps the active one");
+    ok(status_index("candidate") == 0 && status_index("approved") == 1 && status_index("rejected") == 2 && status_index("other") == 0, "the status combo's index");
+    Picked pk;
+    pk.presetIn = "x.json";
+    ok(take_picked(pk, &Picked::presetIn) == "x.json" && pk.presetIn.empty() && take_picked(pk, &Picked::presetIn).empty(), "a dialog's answer is taken once");
+    char *none[1] = {nullptr};
+    picked_cb<&Picked::appOut>(&pk, nullptr, 0);
+    picked_cb<&Picked::appOut>(&pk, none, 0);
+    const char *got[2] = {"y.json", nullptr};
+    picked_cb<&Picked::appOut>(&pk, got, 0);
+    ok(pk.appOut == "y.json" && pk.appIn.empty(), "a dialog's answer lands in its own field; a cancelled one in none");
+    printf("%s\n", bad ? "FAILED" : "all hold");
+    return bad != 0;
+}

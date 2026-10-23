@@ -1,0 +1,12 @@
+exit 0
+ok    a new one is added, with no question
+ok    another id is another entry
+ok    the same id asks first, naming what is there, and changes nothing yet
+ok    confirmed, it replaces in place and persists
+ok    delete asks first and changes nothing yet
+ok    confirmed, it deletes, forgets the active one and persists
+ok    an id that is not there deletes nothing and keeps the active one
+ok    the status combo's index
+ok    a dialog's answer is taken once
+ok    a dialog's answer lands in its own field; a cancelled one in none
+all hold
