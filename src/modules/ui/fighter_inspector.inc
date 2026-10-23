@@ -49,8 +49,12 @@
                 if (r.group != g) continue;
                 char l[80];
                 snprintf(l, sizeof l, "%s  %s###cam%d", IC_CAMERA, r.name, i);
-                if (ImGui::Selectable(l, view.gameCamera == i)) apply_camera(view, cf, i);
-                tip("Camera %d: %s", i, r.what);
+                if (ImGui::Selectable(l, view.gameCamera == i)) {
+                    apply_camera(view, cf, i);
+                    /* a partner's portraits show the pose the game gives them: its idle (the menu's), its weak idle (low HP) */
+                    if (!cf.enemy && (i == 6 || i == 7) && m.motions.size() > 1) m.setMotion(i == 7 ? 2 : 1), view.playing = true;
+                }
+                tip("Camera %d: %s%s", i, r.what, !cf.enemy && i == 7 ? ". Plays the weak idle (motion 2)" : "");
             }
         }
         if (details("Technical details"))
