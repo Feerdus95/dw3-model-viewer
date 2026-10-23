@@ -57,6 +57,26 @@ def icon(cxx):
     return [obj]
 
 
+def read_deps(dep):
+    """the files a .d (make syntax: backslash continues a line, backslash-space is a space in a name) lists after the target"""
+    text = dep.read_text().replace("\\\n", " ")
+    names, cur, i = [], "", 0
+    while i < len(text):
+        c = text[i]
+        if c == "\\" and text[i + 1:i + 2] == " ":
+            cur, i = cur + " ", i + 1
+        elif c.isspace():
+            if cur:
+                names.append(cur)
+            cur = ""
+        else:
+            cur += c
+        i += 1
+    if cur:
+        names.append(cur)
+    return [Path(n) for n in names[1:]]  # [0] is "obj.o:"
+
+
 def main():
     cxx, sdl = find_cxx(), find_sdl()
     cflags = ["-std=c++17", "-O2", "-Wall", f"-I{IMGUI}", f"-I{sdl / 'include'}"]
@@ -65,13 +85,11 @@ def main():
     for src in SOURCES:
         obj = OBJ / (src.stem + ".o")
         objs.append(obj)
-        deps = [src, *HERE.glob("src/*.h")]
-        if src.name == "main.cpp":  # only main.cpp includes the modules: touching one must not rebuild the other sources
-            deps += [*HERE.glob("src/modules/*.inc"), *HERE.glob("src/modules/ui/*.inc")]
-        if obj.exists() and obj.stat().st_mtime > max(d.stat().st_mtime for d in deps):
+        dep = obj.with_suffix(".d")  # what the compiler said this object includes (-MMD): a change to any of it rebuilds it, and only it
+        if obj.exists() and dep.exists() and obj.stat().st_mtime > max((d.stat().st_mtime if d.exists() else float("inf")) for d in [src, *read_deps(dep)]):
             continue
         print("compile", src.name)
-        if subprocess.run([cxx, *cflags, "-c", src, "-o", obj]).returncode:
+        if subprocess.run([cxx, *cflags, "-MMD", "-MF", dep, "-c", src, "-o", obj]).returncode:
             sys.exit(1)
     objs += icon(cxx)
     exe = OUT / "dw3mv.exe"
