@@ -14,12 +14,17 @@ struct Preset {
     bool donorEnemy = false;
     GameCamera c = {};
     bool every = false;                                /* also at the cuts the player skips */
+    std::string context = "base_game", donorContext = "base_game"; /* the data sets the target and the donor are in (--context) */
+    double fitK = 0;                                   /* 0, or the scale of the "Fit to this model" it started from (derived) */
     std::vector<std::string> warn;                     /* what doesn't resolve here (not written) */
 
     std::string fighter_ref() const { return "fighter:" + std::to_string(fighter); }
     std::string script_ref() const { return comp::script_id(scriptFid, scriptEntry, scriptIdx); }
     std::string donor_ref() const { return comp::cam_id(donor, donorEnemy, donorIdx); }
-    std::string id() const { return "preset:" + fighter_ref() + "|" + script_ref() + "|" + donor_ref(); }
+    std::string id() const {
+        std::string c = (context == "base_game" ? "" : context + "|") + (donorContext == "base_game" ? "" : "donor@" + donorContext + "|");
+        return "preset:" + c + fighter_ref() + "|" + script_ref() + "|" + donor_ref();
+    }
 };
 
 static const char *const PRESET_STATUS[3] = {"candidate", "approved", "rejected"};
@@ -35,6 +40,12 @@ static const Fighter *fighter_by_id(int id, bool enemy, bool anySide = true) {
 /* What of P doesn't resolve against the disc's data here */
 static void preset_check(Preset &p) {
     p.warn.clear();
+    /* a preset of a mod's fighter says so, instead of looking like a fighter that doesn't exist */
+    for (int i = 0; i < 2; i++) {
+        const std::string &c = i ? p.donorContext : p.context;
+        if (c != "base_game" && c != g_context) p.warn.push_back(std::string(i ? "its donor" : "its target") + " is in the context " + c + ", and the one loaded is " + g_context);
+    }
+    if (!p.warn.empty()) return;
     const Fighter *t = fighter_by_id(p.fighter, false);
     if (!t) p.warn.push_back(p.fighter_ref() + " is not a fighter of this disc");
     const Fighter *d = fighter_by_id(p.donor, p.donorEnemy, false);
@@ -65,8 +76,9 @@ static std::string preset_json(const std::vector<Preset> &list) {
             .raw("pos", comp::ints3(p.c.pos[0], p.c.pos[1], p.c.pos[2])).raw("ref", comp::ints3(p.c.ref[0], p.c.ref[1], p.c.ref[2])).num("proj", p.c.proj);
         comp::Obj o;
         o.str("id", p.id()).str("name", p.name).str("status", p.status).str("notes", p.notes)
-            .raw("target", comp::Obj().str("fighter", p.fighter_ref()).str("script", p.script_ref()).done())
-            .str("donor_camera_id", p.donor_ref()).raw("camera", cam.done()).num("also_at_cuts", p.every ? 1 : 0);
+            .raw("target", comp::Obj().str("fighter", p.fighter_ref()).str("script", p.script_ref()).str("context", p.context).done())
+            .str("donor_camera_id", p.donor_ref()).str("donor_context", p.donorContext).raw("camera", cam.done()).num("also_at_cuts", p.every ? 1 : 0);
+        if (p.fitK > 0) o.raw("transform", comp::Obj().str("kind", "fit_to_model").flt("scale", p.fitK).str("provenance", "derived").done());
         recs.push_back(o.done());
     }
     return "{\n\"schema_version\":" + std::to_string(PRESET_SCHEMA) + ",\n\"game\":" +
@@ -117,6 +129,10 @@ static bool preset_parse(const std::string &text, std::vector<Preset> &out, std:
         }
         const Json *ev = j.get("also_at_cuts");
         q.every = ev && ev->type == 'n' && ev->num != 0; /* a number: the reader has no booleans */
+        if (str(tg, "context").size()) q.context = str(tg, "context");
+        if (str(&j, "donor_context").size()) q.donorContext = str(&j, "donor_context");
+        const Json *tf = j.get("transform"), *sc = tf ? tf->get("scale") : nullptr;
+        if (sc && sc->type == 'n') q.fitK = sc->num;
         preset_check(q);
         out.push_back(q);
     }
@@ -201,6 +217,54 @@ static int preset_selftest() {
     ok(other.id() != p.id(), "another donor camera is another preset");
     other = p, other.scriptIdx = 6;
     ok(other.id() != p.id(), "another script is another preset");
+    Preset mod = p;
+    mod.context = "dw2003.bladegarurumon";
+    got.clear();
+    preset_parse(preset_json({mod}), got, err, skipped);
+    ok(got.size() == 1 && got[0].context == mod.context && got[0].id() != p.id(), "a mod's context is kept and makes another preset");
+    ok(got.size() == 1 && !got[0].warn.empty() && got[0].warn[0].find("context") != std::string::npos, "a preset of a mod that is not loaded says which context it needs");
+    Preset fit = p;
+    fit.fitK = 1.25;
+    got.clear();
+    preset_parse(preset_json({fit}), got, err, skipped);
+    ok(got.size() == 1 && fabs(got[0].fitK - 1.25) < 1e-6, "the fit a preset started from is kept");
+    {
+        GameCamera out;
+        double k = 0;
+        const GameCamera &dc = d->cameras[9];
+        ok(fit_camera(*d, dc, *d, out, k) && fabs(k - 1) < 1e-6 && abs(out.pos[0] - dc.pos[0]) <= 1 && abs(out.pos[1] - dc.pos[1]) <= 1 && abs(out.pos[2] - dc.pos[2]) <= 1 &&
+               abs(out.ref[0] - dc.ref[0]) <= 1 && abs(out.ref[1] - dc.ref[1]) <= 1 && abs(out.ref[2] - dc.ref[2]) <= 1,
+           "fitting a camera to its own model changes nothing");
+        ok(fit_camera(*d, dc, *t, out, k) && k > 0 && out.proj == dc.proj, "fitting to another model keeps the projection");
+        /* the box's center is where it was on the screen: x/z and y/z of the center from the eye, in the camera's own axes */
+        auto center_on_screen = [](const Fighter &f, const GameCamera &c, float &sx, float &sy) {
+            float lo[3], hi[3], e[3], r[3], b1[3] = {(float)c.pos[0], (float)c.pos[1], (float)c.pos[2]}, b2[3] = {(float)c.ref[0], (float)c.ref[1], (float)c.ref[2]};
+            fighter_box(f, lo, hi);
+            battle_to_view(f, b1, e), battle_to_view(f, b2, r);
+            float m[3] = {(lo[0] + hi[0]) / 2, -(lo[1] + hi[1]) / 2, -(lo[2] + hi[2]) / 2};
+            float fw[3] = {r[0] - e[0], r[1] - e[1], r[2] - e[2]}, l = sqrtf(fw[0] * fw[0] + fw[1] * fw[1] + fw[2] * fw[2]);
+            for (float &x : fw) x /= l;
+            float rt[3] = {fw[2], 0, -fw[0]}, rl = sqrtf(rt[0] * rt[0] + rt[2] * rt[2]); /* up x forward, for a world up of +y */
+            for (float &x : rt) x /= rl;
+            float up[3] = {rt[1] * fw[2] - rt[2] * fw[1], rt[2] * fw[0] - rt[0] * fw[2], rt[0] * fw[1] - rt[1] * fw[0]};
+            float v[3] = {m[0] - e[0], m[1] - e[1], m[2] - e[2]};
+            float z = v[0] * fw[0] + v[1] * fw[1] + v[2] * fw[2];
+            sx = (v[0] * rt[0] + v[1] * rt[1] + v[2] * rt[2]) / z, sy = (v[0] * up[0] + v[1] * up[1] + v[2] * up[2]) / z;
+        };
+        for (const Fighter &e : g_game.fighters) { /* an enemy's side has its own sign: its own model, too, comes back */
+            float lo[3], hi[3];
+            if (!e.enemy || e.cameras.empty() || !fighter_box(e, lo, hi)) continue;
+            GameCamera eo;
+            ok(fit_camera(e, e.cameras[0], e, eo, k) && abs(eo.pos[0] - e.cameras[0].pos[0]) <= 1 && abs(eo.pos[1] - e.cameras[0].pos[1]) <= 1 &&
+                   abs(eo.pos[2] - e.cameras[0].pos[2]) <= 1 && abs(eo.ref[2] - e.cameras[0].ref[2]) <= 1,
+               "the same for an enemy");
+            break;
+        }
+        float ax, ay, bx, by;
+        center_on_screen(*d, dc, ax, ay);
+        center_on_screen(*t, out, bx, by);
+        ok(fabs(ax - bx) < 0.02f && fabs(ay - by) < 0.02f, "the model's box center lands where the donor's did");
+    }
     std::filesystem::path dir = std::filesystem::temp_directory_path() / "dw3mv_preset_test", file = dir / "presets.json";
     std::filesystem::remove_all(dir);
     ok(preset_save(file, {p}, err), "saves");

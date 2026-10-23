@@ -2836,6 +2836,8 @@
         int orig = -1;
         int script = -1;             /* the script last played, of OF: what a preset is made for */
         const Fighter *of = nullptr;
+        GameCamera before = {};      /* the camera before a fit, for undoing it */
+        double fitK = 0;             /* the scale of the fit the camera started from; 0 none */
     } cand;
     /* the presets (presets.json), read when first wanted */
     struct PresetUi {
@@ -3069,6 +3071,7 @@
                 const Fighter &d = g_game.fighters[fi];
                 cand.fighter = fi, cand.cam = std::clamp(ci, 0, std::max(0, (int)d.cameras.size() - 1));
                 if (!d.cameras.empty()) cand.c = d.cameras[cand.cam];
+                cand.fitK = 0;
             };
             if (cand.fighter < 0 || cand.fighter >= (int)g_game.fighters.size() || g_game.fighters[cand.fighter].enemy != f.enemy) {
                 for (int i = 0; i < (int)g_game.fighters.size(); i++)
@@ -3116,9 +3119,31 @@
             if (button(IC_CAMERA "  Look through it")) apply_game_camera(view, f, cand.c, -1);
             ImGui::SameLine();
             if (button("Reset to the donor's")) pick(cand.fighter, cand.cam);
+            if (button(IC_FIT "  Fit to this model")) {
+                GameCamera fitted;
+                double k;
+                if (fit_camera(donor, cand.c, f, fitted, k)) {
+                    cand.before = cand.c, cand.c = fitted, cand.fitK = k;
+                    if (cand.on) apply_game_camera(view, f, cand.c, -1), run.on ? snap_cam() : void();
+                    note(NOTE_INFO, "Fitted: the donor's framing, scaled by " + std::to_string(k).substr(0, 5) + " to this model. Check it in the script.");
+                } else {
+                    note(NOTE_WARN, "A model's box couldn't be read, so there is nothing to fit by.");
+                }
+            }
+            tip("Moves the eye and the target so this model is framed as the donor's was: the boxes' centers match and distances scale with their sizes. The projection stays. It is a proposal: proportions and pose are not in a box");
+            if (cand.fitK > 0) {
+                ImGui::SameLine();
+                if (button("Undo the fit")) {
+                    if (cand.before.proj) cand.c = cand.before;
+                    cand.fitK = 0;
+                    if (cand.on) apply_game_camera(view, f, cand.c, -1), run.on ? snap_cam() : void();
+                }
+                ImGui::TextColored(C_WARN, "Fitted (x%.2f): a proposal, not checked", cand.fitK);
+            }
 
             /* --- presets: the candidate kept for this fighter, this script and this donor camera --- */
             heading("Presets");
+            if (g_context != "base_game") hint("Context: %s", g_context.c_str());
             if (!pre.loaded) {
                 pre.loaded = true;
                 std::string text = preset_text(preset_path());
@@ -3135,7 +3160,8 @@
                 p.fighter = f.id;
                 p.scriptFid = f.effectsFid, p.scriptEntry = f.effectsEntry, p.scriptIdx = cand.script;
                 p.donor = donor.id, p.donorEnemy = donor.enemy, p.donorIdx = cand.cam;
-                p.c = cand.c, p.every = cand.every;
+                p.c = cand.c, p.every = cand.every, p.fitK = cand.fitK;
+                p.context = p.donorContext = g_context;
                 preset_check(p);
                 return p;
             };
@@ -3181,7 +3207,7 @@
                     for (int k = 0; k < (int)g_game.fighters.size(); k++)
                         if (&g_game.fighters[k] == fighter_by_id(p.donor, p.donorEnemy, false)) di = k;
                     if (di >= 0) {
-                        cand.fighter = di, cand.cam = p.donorIdx, cand.c = p.c, cand.every = p.every, cand.on = true; /* the snapshot, not the donor's */
+                        cand.fighter = di, cand.cam = p.donorIdx, cand.c = p.c, cand.every = p.every, cand.fitK = p.fitK, cand.on = true; /* the snapshot, not the donor's */
                         snprintf(pre.name, sizeof pre.name, "%s", p.name.c_str());
                         snprintf(pre.notes, sizeof pre.notes, "%s", p.notes.c_str());
                         pre.status = p.status == PRESET_STATUS[1] ? 1 : p.status == PRESET_STATUS[2] ? 2 : 0;

@@ -18,6 +18,12 @@ static void battle_to_view(const Fighter &f, const float b[3], float out[3]) {
     out[0] = f.enemy ? x : -x, out[1] = y, out[2] = f.enemy ? z : -z; /* a partner's turn: 0x800 about y */
 }
 
+/* battle_to_view the other way: a point in the viewer's space, in fighter F's battle space */
+static void view_to_battle(const Fighter &f, const float v[3], float out[3]) {
+    float home = (float)(0x1400 + f.distance) * (f.enemy ? -1 : 1);
+    out[0] = f.enemy ? v[0] : -v[0], out[1] = v[1] + (float)f.height, out[2] = f.enemy ? v[2] + home : -v[2] + home;
+}
+
 /* What a fighter's camera is for, by where the game looks through it: the
    battle's own view (FIGHTSTG_getEnemyView, which the scripts' camera 0, the
    idle between actions and the ends of the entrances and Digimon changes go

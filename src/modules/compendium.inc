@@ -3,6 +3,9 @@
    the same bytes: ids come from the disc's own keys (a fid, a fighter id, a camera's index, a script's archive and
    number), never from an order of listing, and nothing in the files is a time or a path. */
 
+/* the data set this run reads: "base_game", or a mod's id when --data points at the disc's data with the mod's files over it */
+static std::string g_context = "base_game";
+
 namespace comp {
 
 static std::string esc(const std::string &s) {
@@ -88,8 +91,60 @@ struct Scr {
 
 } // namespace comp
 
+/* A model's box at rest (the first motion's first key), in model units with y down; false when it has no visible vertex */
+static bool model_rest_box(Model &m, float lo[3], float hi[3]) {
+    m.setMotion(1);
+    m.evaluate();
+    for (int i = 0; i < 3; i++) lo[i] = 1e9f, hi[i] = -1e9f;
+    bool any = false;
+    for (size_t k = 1; k < m.bones.size(); k++) {
+        if (!m.pose[k].visible || m.bones[k].mesh < 0) continue;
+        const float *w = m.pose[k].world;
+        for (const Vec3s &pv : m.meshes[m.bones[k].mesh].verts) {
+            any = true;
+            for (int i = 0; i < 3; i++) {
+                float p = w[i] * pv.x + w[4 + i] * pv.y + w[8 + i] * pv.z + w[12 + i];
+                lo[i] = std::min(lo[i], p), hi[i] = std::max(hi[i], p);
+            }
+        }
+    }
+    return any;
+}
+
+/* The same for a fighter's model, read from the data */
+static bool fighter_box(const Fighter &f, float lo[3], float hi[3]) {
+    std::vector<uint8_t> bytes;
+    Model m;
+    return read_file(fid_path(f.modelFid), bytes) && m.load(f.name, std::move(bytes), &f) && model_rest_box(m, lo, hi);
+}
+
+/* "Fit to this model": camera C, framing DONOR's model, moved to frame TARGET's the same way. Both are taken at rest; the
+   framing is carried by a similarity in the viewer's space: the donor's box center goes to the target's, and distances grow by
+   K, the ratio of the boxes' diagonals. The eye and the target move, the projection (and so the field of view) stays.
+   A proposal for the eye to judge: boxes say nothing of proportions, pose or which way the model faces. False when a box is empty. */
+static bool fit_camera(const Fighter &donor, const GameCamera &c, const Fighter &target, GameCamera &out, double &k) {
+    float dl[3], dh[3], tl[3], th[3];
+    if (!fighter_box(donor, dl, dh) || !fighter_box(target, tl, th)) return false;
+    auto diag = [](const float *l, const float *h) { return sqrtf((h[0] - l[0]) * (h[0] - l[0]) + (h[1] - l[1]) * (h[1] - l[1]) + (h[2] - l[2]) * (h[2] - l[2])); };
+    float dd = diag(dl, dh), td = diag(tl, th);
+    if (dd < 1 || td < 1) return false;
+    k = td / dd;
+    /* a model's y and z are the PSX's (down, away); the viewer's space has them flipped */
+    float cd[3] = {(dl[0] + dh[0]) / 2, -(dl[1] + dh[1]) / 2, -(dl[2] + dh[2]) / 2}, ct[3] = {(tl[0] + th[0]) / 2, -(tl[1] + th[1]) / 2, -(tl[2] + th[2]) / 2};
+    auto move = [&](const int16_t *p, int16_t *o) {
+        float b[3] = {(float)p[0], (float)p[1], (float)p[2]}, v[3], w[3];
+        battle_to_view(donor, b, v);
+        for (int i = 0; i < 3; i++) v[i] = ct[i] + (float)k * (v[i] - cd[i]);
+        view_to_battle(target, v, w);
+        for (int i = 0; i < 3; i++) o[i] = (int16_t)std::clamp(lroundf(w[i]), -32768L, 32767L);
+    };
+    move(c.pos, out.pos), move(c.ref, out.ref);
+    out.proj = c.proj;
+    return true;
+}
+
 /* The dump; the exit code is 1 only when it couldn't read or write what it needs, a thing it couldn't resolve is in audit.md */
-static int dump_compendium(const std::string &outArg, const std::string &exe) {
+static int dump_compendium(const std::string &outArg, const std::string &exe, const std::string &baseDir) {
     using namespace comp;
     if (g_game.fighters.empty()) {
         fprintf(stderr, "dump-compendium: no fighters (SMDLDATA.PRO, file 460) in %s\n", g_data.c_str());
@@ -104,6 +159,44 @@ static int dump_compendium(const std::string &outArg, const std::string &exe) {
     if (!haveTechs) problem("techniques: the game's exe (SLES_039.36) was not found, so no script is tied to a technique (pass --exe PATH)");
 
     /* ---- fighters ---- */
+    /* where each thing comes from: with the disc's own data to compare (--base), a fighter or model not there is the mod's
+       ("mod"), one that differs is the mod's version of it ("modified_base"); without it, a mod's context can't say ("unknown") */
+    GameData baseGame;
+    bool haveBase = false;
+    std::string baseFiles = baseDir + "/files";
+    if (g_context != "base_game") {
+        if (!baseDir.empty()) baseGame.load(baseFiles), haveBase = !baseGame.fighters.empty();
+        if (!haveBase) problem("context " + g_context + ": no --base DIR with the disc's data to compare against, so origins are \"unknown\"");
+    }
+    auto sameFighter = [](const Fighter &a, const Fighter &b) {
+        if (a.kind != b.kind || a.enemy != b.enemy || a.modelFid != b.modelFid || a.modelEntry != b.modelEntry || a.motionsFid != b.motionsFid ||
+            a.motionsEntry != b.motionsEntry || a.effectsFid != b.effectsFid || a.effectsEntry != b.effectsEntry || a.distance != b.distance ||
+            a.height != b.height || a.name != b.name || a.cameras.size() != b.cameras.size())
+            return false;
+        for (size_t i = 0; i < a.cameras.size(); i++)
+            if (memcmp(&a.cameras[i], &b.cameras[i], sizeof(GameCamera))) return false;
+        return true;
+    };
+    auto fighterOrigin = [&](const Fighter &f) -> const char * {
+        if (g_context == "base_game") return "base_game";
+        if (!haveBase) return "unknown";
+        for (const Fighter &b : baseGame.fighters)
+            if (b.id == f.id) return sameFighter(f, b) ? "base_game" : "modified_base";
+        return "mod";
+    };
+    auto modelOrigin = [&](int fid) -> const char * {
+        if (g_context == "base_game") return "base_game";
+        if (!haveBase) return "unknown";
+        std::vector<uint8_t> mine, theirs;
+        char b[16];
+        snprintf(b, sizeof b, "/%04d.bin", fid);
+        std::ifstream f(baseFiles + b, std::ios::binary);
+        if (!f) return "mod";
+        theirs.assign(std::istreambuf_iterator<char>(f), {});
+        read_file(fid_path(fid), mine);
+        return mine == theirs ? "base_game" : "modified_base";
+    };
+    std::map<std::string, int> originCount;
     std::vector<const Fighter *> fighters;
     for (const Fighter &f : g_game.fighters) fighters.push_back(&f);
     std::stable_sort(fighters.begin(), fighters.end(), [](const Fighter *a, const Fighter *b) { return a->id < b->id; });
@@ -174,7 +267,7 @@ static int dump_compendium(const std::string &outArg, const std::string &exe) {
         if (fs.empty() && cls[0] != 'e') problem("model " + std::to_string(e.fid) + " " + e.name + ": no fighter and not a MEFT effect model, left unclassified");
         if (fs.empty()) mNoFighter++;
         Obj o;
-        o.str("id", "model:" + std::to_string(e.fid)).num("fid", e.fid).str("file_name", e.name).str("class", cls).str("label", e.label);
+        o.str("id", "model:" + std::to_string(e.fid)).num("fid", e.fid).str("file_name", e.name).str("class", cls).str("label", e.label).str("origin", modelOrigin(e.fid));
         std::vector<std::string> fids;
         for (const Fighter *f : fs) fids.push_back("fighter:" + std::to_string(f->id));
         o.raw("fighters", strs(fids));
@@ -184,21 +277,8 @@ static int dump_compendium(const std::string &outArg, const std::string &exe) {
             problem("model " + std::to_string(e.fid) + " " + e.name + ": " + m.error);
             o.b("loaded", false).str("error", m.error);
         } else {
-            m.setMotion(1);
-            m.evaluate();
-            float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
-            bool any = false;
-            for (size_t k = 1; k < m.bones.size(); k++) {
-                if (!m.pose[k].visible || m.bones[k].mesh < 0) continue;
-                const float *w = m.pose[k].world;
-                for (const Vec3s &pv : m.meshes[m.bones[k].mesh].verts) {
-                    any = true;
-                    for (int i = 0; i < 3; i++) {
-                        float p = w[i] * pv.x + w[4 + i] * pv.y + w[8 + i] * pv.z + w[12 + i];
-                        lo[i] = std::min(lo[i], p), hi[i] = std::max(hi[i], p);
-                    }
-                }
-            }
+            float lo[3], hi[3];
+            bool any = model_rest_box(m, lo, hi);
             size_t polys = 0;
             for (const Mesh &me : m.meshes) polys += me.polys.size();
             o.b("loaded", true).num("bones", (long long)m.bones.size() - 1).num("polys", (long long)polys).num("motions", (long long)m.motions.size());
@@ -273,13 +353,14 @@ static int dump_compendium(const std::string &outArg, const std::string &exe) {
         for (const auto &kv : scripts)
             if (kv.second.users.count(f->id)) scr.push_back(script_id(kv.second.fid, kv.second.entry, kv.second.idx));
         Obj o;
-        o.str("id", "fighter:" + std::to_string(f->id)).num("native_id", f->id).num("native_kind", f->kind).b("enemy", f->enemy).str("name", f->name)
+        o.str("id", "fighter:" + std::to_string(f->id)).num("native_id", f->id).num("native_kind", f->kind).b("enemy", f->enemy).str("name", f->name).str("origin", fighterOrigin(*f))
             .str("model", "model:" + std::to_string(f->modelFid)).num("model_entry", f->modelEntry)
             .num("motions_fid", f->motionsFid).num("motions_entry", f->motionsEntry)
             .str("scripts_archive", std::to_string(f->effectsFid) + "." + std::to_string(f->effectsEntry))
             .num("height", f->height).num("distance", f->distance);
         if (f->enemy) o.num("camera_count_native", f->cameraCount);
         o.raw("cameras", strs(cams)).raw("scripts", strs(scr)).str("provenance", "extracted");
+        originCount[std::string("fighters.origin.") + fighterOrigin(*f)]++;
         fighterRecs.push_back(o.done());
     }
 
@@ -359,6 +440,7 @@ static int dump_compendium(const std::string &outArg, const std::string &exe) {
     std::string json = "{\n\"schema_version\":1,\n";
     json += "\"game\":" + Obj().str("title", "Digimon World 2003").str("edition", "PAL SLES-03936").done() + ",\n";
     json += "\"viewer_version\":" + esc(VERSION) + ",\n";
+    json += "\"context\":" + Obj().str("id", g_context).str("compared_with", haveBase ? "base_game" : "").done() + ",\n";
     json += "\"coordinates\":" + Obj()
         .str("native", "pos and ref are the battle's space, int16, y and z as FighterInfo stores them; proj is the projection distance on a 320x240 screen")
         .str("derived_rule", "derived blocks are computed by the viewer (battle_to_view, apply_camera) and are never read back as native values")
@@ -378,6 +460,8 @@ static int dump_compendium(const std::string &outArg, const std::string &exe) {
     for (auto &kv : fpCount) dupCam += kv.second - 1;
     std::string md = "# Compendium audit\n\nGenerated by `dw3mv --dump-compendium`. The numbers under \"Counts\" are `key: value`, one a line, for diffing; \"unique\" counts records, \"references\" counts uses.\n\n## Counts\n\n```\n";
     auto kvp = [&](const char *k, long long v) { md += std::string(k) + ": " + std::to_string(v) + "\n"; };
+    md += "context: " + g_context + "\n";
+    for (auto &kv : originCount) kvp(kv.first.c_str(), kv.second);
     kvp("models.unique", (long long)list.size());
     kvp("models.digimon", mDigimon);
     kvp("models.effect", mEffect);
@@ -435,7 +519,7 @@ static int dump_compendium(const std::string &outArg, const std::string &exe) {
     for (const std::string &p : problems) md += "- " + p + "\n";
 
     /* ---- write: beside the data, never over a file of it ---- */
-    std::filesystem::path dir = outArg.empty() ? std::filesystem::path(g_data).parent_path() / "compendium" : std::filesystem::path(outArg);
+    std::filesystem::path dir = !outArg.empty() ? std::filesystem::path(outArg) : g_context == "base_game" ? std::filesystem::path(g_data).parent_path() / "compendium" : std::filesystem::path(g_data).parent_path() / "compendium" / g_context;
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
     auto put = [&](const char *name, const std::string &text) {

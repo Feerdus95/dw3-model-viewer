@@ -5,6 +5,7 @@ int main(int argc, char **argv) {
     std::vector<std::string> bounds; /* --bounds: a model file, or a fighter's name (DW3), whose posed box is printed */
     int shot_motion = 1, shot_key = 0, shot_cam = -1, shot_stage = 0, shot_fighter = 0;
     bool check = false, users = false, stages = false, seams = false, compendium = false, testPresets = false;
+    std::string baseDir; /* --base: the disc's data, for a mod's context to be compared with */
     std::string outDir, exePath; /* --dump-compendium: where it writes, and the game's exe for the techniques */
     int effect = -1, xstage = -1, istage = -1;
     float orbit[6] = {}; /* --orbit yaw,pitch,dist,x,y,z (degrees, model units): the shot's camera */
@@ -25,6 +26,8 @@ int main(int argc, char **argv) {
         else if (a == "--check") check = true;
         else if (a == "--dump-compendium") compendium = true;
         else if (a == "--test-presets") testPresets = true;
+        else if (a == "--context" && i + 1 < argc) g_context = argv[++i];
+        else if (a == "--base" && i + 1 < argc) baseDir = argv[++i];
         else if (a == "--out" && i + 1 < argc) outDir = argv[++i];
         else if (a == "--exe" && i + 1 < argc) exePath = argv[++i];
         else if (a == "--bounds" && i + 1 < argc) bounds.push_back(argv[++i]);
@@ -111,7 +114,7 @@ int main(int argc, char **argv) {
         }
         return 0;
     }
-    if (compendium) return dump_compendium(outDir, exePath);
+    if (compendium) return dump_compendium(outDir, exePath, baseDir);
     if (testPresets) return preset_selftest();
     if (istage >= 0) return import_stage_cli(istage, xmods, iobj);
     if (xstage >= 0) return export_stage_cli(xstage, xmods, xdir);
