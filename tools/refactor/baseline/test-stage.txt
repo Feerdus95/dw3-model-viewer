@@ -1,0 +1,30 @@
+exit 0
+ok    the selected props: the one picked if it is in the list, else none
+ok    a group of more than one wins; a group of one is only the one picked
+ok    removing a group takes those and keeps the order of the rest
+ok    an empty group removes nothing
+ok    duplicating a group adds copies a step to the side, at the end, and leaves the originals
+ok    copying keeps the props and where their middle was
+ok    pasting puts their middle at the asked place and keeps how they were around it
+ok    and leaves the list's own and the clipboard as they were
+ok    the same props give the same signature
+ok    a prop's position changes it
+ok    so does its picture
+ok    its kind
+ok    its count
+ok    the number of props
+ok    the leaves
+ok    the stage and the generation of the files
+ok    pasting in the stage it came from puts it a step to the side, with a free name
+ok    from another stage it keeps its place and takes that stage's number in its name
+ok    duplicating adds a step to the side with another name
+ok    a dab adds its pictures inside the radius, from the pool, with the sway, a tint in range and a scale in range
+ok    with two pictures and no repeat, no picture follows itself
+ok    a picture with no weight is never picked
+ok    the dabs stop at the most the viewer draws, and say so
+ok    erasing takes the pool's billboards near the dab
+ok    emitters, models, other pictures and far ones stay
+ok    erasing where there is nothing changes nothing
+ok    with Mix the tallest picture is 300 and the others keep their proportion to it
+ok    alone, a picture is 300 tall
+all hold

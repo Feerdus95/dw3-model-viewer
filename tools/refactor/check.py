@@ -7,7 +7,7 @@ What is compared:
   build        build.py's result, and the warnings a full compile of main.cpp gives (messages, not their places)
   preprocessed main.cpp preprocessed with build.py's own flags (-E -P) and the macros it defines (-dM): both as streams of tokens,
                so only a difference in what the compiler is given shows, not in how the lines are cut
-  tests        the exact output of --test-presets, --test-templates, --test-cameras (from R2) and --test-library (from R3)
+  tests        the exact output of --test-presets, --test-templates, --test-cameras (from R2) --test-library (from R3) and --test-stage (from R4)
   dump         sha256 of compendium.json and audit.md from --dump-compendium (given --exe)
   cli          the exact output of --apply-template and --check-framing for WarGreymon script 11 -> MetalGarurumon script 11
 Exit status 0 when everything matches. The window is never opened: every one of these flags returns before SDL_Init.
@@ -75,7 +75,7 @@ def collect(sles):
     out["preprocessed.txt"] = f"exit {rc}/{rc2}\ntokens {len(tk.split())}\nsha256 {sha(tk)}\nmacros {len(macros.splitlines())}\nmacros sha256 {sha(chr(10).join(sorted(macros.splitlines())))}\n"
     out["_preprocessed_full.txt"] = tk  # kept aside by the caller, not committed
 
-    for name, flag in (("test-presets.txt", "--test-presets"), ("test-templates.txt", "--test-templates"), ("test-cameras.txt", "--test-cameras"), ("test-library.txt", "--test-library")):
+    for name, flag in (("test-presets.txt", "--test-presets"), ("test-templates.txt", "--test-templates"), ("test-cameras.txt", "--test-cameras"), ("test-library.txt", "--test-library"), ("test-stage.txt", "--test-stage")):
         rc, text = run([EXE, flag])
         out[name] = f"exit {rc}\n{text}"
     rc, text = run([EXE, "--apply-template", *PAIR])

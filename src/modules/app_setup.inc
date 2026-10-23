@@ -7,7 +7,7 @@ int main(int argc, char **argv) {
     bool check = false, users = false, stages = false, seams = false, compendium = false, testPresets = false;
     std::vector<std::string> fitArgs; /* --fit DONOR TARGET [CAMERA]: a partner's camera fitted to another partner, printed */
     std::vector<std::string> tplArgs; /* --apply-template DONOR DSCRIPT TARGET TSCRIPT|?: a donor script's camera sequence on a target's, printed */
-    bool testTemplates = false, testCameras = false, testLibrary = false;
+    bool testTemplates = false, testCameras = false, testLibrary = false, testStage = false;
     std::string baseDir; /* --base: the disc's data, for a mod's context to be compared with */
     std::string outDir, exePath; /* --dump-compendium: where it writes, and the game's exe for the techniques */
     int effect = -1, xstage = -1, istage = -1;
@@ -32,6 +32,7 @@ int main(int argc, char **argv) {
         else if (a == "--test-templates") testTemplates = true;
         else if (a == "--test-cameras") testCameras = true;
         else if (a == "--test-library") testLibrary = true;
+        else if (a == "--test-stage") testStage = true;
         else if (a == "--check-framing" && i + 4 < argc) {
             tplArgs = {argv[i + 1], argv[i + 2], argv[i + 3], argv[i + 4], "framing"};
             i += 4;
@@ -62,11 +63,11 @@ int main(int argc, char **argv) {
     const char *base = SDL_GetBasePath();
     g_exe_dir = base ? base : "";
     find_data(data);
-    if (!compendium && !testPresets && !testTemplates && !testCameras && !testLibrary && fitArgs.empty() && tplArgs.empty()) dw2_register_all(); /* the compendium is the disc's: a converted DW2 model is the user's own */
+    if (!compendium && !testPresets && !testTemplates && !testCameras && !testLibrary && !testStage && fitArgs.empty() && tplArgs.empty()) dw2_register_all(); /* the compendium is the disc's: a converted DW2 model is the user's own */
 
     if (!bounds.empty() || !uses.empty()) attach_console();
     if (check || users || stages || seams || !shot.empty() || effect >= 0) attach_console();
-    if (xstage >= 0 || istage >= 0 || compendium || testPresets || testTemplates || testCameras || testLibrary || !fitArgs.empty() || !tplArgs.empty()) attach_console();
+    if (xstage >= 0 || istage >= 0 || compendium || testPresets || testTemplates || testCameras || testLibrary || testStage || !fitArgs.empty() || !tplArgs.empty()) attach_console();
     if (!uses.empty()) { /* which of the 62 motions a fighter's action scripts play, and which scripts */
         for (const Fighter &f : g_game.fighters) {
             std::vector<uint8_t> bytes;
@@ -138,6 +139,7 @@ int main(int argc, char **argv) {
     if (testTemplates) return templates_selftest();
     if (testCameras) return cams_selftest();
     if (testLibrary) return library_selftest();
+    if (testStage) return stage_selftest();
     if (tplArgs.size() == 5) return check_framing_cli(tplArgs[0], atoi(tplArgs[1].c_str()), tplArgs[2], atoi(tplArgs[3].c_str()));
     if (!tplArgs.empty()) return apply_template_cli(tplArgs[0], atoi(tplArgs[1].c_str()), tplArgs[2], tplArgs[3]);
     if (!fitArgs.empty()) return fit_cli(fitArgs[0], fitArgs[1], atoi(fitArgs[2].c_str()));
