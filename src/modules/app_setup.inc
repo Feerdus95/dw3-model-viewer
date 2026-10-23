@@ -666,8 +666,7 @@ int main(int argc, char **argv) {
 
     GLuint texView = 0;
     std::string texKey;
-    std::vector<uint32_t> texPixels;
-    int texW = 0, texH = 0;
+    TexPage texPage; /* the page shown in Textures: its pixels, size and whether the view has to fit it */
     char filter[64] = "";
     uint64_t last = SDL_GetTicksNS();
     bool running = true;

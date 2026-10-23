@@ -19,6 +19,7 @@
 #include "ui/stages_inspector.inc" /* Stages: the inspector */
 #include "ui/dw2_size.inc" /* a DW2 model's size */
 #include "ui/model.inc" /* Model */
+#include "ui/textures_hooks.inc" /* what Textures calls back to main for */
 #include "ui/app.inc" /* the App the separate sections take (Motions: motions.cpp) */
 #include "ui/fighter_state.inc" /* Fighter: script roles and the state of the player, the workbench and the choreography */
 #include "ui/script_player.inc" /* Fighter: the script player */
@@ -30,7 +31,6 @@
 #include "ui/workbench_save.inc" /* saving what the workbench holds, and the undo and save hooks */
 #include "ui/cameras_workbench.inc" /* Cameras: the Workbench */
 #include "ui/effects.inc" /* Effects */
-#include "ui/textures.inc" /* Textures */
 #include "ui/dw2.inc" /* DW2 */
 #include "ui/layout.inc" /* the sections' browser and inspector */
 #include "ui/transport.inc" /* the playback bar */

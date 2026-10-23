@@ -43,7 +43,6 @@
     std::string charPath;
     bool charDirty = false, charEditing = false, charMoved = false;
     float texPan[2] = {0, 0};
-    bool texFitPending = true;
     double ownPushTime = -10, bgPushTime = -10; /* a drag's changes make one step of undo */
     bool dropping = false;
     uint64_t dropSeen = 0;

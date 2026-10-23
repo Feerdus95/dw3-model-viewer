@@ -9,7 +9,7 @@
         case FIGHTER: fighter_browser(); break;
         case CAMERAS: cameras_browser(); break;
         case EFFECTS: effects_browser(); break;
-        case TEXTURES: textures_browser(); break;
+        case TEXTURES: draw_textures_browser(app); break;
         case DW2: dw2_browser(); break;
         }
     };
@@ -24,7 +24,7 @@
         case FIGHTER: fighter_inspector(); break;
         case CAMERAS: cameras_inspector(); break;
         case EFFECTS: effects_inspector(); break;
-        case TEXTURES: textures_inspector(); break;
+        case TEXTURES: draw_textures_inspector(app); break;
         case DW2: dw2_inspector(); break;
         }
     };

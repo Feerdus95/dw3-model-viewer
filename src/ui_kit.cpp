@@ -147,6 +147,14 @@ void heading(const char *text) {
     ImGui::SeparatorText(text);
     ImGui::PopFont();
 }
+void title(const char *fmt, ...) {
+    va_list a;
+    va_start(a, fmt);
+    ImGui::PushFont(g_fontTitle);
+    ImGui::TextWrappedV(fmt, a);
+    ImGui::PopFont();
+    va_end(a);
+}
 void hint(const char *fmt, ...) {
     va_list a;
     va_start(a, fmt);

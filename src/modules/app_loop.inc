@@ -734,26 +734,26 @@
             }
         } else if (section == TEXTURES && scene.model) {
             Model &m = *scene.model;
-            std::vector<std::pair<uint16_t, uint16_t>> combos = tex_combos();
+            std::vector<std::pair<uint16_t, uint16_t>> combos = tex_combos(scene);
             texHover = -1;
             if (!combos.empty()) {
                 view.texCombo = std::min(view.texCombo, (int)combos.size() - 1);
                 auto [tp, cl] = combos[view.texCombo];
                 std::string key = m.name + std::to_string(tp) + "/" + std::to_string(cl);
                 if (key != texKey) {
-                    texPixels = decode_page(m.vram, tp, cl, 256, 256);
-                    texView = rgba_texture(texView, texPixels, 256, 256);
-                    texKey = key, texW = 256, texH = 256;
+                    texPage.pixels = decode_page(m.vram, tp, cl, 256, 256);
+                    texView = rgba_texture(texView, texPage.pixels, 256, 256);
+                    texKey = key, texPage.w = 256, texPage.h = 256;
                 }
-                if (texFitPending) {
-                    view.texZoom = std::clamp(0.9f * std::min(vw / texW, vh / texH), 0.5f, 12.0f);
-                    texPan[0] = texPan[1] = 0, texFitPending = false;
+                if (texPage.fitPending) {
+                    view.texZoom = std::clamp(0.9f * std::min(vw / texPage.w, vh / texPage.h), 0.5f, 12.0f);
+                    texPan[0] = texPan[1] = 0, texPage.fitPending = false;
                 }
                 float z = view.texZoom;
-                ImVec2 o(vc.x - texPan[0] * z - texW * z / 2, vc.y - texPan[1] * z - texH * z / 2);
-                dl->AddRectFilled(o, o + ImVec2(texW * z, texH * z), IM_COL32(40, 40, 48, 255));
-                dl->AddImage((ImTextureID)(intptr_t)texView, o, o + ImVec2(texW * z, texH * z));
-                dl->AddRect(o - ImVec2(1, 1), o + ImVec2(texW * z + 1, texH * z + 1), IM_COL32(255, 255, 255, 40));
+                ImVec2 o(vc.x - texPan[0] * z - texPage.w * z / 2, vc.y - texPan[1] * z - texPage.h * z / 2);
+                dl->AddRectFilled(o, o + ImVec2(texPage.w * z, texPage.h * z), IM_COL32(40, 40, 48, 255));
+                dl->AddImage((ImTextureID)(intptr_t)texView, o, o + ImVec2(texPage.w * z, texPage.h * z));
+                dl->AddRect(o - ImVec2(1, 1), o + ImVec2(texPage.w * z + 1, texPage.h * z + 1), IM_COL32(255, 255, 255, 40));
                 if (view.uvs) {
                     auto at = [&](const uint8_t *uv) { return ImVec2(o.x + (uv[0] + 0.5f) * z, o.y + (uv[1] + 0.5f) * z); };
                     auto inside = [](ImVec2 p, ImVec2 a, ImVec2 b, ImVec2 c) {

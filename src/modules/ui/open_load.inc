@@ -2,7 +2,7 @@
     auto after_open = [&]() {
         view.stageView = false, stageId = -1, stageDirty = false;
         reset_selection();
-        texFitPending = true;
+        texPage.fitPending = true;
     };
     struct StageSnap {
         std::vector<StagePart> parts;

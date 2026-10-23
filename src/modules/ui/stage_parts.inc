@@ -81,7 +81,7 @@
     };
     auto frame_all = [&]() {
         if (section == EFFECTS) fxFitPending = true;
-        else if (section == TEXTURES) texFitPending = true;
+        else if (section == TEXTURES) texPage.fitPending = true;
         else if (scene.model) view.stageView ? frame_stage(view) : frame_model(scene, view);
     };
     auto frame_sel = [&]() {

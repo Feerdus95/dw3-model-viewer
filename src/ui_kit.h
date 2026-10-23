@@ -68,6 +68,7 @@ const char *note_icon(int kind);
 
 /* small widgets */
 void heading(const char *text);
+void title(const char *fmt, ...) IM_FMTARGS(1); /* wrapped, in the title font */
 void hint(const char *fmt, ...) IM_FMTARGS(1);
 void tip(const char *fmt, ...) IM_FMTARGS(1);
 void chip(const char *text, ImVec4 col);

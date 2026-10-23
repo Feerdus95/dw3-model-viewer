@@ -7,14 +7,6 @@
         ImGui::PopFont();
         ImGui::Separator();
     };
-    auto title = [&](const char *fmt, ...) {
-        va_list a;
-        va_start(a, fmt);
-        ImGui::PushFont(g_fontTitle);
-        ImGui::TextWrappedV(fmt, a);
-        ImGui::PopFont();
-        va_end(a);
-    };
     auto display_options = [&]() {
         float lw = ImGui::GetFontSize() * 5;
         ImGui::AlignTextToFramePadding();
