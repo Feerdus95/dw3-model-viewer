@@ -176,6 +176,39 @@ static int library_selftest() {
     ask.then();
     ok(list.size() == 1 && active == list[0].id(), "an id that is not there deletes nothing and keeps the active one");
     ok(status_index("candidate") == 0 && status_index("approved") == 1 && status_index("rejected") == 2 && status_index("other") == 0, "the status combo's index");
+    /* the filter: empty is all; each part narrows; the origin counts only with a mod's context loaded */
+    LibFilter all, f;
+    ok(lib_pass(all, false, "base_game", "approved", "") && lib_pass(all, true, "mod_x", "rejected", "mod"), "an empty filter shows everything");
+    f.ctx = "mod_x";
+    ok(lib_pass(f, false, "mod_x", "candidate", "") && !lib_pass(f, false, "base_game", "candidate", ""), "the context filter keeps only that context");
+    f = LibFilter(), f.status = "approved";
+    ok(lib_pass(f, false, "base_game", "approved", "") && !lib_pass(f, false, "base_game", "candidate", ""), "the status filter keeps only that status");
+    f = LibFilter(), f.origin = "mod";
+    ok(lib_pass(f, true, "base_game", "candidate", "mod") && !lib_pass(f, true, "base_game", "candidate", "unknown"), "the origin filter keeps only that origin, with a mod's context loaded");
+    ok(lib_pass(f, false, "base_game", "candidate", "unknown"), "and is ignored without one (the origin is not even asked)");
+    f.ctx = "mod_x", f.status = "rejected";
+    ok(lib_pass(f, true, "mod_x", "rejected", "mod") && !lib_pass(f, true, "mod_x", "rejected", "unknown") && !lib_pass(f, true, "base_game", "rejected", "mod") &&
+           !lib_pass(f, true, "mod_x", "approved", "mod"),
+       "the parts narrow together");
+    /* the form both Save buttons use */
+    LibForm form;
+    Preset pr = mk(1, "a preset");
+    pr.notes = "its notes", pr.status = "rejected";
+    Application ap;
+    ap.name = "an application", ap.notes = "more notes", ap.variant = "wide", ap.status = "approved";
+    form.load(ap);
+    ok(!strcmp(form.name, "an application") && !strcmp(form.notes, "more notes") && !strcmp(form.variant, "wide") && form.status == 1 && !strcmp(form.status_name(), "approved"),
+       "loading an application fills the form, variant included");
+    form.load(pr);
+    ok(!strcmp(form.name, "a preset") && !strcmp(form.notes, "its notes") && !*form.variant && form.status == 2 && !strcmp(form.status_name(), "rejected"),
+       "loading a preset fills it and clears the variant, which presets don't have");
+    form.status = 99;
+    ok(!strcmp(form.status_name(), "rejected"), "a status out of range is clamped, as the file writer expects");
+    form.status = -3;
+    ok(!strcmp(form.status_name(), "candidate"), "and below range");
+    pr.name = std::string(200, 'x');
+    form.load(pr);
+    ok(strlen(form.name) == sizeof form.name - 1, "a long name is cut to the field, never past it");
     Picked pk;
     pk.presetIn = "x.json";
     ok(take_picked(pk, &Picked::presetIn) == "x.json" && pk.presetIn.empty() && take_picked(pk, &Picked::presetIn).empty(), "a dialog's answer is taken once");

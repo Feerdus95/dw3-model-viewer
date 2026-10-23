@@ -7,6 +7,17 @@ ok    delete asks first and changes nothing yet
 ok    confirmed, it deletes, forgets the active one and persists
 ok    an id that is not there deletes nothing and keeps the active one
 ok    the status combo's index
+ok    an empty filter shows everything
+ok    the context filter keeps only that context
+ok    the status filter keeps only that status
+ok    the origin filter keeps only that origin, with a mod's context loaded
+ok    and is ignored without one (the origin is not even asked)
+ok    the parts narrow together
+ok    loading an application fills the form, variant included
+ok    loading a preset fills it and clears the variant, which presets don't have
+ok    a status out of range is clamped, as the file writer expects
+ok    and below range
+ok    a long name is cut to the field, never past it
 ok    a dialog's answer is taken once
 ok    a dialog's answer lands in its own field; a cancelled one in none
 all hold
