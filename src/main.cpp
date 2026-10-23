@@ -27,6 +27,8 @@
 #include "effect.h"
 #include "model.h"
 #include "stage.h"
+#include "ui_kit.h"
+#include "viewer_types.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdarg>
@@ -56,7 +58,7 @@
 #include "modules/about_effects.inc"
 #include "modules/effect_models.inc"
 #include "modules/viewer_render.inc"
-#include "modules/ui_kit.inc"
+#include "modules/ui_geometry.inc"
 #include "modules/stage_validation.inc"
 #include "modules/seam_report.inc"
 #include "modules/model_camera_tree.inc"

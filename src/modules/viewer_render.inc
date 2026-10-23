@@ -1,25 +1,5 @@
 /* --- the viewer --- */
 
-struct View {
-    Camera cam;
-    int textures = 1; /* 0 off, 1 as the PSX, 2 bilinear */
-    int lighting = 2; /* 0 off, 1 the viewer's light, 2 a stage's */
-    int stage = 0;
-    float fov = 0.8f; /* vertical, radians; a game camera's from its projection */
-    int gameCamera = -1;
-    bool face = true;
-    bool wireframe = false, skeleton = false, cull = false, grid = true;
-    bool marks = false; /* a cross where each effect of a script is */
-    bool playing = true, loop = true;
-    float speed = 1, ticks = 0;
-    int texCombo = 0;
-    float texZoom = 2;
-    bool uvs = true;
-    bool stageView = false;          /* a fight stage: its background, no grid */
-    float stageBg[3] = {0, 0, 0};
-    float pfog[4] = {}, pfogz[2] = {}; /* the props' own fog when set (alpha 0: none): colour and amount; where it starts and ends */
-};
-
 static GLuint g_mesh, g_line, g_lineVao, g_lineVbo, g_sprite, g_prop, g_propVao, g_propVbo, g_pgpu, g_pgVao, g_pgVao0;
 
 /* A stage prop on the view: its PNG's texture on a quad (top left, top right,

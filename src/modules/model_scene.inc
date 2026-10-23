@@ -7,24 +7,6 @@ struct GVert {
     uint32_t mode;
 };
 
-struct Scene {
-    std::unique_ptr<Model> model;
-    std::vector<int> first, count; /* each bone's vertices */
-    std::vector<bool> hidden;
-    int selected = -1;
-    std::vector<uint8_t> mark; /* each bone's highlight: 1 under the mouse, 2 selected */
-    /* an edit in progress, drawn before it's built: bones previewFirst up
-       to previewEnd moved by preview (in the model's space) */
-    float preview[16] = {};
-    int previewFirst = 0, previewEnd = 0;
-    GLuint vao = 0, vbo = 0, vram = 0;
-    float radius = 500, center[3] = {0, 0, 0};
-    int fid = -1;
-    std::string path;
-    std::vector<const Fighter *> fighters; /* who uses the file */
-    int fighter = 0;                       /* the one shown */
-};
-
 static void upload_vram(Scene &s) {
     GL(glBindTexture)(GL_TEXTURE_2D, s.vram);
     GL(glPixelStorei)(GL_UNPACK_ALIGNMENT, 2);
