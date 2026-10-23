@@ -23,20 +23,12 @@
         if (g.size() > 1) propSet = g, propSetPrim = *g.rbegin(), propSetN = props.size(), propSel = propSetPrim;
         else propSel = g.empty() ? -1 : *g.begin();
     };
-    auto cur_props = [&]() {
-        std::set<int> g;
-        if (propSet.size() > 1) g = propSet;
-        else if (propSel >= 0 && propSel < (int)props.size()) g.insert(propSel);
-        return g;
-    };
+    auto cur_props = [&]() { return props_current(propSet, propSel, (int)props.size()); };
     auto prop_delete = [&](int i) {
         if (propSet.size() > 1) {
             stage_mark();
-            std::vector<StageProp> keep;
-            for (int k = 0; k < (int)props.size(); k++)
-                if (!propSet.count(k)) keep.push_back(props[k]);
-            note(NOTE_INFO, "Removed " + std::to_string(props.size() - keep.size()) + " props (Ctrl+Z brings them back)");
-            props = keep, stageDirty = true;
+            note(NOTE_INFO, "Removed " + std::to_string(props_remove(props, propSet)) + " props (Ctrl+Z brings them back)");
+            stageDirty = true;
             set_props({});
             return;
         }
@@ -49,14 +41,7 @@
     auto prop_duplicate = [&](int i) {
         if (propSet.size() > 1) {
             stage_mark();
-            std::set<int> made;
-            for (int k : std::set<int>(propSet)) {
-                StageProp c = props[k];
-                c.pos[0] += 300;
-                props.push_back(c);
-                made.insert((int)props.size() - 1);
-            }
-            set_props(made), stageDirty = true;
+            set_props(props_duplicate(props, std::set<int>(propSet))), stageDirty = true;
             return;
         }
         if (i < 0 || i >= (int)props.size()) return;
@@ -69,30 +54,21 @@
     auto prop_copy = [&]() {
         std::set<int> g = cur_props();
         if (g.empty()) return;
-        propClip.clear();
-        float c[3] = {0, 0, 0};
-        for (int k : g) propClip.push_back(props[k]), c[0] += props[k].pos[0], c[1] += props[k].pos[1], c[2] += props[k].pos[2];
-        for (int k = 0; k < 3; k++) propClipC[k] = c[k] / g.size();
+        props_copy(propClip, props, g);
         clipIsProps = true;
         note(NOTE_INFO, "Copied " + std::to_string(g.size()) + (g.size() == 1 ? " prop" : " props") + " (Ctrl+V puts them where the mouse is)");
     };
     auto prop_paste = [&]() { /* the copied group's middle goes to the mouse on the ground, else a step to the side */
-        if (propClip.empty() || !stage_on()) return;
+        if (propClip.items.empty() || !stage_on()) return;
         ImVec2 mp = ImGui::GetIO().MousePos;
-        float g[3], at[3] = {propClipC[0] + 300, propClipC[1], propClipC[2]};
+        float g[3], at[3] = {propClip.center[0] + 300, propClip.center[1], propClip.center[2]};
         if (mp.x >= vpRect[0] && mp.x < vpRect[0] + vpRect[2] && mp.y >= vpRect[1] && mp.y < vpRect[1] + vpRect[3] &&
             ground_hit(view, vpRect[2], vpRect[3], mp.x - vpRect[0], mp.y - vpRect[1], g))
             at[0] = g[0], at[1] = 0, at[2] = -g[2];
         stage_mark();
-        std::set<int> made;
-        for (StageProp p : propClip) {
-            for (int k = 0; k < 3; k++) p.pos[k] += at[k] - propClipC[k];
-            props.push_back(p);
-            made.insert((int)props.size() - 1);
-        }
-        set_props(made), stageDirty = true;
+        set_props(props_paste(props, propClip, at)), stageDirty = true;
     };
-    auto can_paste = [&]() { return section == EFFECTS ? !frameClip.empty() && fx.id >= 0 : stage_on() && (clipIsProps ? !propClip.empty() : !partClip.parts.empty()); };
+    auto can_paste = [&]() { return section == EFFECTS ? !frameClip.empty() && fx.id >= 0 : stage_on() && (clipIsProps ? !propClip.items.empty() : !partClip.parts.empty()); };
     auto can_edit_sel = [&]() { return section == EFFECTS ? frame_ok() : stage_on() && (stagePart >= 0 || propSel >= 0); };
     auto do_copy = [&]() {
         if (section == EFFECTS) {

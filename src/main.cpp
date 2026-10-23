@@ -65,6 +65,7 @@
 #include "modules/templates.inc"
 #include "modules/fighter_cameras.inc"
 #include "modules/library_ui.inc"
+#include "modules/stage_logic.inc"
 #include "modules/app_setup.inc"
 #include "modules/app_sections.inc"
 #include "modules/app_loop.inc"

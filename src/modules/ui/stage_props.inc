@@ -59,46 +59,12 @@
         return brushOn && pool && section == STAGES && stage_on();
     };
     auto brush_dab = [&](const float g[3], bool erase) {
-        if (erase) {
-            size_t before = props.size();
-            props.erase(std::remove_if(props.begin(), props.end(),
-                                       [&](const StageProp &p) {
-                                           float dx = p.pos[0] - g[0], dz = -p.pos[2] - g[2];
-                                           if (p.emitter || p.model || dx * dx + dz * dz > brushR * brushR) return false;
-                                           for (const BrushPick &k : brushPool)
-                                               if (k.image == p.image) return true;
-                                           return false;
-                                       }),
-                        props.end());
-            if (props.size() != before) brushAdded = stageDirty = true, propSel = -1;
-            return;
-        }
-        int bb = 0;
-        for (const StageProp &p : props) bb += !p.emitter && !p.model;
-        for (int k = 0; k < brushN && bb < BB_MAX; k++, bb++) {
-            /* a picture by its weight; not the one just before it when there are others */
-            bool skip = brushNoRepeat && brushPool.size() > 1;
-            float tot = 0;
-            for (int j = 0; j < (int)brushPool.size(); j++)
-                if (!(skip && j == brushLastPick)) tot += brushPool[j].weight;
-            float want = psim_rnd() * tot;
-            int pick = 0;
-            for (int j = 0; j < (int)brushPool.size(); j++) {
-                if (skip && j == brushLastPick) continue;
-                pick = j, want -= brushPool[j].weight;
-                if (want <= 0) break;
-            }
-            brushLastPick = pick;
-            StageProp s;
-            s.image = brushPool[pick].image, s.size[0] = brushPool[pick].wid, s.size[1] = brushPool[pick].hgt, s.sway = brushSway;
-            float a = psim_rnd() * 6.2831853f, r = sqrtf(psim_rnd()) * brushR, tv = 1 - brushVar * psim_rnd();
-            s.pos[0] = g[0] + cosf(a) * r, s.pos[1] = 0, s.pos[2] = -(g[2] + sinf(a) * r);
-            s.scale = brushScale[0] + psim_rnd() * (brushScale[1] - brushScale[0]);
-            for (float &c : s.tint) c = roundf(255 * tv);
-            props.push_back(s);
-            brushAdded = stageDirty = true;
-        }
-        if (bb >= BB_MAX) note(NOTE_WARN, "That is as many pictures as the brush places (" + std::to_string(BB_MAX) + "): erase some, or use bigger ones");
+        BrushCfg cfg;
+        cfg.radius = brushR, cfg.scale[0] = brushScale[0], cfg.scale[1] = brushScale[1], cfg.var = brushVar, cfg.sway = brushSway, cfg.n = brushN, cfg.noRepeat = brushNoRepeat;
+        DabResult r = brush_dab_props(props, brushPool, brushLastPick, cfg, BB_MAX, g, erase);
+        if (r.changed) brushAdded = stageDirty = true;
+        if (erase && r.changed) propSel = -1;
+        if (r.capped) note(NOTE_WARN, "That is as many pictures as the brush places (" + std::to_string(BB_MAX) + "): erase some, or use bigger ones");
     };
     auto brush_begin = [&](const float g[3]) {
         brushPool.clear(), brushLastPick = -1;
@@ -119,10 +85,7 @@
         }
         if (brushPool.empty()) return false;
         /* the tallest is 300 and the others keep their proportion to it: reeds taller than a tuft */
-        for (BrushPick &k : brushPool) {
-            float hg = brushMixOn ? 300 * k.hgt / tall : 300;
-            k.wid = std::max(10.0f, hg * k.wid / k.hgt), k.hgt = hg;
-        }
+        brush_normalize(brushPool, brushMixOn, tall);
         stage_mark();
         propBrush = true, brushAdded = false;
         for (int k = 0; k < 3; k++) brushLast[k] = g[k];
@@ -204,18 +167,7 @@
     };
     /* the tables of the props: rebuilt only when the hash of what they come from changes (a prop, its picture or model) */
     auto pg_sync = [&]() {
-        uint64_t h = 1469598103934665603ull;
-        auto mix = [&](uint32_t w) { h = (h ^ w) * 1099511628211ull, h ^= h >> 29; };
-        auto mixf = [&](float f) { uint32_t w; memcpy(&w, &f, 4); mix(w); };
-        std::hash<std::string> hs;
-        mix((uint32_t)stageId + 7), mix((uint32_t)propGen), mix((uint32_t)propsMeta.leaves), mix((uint32_t)props.size());
-        for (const StageProp &p : props) {
-            mix((p.emitter ? 1u : 0u) | (p.model ? 2u : 0u) | (p.fixed ? 4u : 0u) | ((uint32_t)p.count << 4));
-            for (float f : {p.pos[0], p.pos[1], p.pos[2], p.size[0], p.size[1], p.tint[0], p.tint[1], p.tint[2], p.scale, p.sway, p.rot, p.fog,
-                            p.radius, p.top, p.fall, p.wind})
-                mixf(f);
-            mix((uint32_t)hs(p.image)), mix((uint32_t)hs(p.obj));
-        }
+        uint64_t h = props_signature(stageId, propGen, propsMeta, props);
         if (propGpu.valid && h == propGpu.sig) return;
         propGpu.valid = true, propGpu.sig = h;
         for (PropBatch &b : propGpu.batches)

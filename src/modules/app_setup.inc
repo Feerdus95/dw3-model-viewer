@@ -358,11 +358,7 @@ int main(int argc, char **argv) {
     bool brushOn = false, propBrush = false, brushAdded = false;
     float brushR = 600, brushScale[2] = {0.7f, 1.3f}, brushVar = 0.2f, brushSway = 0.5f, brushLast[3] = {};
     int brushN = 4;
-    /* what a dab picks from: one picture, or with Mix the ticked ones of the catalog, each with its weight */
-    struct BrushPick {
-        std::string image;
-        float wid, hgt, weight;
-    };
+    /* what a dab picks from (stage_logic.inc): one picture, or with Mix the ticked ones of the catalog, each with its weight */
     std::vector<BrushPick> brushPool;
     int brushLastPick = -1;
     bool brushMixOn = false, brushNoRepeat = true;
@@ -378,8 +374,7 @@ int main(int argc, char **argv) {
     size_t propSetN = 0;
     bool selectMode = false, marquee = false;
     ImVec2 marqA, marqB;
-    std::vector<StageProp> propClip; /* Ctrl+C of props, with where their middle was */
-    float propClipC[3] = {0, 0, 0};
+    PropClip propClip; /* Ctrl+C of props, with where their middle was */
     bool clipIsProps = false;
     float vpRect[4] = {0, 0, 1, 1}; /* the view's x, y, width, height, last frame */
     int propSel = -1, propKind = 0; /* the one picked; what the file dialog is for: 0 billboard, 1 emitter, 2 model */

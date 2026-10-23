@@ -39,20 +39,14 @@
     auto part_paste = [&]() {
         if (partClip.parts.empty() || !stage_on()) return;
         stage_mark();
-        char pre[8] = "";
-        if (partClipStage != stageId) snprintf(pre, sizeof pre, "s%02d_", partClipStage);
-        stageEdit.append(partClip, 0, pre);
-        if (partClipStage == stageId) stageEdit.parts.back().move[0] += 300; /* beside the one it copies */
-        stagePart = (int)stageEdit.parts.size() - 1;
+        stagePart = stage_paste_part(stageEdit, partClip, partClipStage, stageId);
         if (stage_rebuild()) note(NOTE_OK, "Pasted " + part_name(stagePart));
         scrollToSel = true;
     };
     auto part_duplicate = [&](int k) {
         if (k < 0 || k >= (int)stageEdit.parts.size()) return;
         stage_mark();
-        stageEdit.append(stageEdit, k, "");
-        stageEdit.parts.back().move[0] += 300;
-        stagePart = (int)stageEdit.parts.size() - 1;
+        stagePart = stage_duplicate_part(stageEdit, k);
         if (stage_rebuild()) note(NOTE_OK, "Duplicated as " + part_name(stagePart));
         scrollToSel = true;
     };
