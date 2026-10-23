@@ -55,11 +55,7 @@
     auto stage_on = [&]() { return view.stageView && stageId >= 0 && scene.model; };
 
     /* --- asking before losing work --- */
-    struct Ask {
-        std::string title, text, ok;
-        std::function<void()> then;
-        bool open = false, danger = true;
-    } ask;
+    Ask ask; /* (library_ui.inc) */
     auto ask_first = [&](bool dirty, const std::string &text, std::function<void()> then) {
         if (!dirty) return then();
         ask.title = "Unsaved changes", ask.text = text, ask.ok = "Discard them", ask.then = std::move(then), ask.open = true, ask.danger = true;

@@ -315,11 +315,7 @@ int main(int argc, char **argv) {
         size_t e = ownRoot.find_last_of("/\\");
         g_mods = e == std::string::npos ? ownRoot : ownRoot.substr(0, e);
     }
-    struct Picked { /* what the file dialogs gave, maybe from another thread */
-        std::mutex m;
-        std::vector<std::string> files;
-        std::string folder, data, obj, bin, prop, propTex, dw2, presetIn, presetOut, appIn, appOut; /* a presets or applications file to read, or to write */
-    } picked;
+    Picked picked; /* what the file dialogs gave (library_ui.inc) */
     picked.obj = start_obj;
     std::set<int> ownIds = own_effects(ownRoot); /* the effects with own images in ownRoot */
     read_techs({g_data + "/../SLES_039.36", ownRoot + "/../../SLES_039.36"});

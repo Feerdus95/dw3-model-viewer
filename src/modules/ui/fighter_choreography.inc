@@ -160,33 +160,21 @@
 
                 /* --- keep it --- */
                 heading("Save");
-                ImGui::SetNextItemWidth(-1);
-                ImGui::InputTextWithHint("##aname", "Name", choreo.name, sizeof choreo.name);
-                ImGui::SetNextItemWidth(-1);
-                ImGui::InputTextWithHint("##avar", "Variant (to keep several for this script)", choreo.variant, sizeof choreo.variant);
-                ImGui::SetNextItemWidth(-1);
-                ImGui::InputTextWithHint("##anotes", "Notes", choreo.notes_, sizeof choreo.notes_);
-                ImGui::SetNextItemWidth(-1);
-                ImGui::Combo("##astatus", &choreo.status, "Candidate\0Approved\0Rejected\0");
+                save_fields("a", choreo.name, sizeof choreo.name, choreo.variant, sizeof choreo.variant, "Variant (to keep several for this script)", choreo.notes_, sizeof choreo.notes_, choreo.status);
                 ImGui::BeginDisabled(choreo.blocked);
                 if (button(IC_SAVE "  Save as application", 1)) {
                     Application p = app;
                     p.name = choreo.name, p.variant = choreo.variant, p.notes = choreo.notes_, p.status = PRESET_STATUS[std::clamp(choreo.status, 0, 2)];
                     p.context = p.donorContext = g_context;
                     app_check(p);
-                    auto it = std::find_if(choreo.list.begin(), choreo.list.end(), [&](const Application &o) { return o.id() == p.id(); });
-                    auto put = [&, p, idx = (int)(it - choreo.list.begin()), has = it != choreo.list.end()]() {
-                        if (has && idx < (int)choreo.list.size()) choreo.list[idx] = p;
-                        else choreo.list.push_back(p);
-                        choreo.active = p.id();
-                        choreo.app.variant = p.variant;
-                        app_persist(choreo.list, choreo.error);
-                    };
-                    if (it == choreo.list.end()) put();
-                    else {
-                        ask.title = "Replace the application", ask.text = "\"" + it->name + "\" is already saved for this donor script and this script (variant \"" + it->variant + "\"). Replace it with the one on screen?";
-                        ask.ok = "Replace", ask.danger = true, ask.open = true, ask.then = put;
-                    }
+                    keep_or_ask<Application>(
+                        ask, choreo.list, p, "Replace the application",
+                        [](const Application &o) { return "\"" + o.name + "\" is already saved for this donor script and this script (variant \"" + o.variant + "\"). Replace it with the one on screen?"; },
+                        [&](const Application &q) {
+                            choreo.active = q.id();
+                            choreo.app.variant = q.variant;
+                            app_persist(choreo.list, choreo.error);
+                        });
                 }
                 ImGui::EndDisabled();
             }
@@ -212,7 +200,7 @@
                     snprintf(choreo.name, sizeof choreo.name, "%s", a.name.c_str());
                     snprintf(choreo.variant, sizeof choreo.variant, "%s", a.variant.c_str());
                     snprintf(choreo.notes_, sizeof choreo.notes_, "%s", a.notes.c_str());
-                    choreo.status = a.status == PRESET_STATUS[1] ? 1 : a.status == PRESET_STATUS[2] ? 2 : 0;
+                    choreo.status = status_index(a.status);
                     choreo_refresh();
                     run_script(a.scriptIdx);
                     set_ab(true);
@@ -236,48 +224,17 @@
                         if (!choreo.blocked) app_persist(choreo.list, choreo.error);
                     }
                     if (ImGui::MenuItem(IC_DELETE "  Delete the application")) {
-                        std::string id = a.id();
-                        ask.title = "Delete the application", ask.text = "Delete \"" + a.name + "\"? It can't be undone (the previous file is kept as applications.json.bak).", ask.ok = "Delete", ask.danger = true, ask.open = true;
-                        ask.then = [&, id]() {
-                            choreo.list.erase(std::remove_if(choreo.list.begin(), choreo.list.end(), [&](const Application &o) { return o.id() == id; }), choreo.list.end());
-                            if (choreo.active == id) choreo.active.clear();
-                            app_persist(choreo.list, choreo.error);
-                        };
+                        ask_delete(ask, choreo.list, choreo.active, a.id(), "Delete the application",
+                                   "Delete \"" + a.name + "\"? It can't be undone (the previous file is kept as applications.json.bak).", [&]() { app_persist(choreo.list, choreo.error); });
                     }
                     ImGui::EndPopup();
                 }
                 ImGui::PopID();
             }
             hint(mineA ? "Right-click an application to duplicate or delete it." : "No application for this fighter yet.");
-            if (button(IC_IMPORT "  Import##apps")) {
-                static const SDL_DialogFileFilter JSONF = {"Applications", "json"};
-                SDL_ShowOpenFileDialog(
-                    [](void *u, const char *const *list, int) {
-                        if (!list || !*list) return;
-                        Picked *p = (Picked *)u;
-                        std::lock_guard<std::mutex> lock(p->m);
-                        p->appIn = *list;
-                    },
-                    &picked, win, &JSONF, 1, nullptr, false);
-            }
-            ImGui::SameLine();
-            if (button(IC_SAVE "  Export##apps")) {
-                static const SDL_DialogFileFilter JSONF = {"Applications", "json"};
-                SDL_ShowSaveFileDialog(
-                    [](void *u, const char *const *list, int) {
-                        if (!list || !*list) return;
-                        Picked *p = (Picked *)u;
-                        std::lock_guard<std::mutex> lock(p->m);
-                        p->appOut = *list;
-                    },
-                    &picked, win, &JSONF, 1, "applications.json");
-            }
+            json_buttons<&Picked::appIn, &Picked::appOut>(picked, win, IC_IMPORT "  Import##apps", IC_SAVE "  Export##apps", "Applications", "applications.json");
             tip("Export writes every application. Import adds the ones in a file that you don't have; one with the same id is kept as yours and said");
-            std::string aIn, aOut;
-            {
-                std::lock_guard<std::mutex> lock(picked.m);
-                aIn.swap(picked.appIn), aOut.swap(picked.appOut);
-            }
+            std::string aIn = take_picked(picked, &Picked::appIn), aOut = take_picked(picked, &Picked::appOut);
             if (!aOut.empty()) {
                 std::string err;
                 choreo.msg = app_save(std::filesystem::u8path(aOut), choreo.list, err) ? "Exported " + std::to_string(choreo.list.size()) + " applications to " + aOut : err;

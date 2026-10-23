@@ -111,28 +111,17 @@
                 return p;
             };
             bool canSave = !pre.blocked && cand.script >= 0 && cand.of == &f;
-            ImGui::SetNextItemWidth(-1);
-            ImGui::InputTextWithHint("##pname", "Name", pre.name, sizeof pre.name);
-            ImGui::SetNextItemWidth(-1);
-            ImGui::InputTextWithHint("##pnotes", "Notes", pre.notes, sizeof pre.notes);
-            ImGui::SetNextItemWidth(-1);
-            ImGui::Combo("##pstatus", &pre.status, "Candidate\0Approved\0Rejected\0");
+            save_fields("p", pre.name, sizeof pre.name, nullptr, 0, nullptr, pre.notes, sizeof pre.notes, pre.status);
             tip("The status is of this combination only: this fighter, this script and this donor camera");
             ImGui::BeginDisabled(!canSave);
             if (button(IC_SAVE "  Save as preset", 1)) {
-                Preset p = make();
-                auto it = std::find_if(pre.list.begin(), pre.list.end(), [&](const Preset &o) { return o.id() == p.id(); });
-                auto put = [&, p, idx = (int)(it - pre.list.begin()), has = it != pre.list.end()]() {
-                    if (has && idx < (int)pre.list.size()) pre.list[idx] = p;
-                    else pre.list.push_back(p);
-                    pre.active = p.id();
-                    preset_persist(pre.list, pre.error);
-                };
-                if (it == pre.list.end()) put();
-                else {
-                    ask.title = "Replace the preset", ask.text = "\"" + it->name + "\" is already saved for this fighter, script and donor camera. Replace it with the one on screen?";
-                    ask.ok = "Replace", ask.danger = true, ask.open = true, ask.then = put;
-                }
+                keep_or_ask<Preset>(
+                    ask, pre.list, make(), "Replace the preset",
+                    [](const Preset &o) { return "\"" + o.name + "\" is already saved for this fighter, script and donor camera. Replace it with the one on screen?"; },
+                    [&](const Preset &p) {
+                        pre.active = p.id();
+                        preset_persist(pre.list, pre.error);
+                    });
             }
             ImGui::EndDisabled();
             if (!canSave && !pre.blocked) hint("Play one of this fighter's scripts first: a preset is made for the script it was seen with.");
@@ -169,7 +158,7 @@
                         cand.fighter = di, cand.cam = p.donorIdx, cand.c = p.c, cand.every = p.every, cand.fitK = p.fitK, cand.on = true; /* the snapshot, not the donor's */
                         snprintf(pre.name, sizeof pre.name, "%s", p.name.c_str());
                         snprintf(pre.notes, sizeof pre.notes, "%s", p.notes.c_str());
-                        pre.status = p.status == PRESET_STATUS[1] ? 1 : p.status == PRESET_STATUS[2] ? 2 : 0;
+                        pre.status = status_index(p.status);
                         pre.active = p.id();
                         run_script(p.scriptIdx);
                     }
@@ -183,13 +172,7 @@
                 }
                 if (ImGui::BeginPopupContextItem()) {
                     if (ImGui::MenuItem(IC_DELETE "  Delete the preset")) {
-                        std::string id = p.id();
-                        ask.title = "Delete the preset", ask.text = "Delete \"" + p.name + "\"? It can't be undone.", ask.ok = "Delete", ask.danger = true, ask.open = true;
-                        ask.then = [&, id]() {
-                            pre.list.erase(std::remove_if(pre.list.begin(), pre.list.end(), [&](const Preset &o) { return o.id() == id; }), pre.list.end());
-                            if (pre.active == id) pre.active.clear();
-                            preset_persist(pre.list, pre.error);
-                        };
+                        ask_delete(ask, pre.list, pre.active, p.id(), "Delete the preset", "Delete \"" + p.name + "\"? It can't be undone.", [&]() { preset_persist(pre.list, pre.error); });
                     }
                     ImGui::EndPopup();
                 }
@@ -198,35 +181,9 @@
             if (!mine) hint("No preset for this fighter yet.");
             else hint("Right-click a preset to delete it.");
 
-            if (button(IC_IMPORT "  Import...")) {
-                static const SDL_DialogFileFilter JSONF = {"Presets", "json"};
-                SDL_ShowOpenFileDialog(
-                    [](void *u, const char *const *list, int) {
-                        if (!list || !*list) return;
-                        Picked *p = (Picked *)u;
-                        std::lock_guard<std::mutex> lock(p->m);
-                        p->presetIn = *list;
-                    },
-                    &picked, win, &JSONF, 1, nullptr, false);
-            }
-            ImGui::SameLine();
-            if (button(IC_SAVE "  Export...")) {
-                static const SDL_DialogFileFilter JSONF = {"Presets", "json"};
-                SDL_ShowSaveFileDialog(
-                    [](void *u, const char *const *list, int) {
-                        if (!list || !*list) return;
-                        Picked *p = (Picked *)u;
-                        std::lock_guard<std::mutex> lock(p->m);
-                        p->presetOut = *list;
-                    },
-                    &picked, win, &JSONF, 1, "presets.json");
-            }
+            json_buttons<&Picked::presetIn, &Picked::presetOut>(picked, win, IC_IMPORT "  Import...", IC_SAVE "  Export...", "Presets", "presets.json");
             tip("Export writes every preset; import reads a file of presets and shows what it would add before it changes anything");
-            std::string inPath, outPath;
-            {
-                std::lock_guard<std::mutex> lock(picked.m);
-                inPath.swap(picked.presetIn), outPath.swap(picked.presetOut);
-            }
+            std::string inPath = take_picked(picked, &Picked::presetIn), outPath = take_picked(picked, &Picked::presetOut);
             if (!outPath.empty()) {
                 std::string err;
                 pre.msg = preset_save(std::filesystem::u8path(outPath), pre.list, err) ? "Exported " + std::to_string(pre.list.size()) + " presets to " + outPath : err;
