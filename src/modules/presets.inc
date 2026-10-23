@@ -164,6 +164,9 @@ static bool preset_save(const std::filesystem::path &path, const std::vector<Pre
         std::filesystem::remove(tmp, ec);
         return err = "what was written did not read back" + (perr.empty() ? "" : ": " + perr) + "; " + path.string() + " is as it was", false;
     }
+    /* the file as it was stays beside it as presets.json.bak: one step back for whatever this save changes or deletes */
+    if (std::filesystem::exists(path)) std::filesystem::copy_file(path, path.string() + ".bak", std::filesystem::copy_options::overwrite_existing, ec);
+    ec.clear();
     std::filesystem::rename(tmp, path, ec);
     if (ec) return err = "can't replace " + path.string() + ": " + ec.message(), false;
     return true;
@@ -273,7 +276,28 @@ static int preset_selftest() {
     p2.status = "rejected";
     ok(preset_save(file, {p2}, err) && preset_text(file) != first && !std::filesystem::exists(dir / "presets.json.tmp"), "replaces the file and leaves no temp");
     ok(preset_text(file) == preset_json({p2}), "the file is the json, byte for byte");
+    ok(preset_text(file.string() + ".bak") == first, "the previous file is kept as .bak");
     std::filesystem::remove_all(dir);
     printf("%s\n", bad ? "FAILED" : "all hold");
     return bad != 0;
+}
+
+/* --fit DONOR TARGET [CAMERA]: DONOR's camera CAMERA (a partner's, 8 is its Shot 1) as Fit to this model puts it on TARGET's model */
+static int fit_cli(const std::string &donor, const std::string &target, int cam) {
+    const Fighter *d = nullptr, *t = nullptr;
+    for (const Fighter &f : g_game.fighters) {
+        if (f.name == donor && !f.enemy) d = &f;
+        if (f.name == target && !f.enemy) t = &f;
+    }
+    if (!d || !t || cam < 0 || cam >= (int)d->cameras.size()) return printf("--fit: a partner of that name, or that camera, doesn't exist\n"), 1;
+    float dl[3], dh[3], tl[3], th[3];
+    GameCamera out;
+    double k;
+    if (!fighter_box(*d, dl, dh) || !fighter_box(*t, tl, th) || !fit_camera(*d, d->cameras[cam], *t, out, k)) return printf("--fit: a model's box couldn't be read\n"), 1;
+    const GameCamera &c = d->cameras[cam];
+    printf("%s box %.0f x %.0f x %.0f, %s box %.0f x %.0f x %.0f: scale %.3f\n", donor.c_str(), dh[0] - dl[0], dh[1] - dl[1], dh[2] - dl[2], target.c_str(), th[0] - tl[0],
+           th[1] - tl[1], th[2] - tl[2], k);
+    printf("camera %d (%s)\n  donor : eye %d %d %d  target %d %d %d  proj %d\n  fitted: eye %d %d %d  target %d %d %d  proj %d\n", cam, camera_role(false, cam).name, c.pos[0], c.pos[1],
+           c.pos[2], c.ref[0], c.ref[1], c.ref[2], c.proj, out.pos[0], out.pos[1], out.pos[2], out.ref[0], out.ref[1], out.ref[2], out.proj);
+    return 0;
 }
