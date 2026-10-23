@@ -53,6 +53,19 @@ struct ChoreoUi {
     int status = 0;
 };
 
+/* B's source is one choice: the sequence (an application on screen, and "B shows" on it), else the candidate camera */
+static bool b_is_sequence(const ChoreoUi &choreo) { return choreo.on && choreo.has; }
+static const char *cams_b_name(const ChoreoUi &choreo) { return b_is_sequence(choreo) ? "sequence" : "candidate camera"; }
+static std::string cams_showing(bool b, const ChoreoUi &choreo) { return b ? std::string("Showing B: ") + cams_b_name(choreo) : "Showing A: the script's camera"; }
+
+/* the candidate's default donor for fighter F: F itself (its index in g_game.fighters, -1 if it isn't there) and its battle view (a partner's
+   camera 9, an enemy's first), clamped to its cameras */
+static int cams_default_donor(const Fighter &f, int &cam) {
+    for (int i = 0; i < (int)g_game.fighters.size(); i++)
+        if (&g_game.fighters[i] == &f) return cam = std::min<int>(f.enemy ? 0 : 8, std::max(0, (int)f.cameras.size() - 1)), i;
+    return -1;
+}
+
 static const Fighter *scene_fighter(const Scene &scene) { return scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter]; }
 
 /* the view takes the game's camera the run has set, as the player's own */
@@ -292,6 +305,21 @@ static int cams_selftest() {
     choreo.on = false;
     cams_b_start(cand, choreo, *f, w);
     ok(!memcmp(w, wc, sizeof wc), "and at the candidate without");
+    /* what B is called and what the bar says */
+    ChoreoUi none, seq;
+    seq.on = seq.has = true;
+    ok(!b_is_sequence(none) && b_is_sequence(seq) && !strcmp(cams_b_name(none), "candidate camera") && !strcmp(cams_b_name(seq), "sequence"), "B is the sequence only with one on screen and chosen");
+    seq.has = false;
+    ok(!b_is_sequence(seq), "chosen but nothing built: B is the candidate");
+    seq.has = true, seq.on = false;
+    ok(!b_is_sequence(seq), "built but not chosen: B is the candidate");
+    ok(cams_showing(false, none) == "Showing A: the script's camera" && cams_showing(true, none) == "Showing B: candidate camera" && cams_showing(true, ([&] { ChoreoUi c; c.on = c.has = true; return c; })()) == "Showing B: sequence",
+       "the bar says which one is showing, and what B is");
+    /* the default donor */
+    int cam = -1, di = cams_default_donor(*f, cam);
+    ok(di == (int)(f - &g_game.fighters[0]) && cam == std::min<int>(f->enemy ? 0 : 8, (int)f->cameras.size() - 1), "the default donor is the fighter itself, at its battle view");
+    Fighter stranger = *f;
+    ok(cams_default_donor(stranger, cam) == -1, "a fighter that isn't in the list has none");
     printf("%s\n", bad ? "FAILED" : "all hold");
     return bad != 0;
 }

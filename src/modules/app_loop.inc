@@ -258,7 +258,8 @@
         bool motionBar = scene.model && !view.stageView && !scene.model->motions.empty() &&
                          (section == FILES || section == DW2 || section == MODEL || section == MOTIONS || section == FIGHTER);
         bool transportOn = (section == EFFECTS && fx.id >= 0) || motionBar;
-        float transH = transportOn ? ImGui::GetFrameHeight() + 12 * dpi : 0;
+        bool abBar = motionBar && section == FIGHTER && !scene.fighters.empty() && !scene.model->dw2;
+        float transH = transportOn ? ImGui::GetFrameHeight() * (abBar ? 2 : 1) + (abBar ? 16 : 12) * dpi : 0;
         if (browserW <= 0) browserW = ds.x * 0.21f;
         if (inspectorW <= 0) inspectorW = ds.x * 0.25f;
         /* the panels' inner edges drag like splitters, before the layout reads the widths */

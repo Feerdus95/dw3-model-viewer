@@ -20,4 +20,10 @@ ok    a shot of a fighter's camera is that one
 ok    a command past the application's shots leaves B as it is
 ok    B starts at the battle's default view with an application
 ok    and at the candidate without
+ok    B is the sequence only with one on screen and chosen
+ok    chosen but nothing built: B is the candidate
+ok    built but not chosen: B is the candidate
+ok    the bar says which one is showing, and what B is
+ok    the default donor is the fighter itself, at its battle view
+ok    a fighter that isn't in the list has none
 all hold

@@ -98,8 +98,40 @@
             if (lockCam) show_cam();
         }
     };
-    auto set_ab = [&](bool b) { cams_set_ab(view, scene, run, cand, choreo, b); };
+    /* the donor of the candidate camera: a fighter of the model's side and one of its cameras; its values are the start, then adjustable */
+    auto cand_pick = [&](int fi, int ci) {
+        const Fighter &d = g_game.fighters[fi];
+        cand.fighter = fi, cand.cam = std::clamp(ci, 0, std::max(0, (int)d.cameras.size() - 1));
+        if (!d.cameras.empty()) cand.c = d.cameras[cand.cam];
+        cand.fitK = 0;
+    };
+    /* a donor for fighter F when there is none or it is of the other side: F itself, its battle view (B works before the panel is drawn) */
+    auto cand_ensure = [&](const Fighter &f) {
+        if (cand.fighter < 0 || cand.fighter >= (int)g_game.fighters.size() || g_game.fighters[cand.fighter].enemy != f.enemy) {
+            int cam = 0, i = cams_default_donor(f, cam);
+            if (i >= 0) cand_pick(i, cam);
+            cand.on = false;
+        }
+        return cand.fighter >= 0;
+    };
+    auto set_ab = [&](bool b) {
+        if (const Fighter *f = scene_fighter(scene)) cand_ensure(*f);
+        cams_set_ab(view, scene, run, cand, choreo, b);
+    };
     auto cand_edited = [&]() { cams_cand_edited(view, scene, run, cand, choreo); };
+    /* what B shows: the candidate camera or the sequence (an application, once there is one) */
+    auto b_source = [&]() {
+        bool seq = b_is_sequence(choreo);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextDisabled("B shows");
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Candidate camera##bsrc", !seq) && seq) choreo.on = false, choreo_refresh();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!choreo.has);
+        if (ImGui::RadioButton("Sequence##bsrc", seq) && !seq) choreo.on = true, choreo_refresh();
+        ImGui::EndDisabled();
+        tip("What B shows in place of the script's camera: the candidate camera, or the choreography's sequence (once one is built or loaded)");
+    };
     auto run_step = [&](float dt) {
         float ticks = view.playing ? dt * 60 * view.speed : 0;
         spriteDraws.clear();

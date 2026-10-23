@@ -17,6 +17,7 @@
         }
         ImGui::Checkbox("Keep the game's camera", &lockCam);
         tip("While a script plays the view stays where the battle puts the camera (its default view, then the script's cameras). Off, you can move around it: a sprite effect then shows from where you look, not as the game shows it");
+        b_source();
 #include "fighter_candidate.inc"
 #include "fighter_choreography.inc"
         if (run.on && button(IC_PAUSE "  Stop the script")) run.on = false, free_fx_models();

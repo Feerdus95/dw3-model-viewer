@@ -22,6 +22,7 @@
 #include "ui/motions.inc" /* Motions */
 #include "ui/fighter_state.inc" /* Fighter: script roles and the state of the player, the workbench and the choreography */
 #include "ui/script_player.inc" /* Fighter: the script player */
+#include "ui/ab_controls.inc" /* A/B under the view */
 #include "ui/fighter_browser.inc" /* Fighter: the browser (its two big blocks are included in its body) */
 #include "ui/fighter_inspector.inc" /* Fighter: the inspector */
 #include "ui/effects.inc" /* Effects */

@@ -1,22 +1,8 @@
         if (ImGui::CollapsingHeader("Candidate camera")) {
             /* the donor: a fighter of this one's side and one of its cameras; its values are the start, then adjustable */
-            auto pick = [&](int fi, int ci) {
-                const Fighter &d = g_game.fighters[fi];
-                cand.fighter = fi, cand.cam = std::clamp(ci, 0, std::max(0, (int)d.cameras.size() - 1));
-                if (!d.cameras.empty()) cand.c = d.cameras[cand.cam];
-                cand.fitK = 0;
-            };
-            if (cand.fighter < 0 || cand.fighter >= (int)g_game.fighters.size() || g_game.fighters[cand.fighter].enemy != f.enemy) {
-                for (int i = 0; i < (int)g_game.fighters.size(); i++)
-                    if (&g_game.fighters[i] == &f) pick(i, std::min<int>(f.enemy ? 0 : 8, std::max(0, (int)f.cameras.size() - 1)));
-                cand.on = false;
-            }
-            if (cand.fighter < 0) return hint("This fighter is not in the fighters' list.");
-            if (ImGui::RadioButton("A  The script's camera", !cand.on)) set_ab(false);
-            ImGui::SameLine();
-            if (ImGui::RadioButton("B  The candidate", cand.on)) set_ab(true);
-            tip("B replaces the camera the script asks for with the candidate, at the same moments; A is the game's own. Switching changes only the view, on the frame that is showing: the animation, its timing and the candidate's edits stay (key B toggles)");
-            ImGui::TextColored(cand.on ? C_WARN : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled), "Showing %s", cand.on ? "B, the candidate" : "A, the script's camera");
+            auto pick = cand_pick;
+            if (!cand_ensure(f)) return hint("This fighter is not in the fighters' list.");
+            hint("A and B are under the view (key B): B replaces the camera the script asks for with the candidate, at the same moments.");
             ImGui::Checkbox("Also at the cuts the player skips", &cand.every);
             tip("The script's explicit cameras and the other side's shots: the player doesn't move the view for them, the candidate does");
             const Fighter &donor = g_game.fighters[cand.fighter];

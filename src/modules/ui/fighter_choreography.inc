@@ -87,10 +87,6 @@
             if (choreo.has) {
                 heading("The sequence");
                 for (const std::string &w : app.warn) ImGui::TextColored(C_WARN, "%s", w.c_str());
-                if (ImGui::RadioButton("A  The script's cameras##ch", !cand.on)) set_ab(false);
-                ImGui::SameLine();
-                if (ImGui::RadioButton("B  The sequence##ch", cand.on)) set_ab(true);
-                tip("Switches only the view, on the frame that is showing (key B)");
                 bool changed = false;
                 bool fitted = app.fitK > 0;
                 if (ImGui::Checkbox("Fitted to this model", &fitted)) {
@@ -156,7 +152,6 @@
                 }
                 for (const std::string &n : choreo.notes) hint("%s", n.c_str());
                 if (changed) choreo_refresh();
-                if (ImGui::Checkbox("B uses the sequence", &choreo.on)) choreo_refresh();
 
                 /* --- keep it --- */
                 heading("Save");
