@@ -100,9 +100,10 @@
         if (own.save()) ownDirty = false, ownIds = own_effects(ownRoot), note(NOTE_OK, "Saved " + own.dir + "/effect.json");
         else note(NOTE_ERROR, own.error);
     };
-    auto can_save = [&]() { return section == EFFECTS ? fx.id >= 0 && !own.frames.empty() : stage_on() || (char_on() && charDirty); };
+    auto can_save = [&]() { return section == CAMERAS ? wb_undo_on() : section == EFFECTS ? fx.id >= 0 && !own.frames.empty() : stage_on() || (char_on() && charDirty); };
     auto do_save = [&]() {
         if (!can_save()) return;
+        if (section == CAMERAS) return wb_save_do();
         if (char_on() && section != EFFECTS) return char_save();
         section == EFFECTS ? own_save() : stage_save();
     };

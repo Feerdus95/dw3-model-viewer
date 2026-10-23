@@ -35,8 +35,14 @@
         ownDirty = true, fxDrawn = -1;
         if (ownFrame >= (int)own.frames.size()) ownFrame = -1;
     };
+    /* the camera workbench's own undo and save (workbench_ops.inc, workbench_save.inc fill these in): Undo / Redo in Cameras and Fighter, Ctrl+S in Cameras */
+    std::function<bool()> wb_undo_on;
+    std::function<bool(bool)> wb_undo_can;
+    std::function<void(bool)> wb_undo_do;
+    std::function<void()> wb_save_do;
     auto undo_own = [&]() { return section == EFFECTS; };
     auto can_undo = [&](bool redo) {
+        if (wb_undo_on()) return wb_undo_can(redo);
         if (undo_own()) return fx.id >= 0 && !(redo ? ownHist.redo : ownHist.undo).empty();
         if (scene.model && scene.model->dw2 && (section == DW2 || section == MODEL)) return !(redo ? dw2Redo : dw2Undo).empty();
         if (section == MODEL && char_on()) return !(redo ? charRedo : charUndo).empty();
@@ -44,6 +50,7 @@
     };
     auto do_undo = [&](bool redo) {
         if (!can_undo(redo)) return;
+        if (wb_undo_on()) return wb_undo_do(redo);
         if (undo_own()) {
             std::vector<OwnSnap> &from = redo ? ownHist.redo : ownHist.undo, &to = redo ? ownHist.undo : ownHist.redo;
             to.push_back(own_snap());

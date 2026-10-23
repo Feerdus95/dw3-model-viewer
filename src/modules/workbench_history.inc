@@ -66,6 +66,8 @@ static void wb_put(Candidate &cand, ChoreoUi &choreo, const WbSnap &s) {
 
 /* Which parts differ from the last clean (saved or loaded) state: 1 the candidate, 2 the sequence */
 enum { WB_CAND = 1, WB_SEQ = 2 };
+/* What the unsaved indicator names for those parts */
+static std::string wb_unsaved_what(int parts) { return parts == (WB_CAND | WB_SEQ) ? "candidate camera, sequence" : parts == WB_CAND ? "candidate camera" : parts == WB_SEQ ? "sequence" : ""; }
 
 struct WbHist {
     static const size_t LIMIT = 100; /* the oldest entries go first */

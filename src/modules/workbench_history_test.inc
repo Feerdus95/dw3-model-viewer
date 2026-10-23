@@ -229,6 +229,9 @@ static int workbench_selftest() {
         }
     }
 
+    ok(wb_unsaved_what(WB_CAND) == "candidate camera" && wb_unsaved_what(WB_SEQ) == "sequence" && wb_unsaved_what(WB_CAND | WB_SEQ) == "candidate camera, sequence" && wb_unsaved_what(0).empty(),
+       "the indicator names the part that is unsaved, or both");
+
     /* clear */
     h = WbHist();
     h.edit(state(1), false);

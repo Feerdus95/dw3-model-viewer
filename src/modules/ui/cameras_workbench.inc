@@ -252,28 +252,9 @@
             lib_form(form);
             tip("The status is of this combination only: this fighter, this script and this donor camera");
             heading("Save the candidate camera as a preset");
-            auto make = [&]() {
-                Preset p;
-                p.name = form.name, p.notes = form.notes, p.status = form.status_name();
-                p.fighter = f.id;
-                p.scriptFid = f.effectsFid, p.scriptEntry = f.effectsEntry, p.scriptIdx = cand.script;
-                p.donor = donor.id, p.donorEnemy = donor.enemy, p.donorIdx = cand.cam;
-                p.c = cand.c, p.every = cand.every, p.fitK = cand.fitK;
-                p.context = p.donorContext = g_context;
-                preset_check(p);
-                return p;
-            };
             bool canSave = !pre.blocked && cand.script >= 0 && cand.of == &f;
             ImGui::BeginDisabled(!canSave);
-            if (button(IC_SAVE "  Save as preset", 1)) {
-                keep_or_ask<Preset>(
-                    ask, pre.list, make(), "Replace the preset",
-                    [](const Preset &o) { return "\"" + o.name + "\" is already saved for this fighter, script and donor camera. Replace it with the one on screen?"; },
-                    [&](const Preset &p) {
-                        pre.active = p.id();
-                        preset_persist(pre.list, pre.error);
-                    });
-            }
+            if (button(IC_SAVE "  Save as preset", 1)) wb_save_preset();
             ImGui::EndDisabled();
             if (!canSave && !pre.blocked) hint("Play one of this fighter's scripts first: a preset is made for the script it was seen with.");
             if (canSave) hint("For script %d, donor %s", cand.script, comp::cam_id(donor.id, donor.enemy, cand.cam).c_str());
@@ -281,20 +262,7 @@
             heading("Save the sequence as an application");
             if (choreo.has) {
                 ImGui::BeginDisabled(choreo.blocked);
-                if (button(IC_SAVE "  Save as application", 1)) {
-                    Application p = app;
-                    p.name = form.name, p.variant = form.variant, p.notes = form.notes, p.status = form.status_name();
-                    p.context = p.donorContext = g_context;
-                    app_check(p);
-                    keep_or_ask<Application>(
-                        ask, choreo.list, p, "Replace the application",
-                        [](const Application &o) { return "\"" + o.name + "\" is already saved for this donor script and this script (variant \"" + o.variant + "\"). Replace it with the one on screen?"; },
-                        [&](const Application &q) {
-                            choreo.active = q.id();
-                            choreo.app.variant = q.variant;
-                            app_persist(choreo.list, choreo.error);
-                        });
-                }
+                if (button(IC_SAVE "  Save as application", 1)) wb_save_app();
                 ImGui::EndDisabled();
             } else {
                 hint("Build a sequence in the Sequence tab to keep it as an application.");

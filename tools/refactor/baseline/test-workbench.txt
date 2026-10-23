@@ -42,5 +42,6 @@ ok    a fade in progress goes on, towards the restored camera
 ok    undoing a sequence away makes B the candidate again
 ok    and redoing it brings the sequence back, the script untouched
 ok    with no script and B showing, the view takes the restored candidate
+ok    the indicator names the part that is unsaved, or both
 ok    clear forgets the history and the clean points
 all hold

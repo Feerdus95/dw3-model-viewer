@@ -224,16 +224,21 @@
             else if (scene.model && !scene.fighters.empty() && !scene.fighters[scene.fighter]->name.empty())
                 open = scene.fighters[scene.fighter]->name + "  (" + scene.model->name + ")";
             else if (scene.model) open = scene.model->name;
-            bool dirty = (stageDirty && stageId >= 0) || ownDirty;
+            int wbd = wb_dirty(); /* the camera workbench: WB_CAND, WB_SEQ */
+            bool wbOnly = wbd && !(stageDirty && stageId >= 0) && !ownDirty;
+            std::string unsaved = IC_WARN " unsaved";
+            if (wbOnly) unsaved += ": " + wb_unsaved_what(wbd);
+            bool dirty = (stageDirty && stageId >= 0) || ownDirty || wbd;
             float ub = ImGui::GetFrameHeight() * 1.3f;
             float right = ds.x - st.WindowPadding.x - ub * 2 - st.ItemSpacing.x;
-            float tw = ImGui::CalcTextSize(open.c_str()).x + (dirty ? ImGui::CalcTextSize(IC_WARN " unsaved   ").x : 0);
+            float tw = ImGui::CalcTextSize(open.c_str()).x + (dirty ? ImGui::CalcTextSize((unsaved + "   ").c_str()).x : 0);
             ImGui::SameLine(std::max(ImGui::GetCursorPosX() + 20 * dpi, right - tw - st.ItemSpacing.x * 2));
             ImGui::AlignTextToFramePadding();
             if (dirty) {
-                ImGui::TextColored(C_WARN, IC_WARN " unsaved");
-                tip("%s%s%s", stageDirty && stageId >= 0 ? "The stage's changes aren't saved to the game. " : "",
-                    ownDirty ? "The own images' changes aren't saved. " : "", "Ctrl+S saves the section's.");
+                ImGui::TextColored(C_WARN, "%s", unsaved.c_str());
+                tip("%s%s%s%s%s", stageDirty && stageId >= 0 ? "The stage's changes aren't saved to the game. " : "", ownDirty ? "The own images' changes aren't saved. " : "",
+                    wbd & WB_CAND ? "The candidate camera isn't saved as a preset. " : "", wbd & WB_SEQ ? "The sequence isn't saved as an application. " : "",
+                    "Ctrl+S saves the section's (in Cameras: what B shows).");
                 ImGui::SameLine();
             }
             ImGui::TextDisabled("%s", open.c_str());
@@ -242,7 +247,7 @@
             ImGui::BeginDisabled(!can_undo(false));
             if (ImGui::Button(IC_UNDO, ImVec2(ub, 0))) do_undo(false);
             ImGui::EndDisabled();
-            tip("Undo (Ctrl+Z): the %s", undo_own() ? "own images' edits" : "stage's edits");
+            tip("Undo (Ctrl+Z): the %s", wb_undo_on() ? "camera workbench's edits" : undo_own() ? "own images' edits" : "stage's edits");
             ImGui::SameLine();
             ImGui::BeginDisabled(!can_undo(true));
             if (ImGui::Button(IC_REDO, ImVec2(ub, 0))) do_undo(true);
@@ -608,6 +613,7 @@
         if (chord(ImGuiMod_Ctrl | ImGuiKey_D)) do_duplicate();
         if (chord(ImGuiMod_Ctrl | ImGuiKey_S)) do_save();
         if (chord(ImGuiMod_Ctrl | ImGuiKey_O)) pick_bin();
+        wb_sync();
         wb_settle();
         if (chord(ImGuiMod_Ctrl | ImGuiKey_B)) showBrowser = !showBrowser;
         if (chord(ImGuiMod_Ctrl | ImGuiKey_I)) showInspector = !showInspector;

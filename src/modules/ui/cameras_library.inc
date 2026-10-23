@@ -106,6 +106,7 @@
                 wb_begin();
                 cand.fighter = di, cand.cam = p.donorIdx, cand.c = p.c, cand.every = p.every, cand.fitK = p.fitK, cand.on = true; /* the snapshot, not the donor's */
                 wb_end();
+                wbh.set_clean_cand(wb_now().c);
                 form.load(p);
                 pre.active = p.id();
                 run_script(p.scriptIdx);
@@ -187,6 +188,7 @@
                 choreo.has = choreo.on = true;
                 choreo.active = a.id();
                 wb_end();
+                wbh.set_clean_seq(wb_now().s);
                 form.load(a);
                 choreo_refresh();
                 run_script(a.scriptIdx);

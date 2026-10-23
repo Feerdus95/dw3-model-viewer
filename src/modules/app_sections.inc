@@ -27,6 +27,7 @@
 #include "ui/fighter_browser.inc" /* Fighter: the browser (the scripts and the player's options) */
 #include "ui/fighter_inspector.inc" /* Fighter: the inspector */
 #include "ui/cameras_library.inc" /* Cameras: the Library */
+#include "ui/workbench_save.inc" /* saving what the workbench holds, and the undo and save hooks */
 #include "ui/cameras_workbench.inc" /* Cameras: the Workbench */
 #include "ui/effects.inc" /* Effects */
 #include "ui/textures.inc" /* Textures */
