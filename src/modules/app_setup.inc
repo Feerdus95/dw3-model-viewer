@@ -30,6 +30,10 @@ int main(int argc, char **argv) {
         else if (a == "--dump-compendium") compendium = true;
         else if (a == "--test-presets") testPresets = true;
         else if (a == "--test-templates") testTemplates = true;
+        else if (a == "--check-framing" && i + 4 < argc) {
+            tplArgs = {argv[i + 1], argv[i + 2], argv[i + 3], argv[i + 4], "framing"};
+            i += 4;
+        }
         else if (a == "--apply-template" && i + 4 < argc) {
             tplArgs = {argv[i + 1], argv[i + 2], argv[i + 3], argv[i + 4]};
             i += 4;
@@ -130,6 +134,7 @@ int main(int argc, char **argv) {
     if (compendium) return dump_compendium(outDir, exePath, baseDir);
     if (testPresets) return preset_selftest();
     if (testTemplates) return templates_selftest();
+    if (tplArgs.size() == 5) return check_framing_cli(tplArgs[0], atoi(tplArgs[1].c_str()), tplArgs[2], atoi(tplArgs[3].c_str()));
     if (!tplArgs.empty()) return apply_template_cli(tplArgs[0], atoi(tplArgs[1].c_str()), tplArgs[2], tplArgs[3]);
     if (!fitArgs.empty()) return fit_cli(fitArgs[0], fitArgs[1], atoi(fitArgs[2].c_str()));
     if (istage >= 0) return import_stage_cli(istage, xmods, iobj);

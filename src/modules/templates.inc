@@ -334,6 +334,70 @@ static const Fighter *partner_named(const std::string &name) {
     return nullptr;
 }
 
+/* Where a fighter's box at rest (LO, HI from fighter_box) falls on the screen through the camera of words W, in the 240-line screen's
+   pixels from its center: the box's center, its size, and the part of its corners inside 320 x 240. The roll is not drawn (as in the
+   viewer). OK is false when a corner is behind the camera */
+struct Framing {
+    bool ok = false;
+    float cx = 0, cy = 0, w = 0, h = 0, inside = 0;
+    float mx = 0, my = 0; /* where the box's own center falls */
+};
+static Framing frame_of(const Fighter &f, const int w[14], const float lo[3], const float hi[3]) {
+    Framing r;
+    float eB[3], rB[3], eye[3], ref[3];
+    cam_eff(w, eB, rB);
+    battle_to_view(f, eB, eye), battle_to_view(f, rB, ref);
+    auto sub = [](const float *a, const float *b, float *o) { for (int i = 0; i < 3; i++) o[i] = a[i] - b[i]; };
+    auto dot = [](const float *a, const float *b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
+    auto cross = [](const float *a, const float *b, float *o) { o[0] = a[1] * b[2] - a[2] * b[1], o[1] = a[2] * b[0] - a[0] * b[2], o[2] = a[0] * b[1] - a[1] * b[0]; };
+    auto norm = [&](float *a) { float l = sqrtf(dot(a, a)); for (int i = 0; i < 3; i++) a[i] /= l > 0 ? l : 1; };
+    float fwd[3], up[3] = {0, 1, 0}, right[3], up2[3];
+    sub(ref, eye, fwd), norm(fwd), cross(fwd, up, right), norm(right), cross(right, fwd, up2);
+    float proj = (float)w[13], xmin = 1e9f, xmax = -1e9f, ymin = 1e9f, ymax = -1e9f;
+    int in = 0;
+    for (int c = 0; c < 8; c++) {
+        /* a model's y and z are the PSX's: the viewer's space has them flipped */
+        float p[3] = {c & 1 ? hi[0] : lo[0], -(c & 2 ? hi[1] : lo[1]), -(c & 4 ? hi[2] : lo[2])}, d[3];
+        sub(p, eye, d);
+        float z = dot(d, fwd);
+        if (z <= 1) return r;
+        float x = proj * dot(d, right) / z, y = proj * dot(d, up2) / z;
+        xmin = std::min(xmin, x), xmax = std::max(xmax, x), ymin = std::min(ymin, y), ymax = std::max(ymax, y);
+        in += fabsf(x) <= 160 && fabsf(y) <= 120;
+    }
+    r.ok = true, r.cx = (xmin + xmax) / 2, r.cy = (ymin + ymax) / 2, r.w = xmax - xmin, r.h = ymax - ymin, r.inside = in / 8.0f;
+    float m[3] = {(lo[0] + hi[0]) / 2, -(lo[1] + hi[1]) / 2, -(lo[2] + hi[2]) / 2}, d[3];
+    sub(m, eye, d);
+    float z = dot(d, fwd);
+    if (z > 1) r.mx = proj * dot(d, right) / z, r.my = proj * dot(d, up2) / z;
+    else r.ok = false;
+    return r;
+}
+
+/* --check-framing DONOR DSCRIPT TARGET TSCRIPT: for each explicit shot the application puts on the target, where the donor's model
+   falls on the screen through the donor's camera and where the target's falls through the effective one. A Fit is a similarity, so
+   the center must agree; the size agrees as far as the two boxes have the same proportions. */
+static int check_framing_cli(const std::string &donor, int dIdx, const std::string &target, int tIdx) {
+    const Fighter *d = partner_named(donor), *t = partner_named(target);
+    if (!d || !t) return printf("--check-framing: a partner of that name doesn't exist\n"), 1;
+    float dl[3], dh[3], tl[3], th[3];
+    if (!fighter_box(*d, dl, dh) || !fighter_box(*t, tl, th)) return printf("--check-framing: a model's box couldn't be read\n"), 1;
+    Application a = app_new(*d, dIdx, *t, tIdx, true);
+    FitFrame ff = fit_frame(*d, *t);
+    std::vector<std::string> notes;
+    std::vector<EffShot> eff = app_effective(a, *t, ff, notes);
+    printf("%s box %.0f x %.0f x %.0f, %s box %.0f x %.0f x %.0f, scale %.3f. Pixels from the center of a 320 x 240 screen.\n", d->name.c_str(), dh[0] - dl[0], dh[1] - dl[1],
+           dh[2] - dl[2], t->name.c_str(), th[0] - tl[0], th[1] - tl[1], th[2] - tl[2], ff.k);
+    for (size_t k = 0; k < a.shots.size() && k < eff.size(); k++) {
+        if (a.shots[k].s.kind != 2 || a.shots[k].to < 0 || a.shots[k].to >= (int)eff.size()) continue;
+        const EffShot &e = eff[a.shots[k].to];
+        Framing fd = frame_of(*d, a.shots[k].s.w, dl, dh), ft = frame_of(*t, e.w, tl, th);
+        printf("  shot %zu (command %d, %s): donor  centre %6.1f,%6.1f  size %6.1f x %6.1f  inside %.0f%%%s\n", k + 1, a.shots[k].to + 1, e.source, fd.cx, fd.cy, fd.w, fd.h, fd.inside * 100, fd.ok ? "" : "  (box behind the camera)");
+        printf("%*s target centre %6.1f,%6.1f  size %6.1f x %6.1f  inside %.0f%%%s\n", 40, "", ft.cx, ft.cy, ft.w, ft.h, ft.inside * 100, ft.ok ? "" : "  (box behind the camera)");
+    }
+    return 0;
+}
+
 /* --apply-template DONOR DSCRIPT TARGET TSCRIPT|?: DONOR's script's camera sequence on TARGET's script, printed; "?" lists the target's
    scripts that have camera commands */
 static int apply_template_cli(const std::string &donor, int dIdx, const std::string &target, const std::string &tArg) {
@@ -434,6 +498,19 @@ static int templates_selftest() {
         anyRot |= s.s.w[9] || s.s.w[10] || s.s.w[11];
     }
     ok(world, "the fitted camera sees the world where the similarity puts the donor's");
+    {
+        /* on the screen: the model's center falls where the donor's did, and the size follows the boxes' proportions */
+        float dl[3], dh[3], tl[3], th[3];
+        bool same = fighter_box(*d, dl, dh) && fighter_box(*t, tl, th), any = false;
+        for (size_t k = 0; same && k < a.shots.size() && k < eff.size(); k++) {
+            if (a.shots[k].s.kind != 2 || !a.shots[k].enabled || a.shots[k].has) continue;
+            Framing fd = frame_of(*d, a.shots[k].s.w, dl, dh), ft = frame_of(*t, eff[a.shots[k].to].w, tl, th);
+            if (!fd.ok || !ft.ok) continue; /* a shot that doesn't see the model (a cut to somewhere else) */
+            any = true;
+            same = same && fabsf(fd.mx - ft.mx) < 4 && fabsf(fd.my - ft.my) < 4;
+        }
+        ok(same && any, "on the screen the model's center falls where the donor's did");
+    }
     ok(carried, "rotation, roll and projection are carried as they are");
     /* a synthetic rotated camera, since few real ones are */
     {
