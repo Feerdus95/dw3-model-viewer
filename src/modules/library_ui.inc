@@ -18,18 +18,69 @@ struct Ask {
 /* the status combo's index for a saved status ("candidate", "approved", "rejected") */
 static int status_index(const std::string &s) { return s == PRESET_STATUS[1] ? 1 : s == PRESET_STATUS[2] ? 2 : 0; }
 
-/* Name, (Variant,) Notes and Status of what is being kept. ID tells this form's widgets from the other's; VARIANT null: none */
-static void save_fields(const char *id, char *name, size_t nameSize, char *variant, size_t variantSize, const char *variantHint, char *notes, size_t notesSize, int &status) {
-    ImGui::SetNextItemWidth(-1);
-    ImGui::InputTextWithHint((std::string("##") + id + "name").c_str(), "Name", name, nameSize);
-    if (variant) {
-        ImGui::SetNextItemWidth(-1);
-        ImGui::InputTextWithHint((std::string("##") + id + "var").c_str(), variantHint, variant, variantSize);
+/* What the Library shows, for both lists: a context, an origin (where the fighter comes from; only with a mod's context loaded) and a
+   status. Empty: all */
+struct LibFilter {
+    std::string ctx, origin, status;
+};
+/* Does an entry of CONTEXT and STATUS, of a fighter whose origin is ORIGIN, pass? ORIGIN is only looked at while MODDED and the filter has one */
+static bool lib_pass(const LibFilter &f, bool modded, const std::string &context, const std::string &status, const std::string &origin) {
+    if (!f.ctx.empty() && context != f.ctx) return false;
+    if (!f.status.empty() && status != f.status) return false;
+    if (modded && !f.origin.empty() && origin != f.origin) return false;
+    return true;
+}
+
+/* The one form both Save buttons use: Name, Variant (applications only), Notes and Status. Loading an entry fills it */
+struct LibForm {
+    char name[64] = "", notes[256] = "", variant[24] = "";
+    int status = 0;
+    void load(const Preset &p) {
+        snprintf(name, sizeof name, "%s", p.name.c_str());
+        snprintf(notes, sizeof notes, "%s", p.notes.c_str());
+        snprintf(variant, sizeof variant, "%s", "");
+        status = status_index(p.status);
     }
+    void load(const Application &a) {
+        snprintf(name, sizeof name, "%s", a.name.c_str());
+        snprintf(notes, sizeof notes, "%s", a.notes.c_str());
+        snprintf(variant, sizeof variant, "%s", a.variant.c_str());
+        status = status_index(a.status);
+    }
+    const char *status_name() const { return PRESET_STATUS[std::clamp(status, 0, 2)]; }
+};
+static void lib_form(LibForm &form) {
     ImGui::SetNextItemWidth(-1);
-    ImGui::InputTextWithHint((std::string("##") + id + "notes").c_str(), "Notes", notes, notesSize);
+    ImGui::InputTextWithHint("##lname", "Name", form.name, sizeof form.name);
     ImGui::SetNextItemWidth(-1);
-    ImGui::Combo((std::string("##") + id + "status").c_str(), &status, "Candidate\0Approved\0Rejected\0");
+    ImGui::InputTextWithHint("##lvar", "Variant (applications: to keep several for this script)", form.variant, sizeof form.variant);
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##lnotes", "Notes", form.notes, sizeof form.notes);
+    ImGui::SetNextItemWidth(-1);
+    ImGui::Combo("##lstatus", &form.status, "Candidate\0Approved\0Rejected\0");
+}
+
+/* The rows of a list (presets or applications) the same way: a selectable line with its tooltip and a context menu. SHOWN picks the rows,
+   LABEL is the text, USABLE whether a click loads it, TIPTEXT the tooltip, MENU draws the menu's items (it gets a copy: an item may change
+   the list). Returns how many rows are shown. */
+template <class T>
+static int library_rows(std::vector<T> &list, const std::string &active, int idBase, const std::function<bool(const T &)> &shown,
+                        const std::function<std::string(const T &)> &label, const std::function<bool(const T &)> &usable,
+                        const std::function<std::string(const T &)> &tipText, const std::function<void(T &)> &load, const std::function<void(T)> &menu) {
+    int n = 0;
+    for (int i = 0; i < (int)list.size(); i++) {
+        if (!shown(list[i])) continue;
+        n++;
+        ImGui::PushID(idBase + i);
+        if (ImGui::Selectable((label(list[i]) + "###row").c_str(), active == list[i].id()) && usable(list[i])) load(list[i]);
+        tip("%s", tipText(list[i]).c_str());
+        if (ImGui::BeginPopupContextItem()) {
+            menu(list[i]);
+            ImGui::EndPopup();
+        }
+        ImGui::PopID();
+    }
+    return n;
 }
 
 /* Puts ITEM in LIST: when one with its id is there, asks first (TEXT says what is being replaced) and replaces it; else adds it.
@@ -56,6 +107,13 @@ static void ask_delete(Ask &ask, std::vector<T> &list, std::string &active, cons
         if (active == id) active.clear();
         persist();
     };
+}
+
+/* The context menu's "Delete the NOUN": asks (EXTRA says more about it), then deletes */
+template <class T>
+static void menu_delete(Ask &ask, std::vector<T> &list, std::string &active, const T &e, const std::string &noun, const std::string &extra, std::function<void()> persist) {
+    if (ImGui::MenuItem((std::string(IC_DELETE "  Delete the ") + noun).c_str()))
+        ask_delete(ask, list, active, e.id(), ("Delete the " + noun).c_str(), "Delete \"" + e.name + "\"? It can't be undone" + extra + ".", persist);
 }
 
 /* The file dialogs' answers go to the Picked field they were opened for */

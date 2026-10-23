@@ -48,16 +48,14 @@
         bool loaded = false, blocked = false;
         std::string error, msg, active, inFile;
         std::vector<Preset> list;
-        char name[64] = "", notes[256] = "";
-        int status = 0;
-        std::string ctx;    /* the list shows only this context's presets; empty all */
-        std::string origin; /* only the fighters of this origin (donors and, by the preset's fighter, presets); empty all */
         struct In {
             Preset p;
             bool dup, take;
         };
         std::vector<In> in;
     } pre;
+    LibFilter libf; /* what the Library shows (library_ui.inc); the donors' list follows its origin */
+    LibForm form;   /* the Details tab's form, for both Save buttons */
     ChoreoUi choreo; /* (fighter_cameras.inc) */
     /* the technique whose look a script's own (9999) sprite effect takes: TechData.scriptEffect. The Fight
        command is no technique: its effect is 2 */

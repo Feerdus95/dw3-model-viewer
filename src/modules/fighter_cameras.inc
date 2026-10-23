@@ -49,8 +49,6 @@ struct ChoreoUi {
     bool loaded = false, blocked = false;
     std::string error, msg, active;
     std::vector<Application> list;
-    char name[64] = "", notes_[256] = "", variant[24] = "";
-    int status = 0;
 };
 
 /* B's source is one choice: the sequence (an application on screen, and "B shows" on it), else the candidate camera */
