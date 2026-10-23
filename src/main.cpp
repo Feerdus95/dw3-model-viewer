@@ -64,6 +64,8 @@
 #include "modules/presets.inc"
 #include "modules/templates.inc"
 #include "modules/fighter_cameras.inc"
+#include "modules/workbench_history.inc"
+#include "modules/workbench_history_test.inc"
 #include "modules/library_ui.inc"
 #include "modules/stage_logic.inc"
 #include "modules/stage_logic_test.inc"

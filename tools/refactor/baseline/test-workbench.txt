@@ -1,0 +1,37 @@
+exit 0
+ok    a drag of many frames is one entry, with the state before it
+ok    undo goes to the state before the drag and keeps the one it left for redo
+ok    redo comes back to the end of the drag
+ok    a click is an entry too, and a new operation drops what redo had
+ok    nothing to redo
+ok    a drag put back where it started leaves no entry
+ok    a click that changes nothing neither
+ok    finishing with nothing begun does nothing
+ok    a no-op after a real one does not remove the real one
+ok    at 100 entries the oldest go and the recent stay
+ok    undoing all of them goes back to the oldest one kept
+ok    and redo back to the end; neither stack outgrows the limit
+ok    right after the clean point nothing is unsaved
+ok    a changed candidate is unsaved
+ok    put back exactly, it is clean again
+ok    a sequence built is an unsaved sequence
+ok    both can be unsaved
+ok    saving the candidate does not make the sequence clean
+ok    nor the other way round: each part has its own clean point
+ok    a shot switched off is unsaved
+ok    and clean again when switched back
+ok    a sequence built and then edited is unsaved, in two entries
+ok    undone once it is the built one, still unsaved
+ok    undone back to no sequence it is clean: running operations is not what makes it unsaved
+ok    redone it is unsaved again
+ok    the same shots are the same sequence; another count or variant is another
+ok    the name, notes and status are the form's, not the sequence's
+ok    the Fit, a shot's map, switch and override (words and time), the target and the donor script are the sequence's identity
+ok    without a sequence there is nothing to compare
+ok    the camera before a Fit does not count while there is no Fit
+ok    and does while there is one
+ok    put back is what was taken, both parts
+ok    A/B showing, the script's last camera and script are not touched
+ok    without a sequence B cannot be showing one
+ok    clear forgets the history and the clean points
+all hold
