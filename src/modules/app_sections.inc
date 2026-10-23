@@ -2826,6 +2826,15 @@
         int camIdx = -1;
     } run;
     bool lockCam = true;
+    /* A candidate camera (Camera workbench): another fighter's camera, adjusted, in the place of the camera the script asks for, at the
+       same moments. FIGHTER is its donor in g_game.fighters (same side as the model); EVERY: also at the camera commands the
+       player doesn't act on (explicit ones, the other side's shots). ORIG: the game's camera the script last asked for (-1 the default view) */
+    struct Candidate {
+        bool on = false, every = false;
+        int fighter = -1, cam = 0;
+        GameCamera c = {};
+        int orig = -1;
+    } cand;
     /* the technique whose look a script's own (9999) sprite effect takes: TechData.scriptEffect. The Fight
        command is no technique: its effect is 2 */
     int ownTech = 0;
@@ -2936,7 +2945,12 @@
         /* the battle's default view, which the script's cameras then change: a partner's camera 2, the one
            for an enemy of 2 cameras, the most common */
         const Fighter *f = scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter];
-        if (lockCam && f && !f->enemy && f->cameras.size() > 1) apply_camera(view, *f, 1), snap_cam();
+        cand.orig = f && !f->enemy && f->cameras.size() > 1 ? 1 : -1;
+        if (lockCam && f && cand.orig >= 0) {
+            if (cand.on) apply_game_camera(view, *f, cand.c, -1);
+            else apply_camera(view, *f, cand.orig);
+            snap_cam();
+        }
     };
     auto run_step = [&](float dt) {
         float ticks = view.playing ? dt * 60 * view.speed : 0;
@@ -2985,9 +2999,12 @@
                 return;
             }
             if (ln.motion > 0 && ln.motion <= (int)m.motions.size()) m.setMotion(ln.motion);
-            if (ln.camera >= 0 && f) {
+            if (f && (ln.camera >= 0 || (cand.every && ln.camMode))) {
                 int c = ln.camera >= 100 ? ln.camera - 100 : ln.camera;
-                if (c < (int)f->cameras.size() && (ln.camera >= 100) == f->enemy) apply_camera(view, *f, c), snap_cam();
+                bool own = ln.camera >= 0 && c < (int)f->cameras.size() && (ln.camera >= 100) == f->enemy;
+                if (own) cand.orig = c;
+                if (cand.on && (own || cand.every)) apply_game_camera(view, *f, cand.c, -1), snap_cam();
+                else if (own) apply_camera(view, *f, c), snap_cam();
             }
             if (ln.emStart && f) start_fx_model(ln, *f);
             if (ln.fxStart) {
@@ -3030,6 +3047,60 @@
         }
         ImGui::Checkbox("Keep the game's camera", &lockCam);
         tip("While a script plays the view stays where the battle puts the camera (its default view, then the script's cameras). Off, you can move around it: a sprite effect then shows from where you look, not as the game shows it");
+        if (ImGui::CollapsingHeader("Candidate camera")) {
+            /* the donor: a fighter of this one's side and one of its cameras; its values are the start, then adjustable */
+            auto pick = [&](int fi, int ci) {
+                const Fighter &d = g_game.fighters[fi];
+                cand.fighter = fi, cand.cam = std::clamp(ci, 0, std::max(0, (int)d.cameras.size() - 1));
+                if (!d.cameras.empty()) cand.c = d.cameras[cand.cam];
+            };
+            if (cand.fighter < 0 || cand.fighter >= (int)g_game.fighters.size() || g_game.fighters[cand.fighter].enemy != f.enemy) {
+                for (int i = 0; i < (int)g_game.fighters.size(); i++)
+                    if (&g_game.fighters[i] == &f) pick(i, std::min<int>(f.enemy ? 0 : 8, std::max(0, (int)f.cameras.size() - 1)));
+                cand.on = false;
+            }
+            if (cand.fighter < 0) return hint("This fighter is not in the fighters' list.");
+            bool was = cand.on;
+            ImGui::Checkbox("Use the candidate", &cand.on);
+            tip("Replaces the camera the script asks for with the candidate, at the same moments. Off, the game's own camera comes back at once. The script and the fighter's cameras are not changed");
+            ImGui::Checkbox("Also at the cuts the player skips", &cand.every);
+            tip("The script's explicit cameras and the other side's shots: the player doesn't move the view for them, the candidate does");
+            if (was && !cand.on && cand.orig >= 0 && cand.orig < (int)f.cameras.size()) {
+                apply_camera(view, f, cand.orig);
+                if (run.on) snap_cam();
+            }
+            const Fighter &donor = g_game.fighters[cand.fighter];
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::BeginCombo("##donor", (donor.name + " (fighter " + std::to_string(donor.id) + ")").c_str())) {
+                for (int i = 0; i < (int)g_game.fighters.size(); i++) {
+                    const Fighter &d = g_game.fighters[i];
+                    if (d.enemy != f.enemy || d.cameras.empty()) continue;
+                    ImGui::PushID(i);
+                    if (ImGui::Selectable((d.name + " (fighter " + std::to_string(d.id) + ")").c_str(), i == cand.fighter)) pick(i, cand.cam);
+                    ImGui::PopID();
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::BeginCombo("##donorcam", camera_role(donor.enemy, cand.cam).name)) {
+                for (int i = 0; i < (int)donor.cameras.size(); i++)
+                    if (ImGui::Selectable(camera_role(donor.enemy, i).name, i == cand.cam)) pick(cand.fighter, i);
+                ImGui::EndCombo();
+            }
+            /* the native values, as the game stores them (battle space) */
+            int pos[3] = {cand.c.pos[0], cand.c.pos[1], cand.c.pos[2]}, ref[3] = {cand.c.ref[0], cand.c.ref[1], cand.c.ref[2]}, proj = cand.c.proj;
+            bool ch = ImGui::DragInt3("Eye", pos, 4);
+            ch |= ImGui::DragInt3("Target", ref, 4);
+            ch |= ImGui::DragInt("Projection", &proj, 1, 1, 32767);
+            if (ch) {
+                for (int k = 0; k < 3; k++) cand.c.pos[k] = (int16_t)pos[k], cand.c.ref[k] = (int16_t)ref[k];
+                cand.c.proj = (int16_t)proj;
+                if (cand.on) apply_game_camera(view, f, cand.c, -1), run.on ? snap_cam() : void();
+            }
+            if (button(IC_CAMERA "  Look through it")) apply_game_camera(view, f, cand.c, -1);
+            ImGui::SameLine();
+            if (button("Reset to the donor's")) pick(cand.fighter, cand.cam);
+        }
         if (run.on && button(IC_PAUSE "  Stop the script")) run.on = false, free_fx_models();
         ImGui::BeginChild("scripts");
         for (int g = 0; g < 4; g++) {
@@ -3080,7 +3151,10 @@
                         if (ln.motion > 0 && ln.motion <= (int)mm.motions.size()) mm.setMotion(ln.motion), view.playing = true;
                         if (ln.effect >= 0) pick_effect(ln.effect, true);
                         int c = ln.camera >= 100 ? ln.camera - 100 : ln.camera;
-                        if (c >= 0 && c < (int)f.cameras.size() && (ln.camera >= 100) == f.enemy) apply_camera(view, f, c);
+                        if (c >= 0 && c < (int)f.cameras.size() && (ln.camera >= 100) == f.enemy) {
+                            if (cand.on) apply_game_camera(view, f, cand.c, -1);
+                            else apply_camera(view, f, c);
+                        }
                     }
                     if (!active) ImGui::PopStyleColor();
                     if (active) tip("%s", ln.motion > 0 ? "Plays this motion" : ln.effect >= 0 ? "Shows this effect (in Effects)" : "Looks through this camera");

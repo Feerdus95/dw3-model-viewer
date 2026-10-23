@@ -59,8 +59,8 @@ static CameraRole camera_role(bool enemy, int i) {
     }
 }
 
-static void apply_camera(View &v, const Fighter &f, int index) {
-    const GameCamera &c = f.cameras[index];
+/* Looks through camera C as fighter F's frame has it; INDEX is the fighter's camera it is, or -1 (a candidate) */
+static void apply_game_camera(View &v, const Fighter &f, const GameCamera &c, int index) {
     auto local = [&](const int16_t *p, float *out) {
         float b[3] = {(float)p[0], (float)p[1], (float)p[2]};
         battle_to_view(f, b, out);
@@ -78,6 +78,7 @@ static void apply_camera(View &v, const Fighter &f, int index) {
     if (c.proj > 0) v.fov = 2 * atanf(120.0f / c.proj);
     v.gameCamera = index;
 }
+static void apply_camera(View &v, const Fighter &f, int index) { apply_game_camera(v, f, f.cameras[index], index); }
 
 static std::string g_mods; /* the port's mods folder: a model saved there is the one opened */
 
