@@ -76,5 +76,8 @@ bool details(const char *label);
 bool button(const char *label, int kind = 0, ImVec2 size = ImVec2(0, 0));
 bool segmented(const char *id, int *v, std::initializer_list<const char *> labels);
 void same_line_if_fits(const char *label);
+void same_line_if_width(float w);
+bool check_box(const char *label, bool *v); /* ImGui::Checkbox, its label wrapping when the line is short */
+float check_width(const char *label); /* a checkbox's or radio button's width */
 std::string nice_path(const std::string &p);
 void field(const char *label, const char *fmt, ...) IM_FMTARGS(2);

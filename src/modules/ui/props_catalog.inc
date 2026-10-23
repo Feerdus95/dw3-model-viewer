@@ -183,11 +183,11 @@
         if (!n) hint("%s", pcat.empty() ? "Nothing here yet: Open folder, add PNGs or OBJs in subfolders, and Refresh." : "Nothing matches.");
         ImGui::EndChild();
         if (stage_on()) {
-            ImGui::Checkbox("Brush", &brush.on);
+            check_box("Brush", &brush.on);
             tip("Drag on the ground to scatter pictures: grass fields, flower beds. Ctrl+drag erases them.");
             if (brush.on) {
                 ImGui::SameLine();
-                ImGui::Checkbox("Mix", &brush.mixOn);
+                check_box("Mix", &brush.mixOn);
                 tip("Paint with several pictures at once for variety: tick the ones to use in the grid. Off: only the picked one.");
                 float w = ImGui::GetContentRegionAvail().x / 3 - 8 * dpi;
                 ImGui::SetNextItemWidth(w);
@@ -217,7 +217,7 @@
                         tip("How often this one comes up next to the others: 2 is twice as often as 1");
                         ImGui::SameLine();
                     }
-                    ImGui::Checkbox("No repeats", &brush.cfg.noRepeat);
+                    check_box("No repeats", &brush.cfg.noRepeat);
                     tip("A picture never comes right after itself, so there are no patches of one kind");
                     ImGui::SameLine();
                     if (ImGui::Button("Tick this tab")) {

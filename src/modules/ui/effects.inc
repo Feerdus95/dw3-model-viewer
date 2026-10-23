@@ -6,7 +6,8 @@
         else if (u.size() > 1) l += "  (" + std::to_string(u.size()) + " Digimon)";
         else if (u.empty()) l += "  (the battle's own)";
         ImGui::PushID(id);
-        if (ImGui::Selectable(l.c_str(), fx.id == id, ImGuiSelectableFlags_AllowOverlap) && fx.id != id) pick_effect(id, false);
+        float ownW = ownIds.count(id) ? ImGui::CalcTextSize("own").x + ImGui::GetStyle().ItemSpacing.x : 0; /* its "own" mark has the row's end to itself */
+        if (ImGui::Selectable(l.c_str(), fx.id == id, ImGuiSelectableFlags_AllowOverlap, ImVec2(ImGui::GetContentRegionAvail().x - ownW, 0)) && fx.id != id) pick_effect(id, false);
         if (u.size() > 1 || (!t.empty() && !u.empty())) tip("%s", joined(u).c_str());
         if (ImGui::BeginPopupContextItem("##menu")) {
             menu_title("effect " + std::to_string(id), "%s", t.empty() ? joined(u).c_str() : joined(t).c_str());
@@ -102,11 +103,11 @@
             hint("PNGs the native port draws instead of this effect.");
             int crit = ownCritical;
             if (segmented("kind", &crit, {"Hit", "Critical hit"})) reload_own(crit != 0);
-            ImGui::SameLine();
+            same_line_if_width(ImGui::CalcTextSize(IC_WARN " Unsaved").x + 16 * dpi);
             if (ownDirty) chip(IC_WARN " Unsaved", C_WARN);
             else if (own.frames.empty()) chip("None yet", C_DIM);
             else chip(own.hasJson ? "Saved" : "PNGs only", C_ACCENT);
-            if (ImGui::Checkbox("Show them in the view", &ownShow)) fxTime = 0, fxDrawn = -1;
+            if (check_box("Show them in the view", &ownShow)) fxTime = 0, fxDrawn = -1;
             tip("Instead of the original effect");
             if (ImGui::Button(IC_IMPORT "  Import PNGs...")) {
                 static const SDL_DialogFileFilter PNG = {"PNG images", "png"};

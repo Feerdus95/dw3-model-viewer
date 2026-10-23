@@ -143,7 +143,7 @@
                 auto &e = pre.in[i];
                 ImGui::PushID(1000 + i);
                 std::string label = (e.p.name.empty() ? "(no name)" : e.p.name) + "  " + e.p.fighter_ref() + ", " + e.p.script_ref() + (e.dup ? "  - already yours: replace it" : "");
-                ImGui::Checkbox(label.c_str(), &e.take);
+                check_box(label.c_str(), &e.take);
                 for (const std::string &w : e.p.warn) ImGui::TextColored(C_WARN, "  %s", w.c_str());
                 ImGui::PopID();
             }
@@ -157,7 +157,7 @@
                 pre.in.clear();
                 if (!pre.blocked) preset_persist(pre.list, pre.error);
             }
-            ImGui::SameLine();
+            same_line_if_fits("Cancel");
             if (ImGui::Button("Cancel")) pre.in.clear();
         }
 

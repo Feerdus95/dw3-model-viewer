@@ -1,5 +1,76 @@
     /* ===== Files ===== */
+    /* The Digimon made for the port (Digimon World 2's, converted: a dw2003.txt beside the model names the file and the fighter), opened straight, converted
+       already or not: no need to find them in the DW2 tab and convert each time */
+    struct Modeled {
+        std::string name, like, out, dw2;
+        int fid;
+        bool made;
+    };
+    std::vector<Modeled> modeled;
+    uint64_t modeledAt = 0;
+    int filesTab = 0, filesTabGo = -1; /* 0 the game's, 1 the modeled; the tab to show next */
+    auto modeled_scan = [&]() {
+        if (modeledAt && SDL_GetTicks() - modeledAt < 3000) return; /* a conversion made outside shows within moments */
+        modeledAt = SDL_GetTicks() | 1;
+        modeled.clear();
+        if (g_dw2.empty()) dw2_load_dir();
+        std::error_code ec;
+        for (const Dw2Entry &en : g_dw2.empty() ? std::vector<Dw2Entry>() : dw2_scan()) {
+            if (en.fx) continue;
+            Dw2Link l = dw2_link(en.path);
+            if (!l.ok) continue;
+            modeled.push_back({l.name.empty() ? l.like : l.name, l.like, l.out, en.path, l.fid, std::filesystem::exists(std::filesystem::u8path(l.out), ec)});
+        }
+    };
+    auto modeled_open = [&](const Modeled &m) {
+        if (!m.made) dw2_convert(m.dw2);
+        dw2_open_converted(m.dw2);
+        modeledAt = 0;
+    };
+    auto modeled_browser = [&]() {
+        modeled_scan();
+        if (modeled.empty()) {
+            hint("No Digimon made for the port yet.");
+            hint("A Digimon World 2 model with a dw2003.txt beside it (the DW2 tab's folder: %s) is listed here.", g_dw2.empty() ? "none chosen" : g_dw2.c_str());
+            return;
+        }
+        hint("Digimon World 2's, made for Digimon World 2003. Click one to open its converted file with its fighter.");
+        if (ImGui::BeginTable("modeled", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY)) {
+            ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 1.4f);
+            ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+            for (const Modeled &m : modeled) {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::PushID(m.fid);
+                bool sel = scene.model && !view.stageView && scene.fid == m.fid;
+                if (ImGui::Selectable(m.name.c_str(), sel, ImGuiSelectableFlags_SpanAllColumns) && !sel) modeled_open(m);
+                tip("%s, like %s: file %d (%s)", m.name.c_str(), m.like.c_str(), m.fid, nice_path(m.out).c_str());
+                if (ImGui::BeginPopupContextItem("##menu")) {
+                    menu_title(m.name, "like %s, file %d", m.like.c_str(), m.fid);
+                    if (ImGui::MenuItem(IC_OPEN "  Open")) modeled_open(m);
+                    if (ImGui::MenuItem(IC_RESTART "  Convert again, and open")) {
+                        dw2_convert(m.dw2);
+                        dw2_open_converted(m.dw2);
+                        modeledAt = 0;
+                    }
+                    if (ImGui::MenuItem(IC_COPY "  Copy the name")) ImGui::SetClipboardText(m.name.c_str());
+                    ImGui::EndPopup();
+                }
+                ImGui::TableNextColumn();
+                ImGui::TextDisabled("%s", m.made ? "converted" : "not converted yet");
+                ImGui::PopID();
+            }
+            ImGui::EndTable();
+        }
+    };
     auto files_browser = [&]() {
+        if (ImGui::BeginTabBar("##filetabs")) {
+            if (ImGui::BeginTabItem("Game", nullptr, filesTabGo == 0 ? ImGuiTabItemFlags_SetSelected : 0)) filesTab = 0, ImGui::EndTabItem();
+            if (ImGui::BeginTabItem("Modeled", nullptr, filesTabGo == 1 ? ImGuiTabItemFlags_SetSelected : 0)) filesTab = 1, ImGui::EndTabItem();
+            ImGui::EndTabBar();
+            filesTabGo = -1;
+        }
+        if (filesTab == 1) return modeled_browser();
         if (!listed) {
             if (!scanner.running) scanner.start();
             listed = scanner.poll(list);
@@ -55,7 +126,7 @@
             title("%s", fi && !fi->name.empty() ? fi->name.c_str() : m.name.c_str());
             if (fi) {
                 chip(fi->enemy ? "enemy" : "partner", fi->enemy ? C_ERROR : C_OK);
-                ImGui::SameLine();
+                same_line_if_width(ImGui::CalcTextSize(m.name.c_str()).x + 16 * dpi);
             }
             chip(m.name.c_str(), C_DIM);
             size_t polys = 0, verts = 0;
@@ -70,7 +141,7 @@
             heading("Look closer");
             float w = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2;
             for (int s : {MODEL, MOTIONS, FIGHTER, CAMERAS, TEXTURES}) {
-                if (s == MOTIONS || s == TEXTURES) ImGui::SameLine();
+                if (s == MOTIONS || s == CAMERAS) ImGui::SameLine();
                 std::string l = std::string(SECTION_ICON[s]) + "  " + SECTION_NAME[s];
                 if (ImGui::Button(l.c_str(), ImVec2(w, 0))) section = s;
                 tip("%s", SECTION_TIP[s]);

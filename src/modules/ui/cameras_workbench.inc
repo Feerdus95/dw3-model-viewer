@@ -11,10 +11,10 @@
         if (cand.script >= 0 && cand.of == &f) {
             ImGui::AlignTextToFramePadding();
             ImGui::Text("Script %d", cand.script);
-            ImGui::SameLine();
+            same_line_if_fits(IC_RESTART "  Play the script");
             if (button(run.on && run.script == cand.script ? IC_RESTART "  Play again" : IC_PLAY "  Play the script")) run_script(cand.script);
             if (run.on) {
-                ImGui::SameLine();
+                same_line_if_fits(IC_PAUSE "  Stop");
                 if (button(IC_PAUSE "  Stop")) run.on = false, free_fx_models();
             }
         } else {
@@ -30,7 +30,7 @@
             if (!cand_ensure(f)) return hint("This fighter is not in the fighters' list.");
             hint("A and B are under the view (key B): B replaces the camera the script asks for with the candidate, at the same moments.");
             bool every = cand.every;
-            if (ImGui::Checkbox("Also at the cuts the player skips", &every)) wb_begin(), cand.every = every, wb_end();
+            if (check_box("Also at the cuts the player skips", &every)) wb_begin(), cand.every = every, wb_end();
             tip("The script's explicit cameras and the other side's shots: the player doesn't move the view for them, the candidate does");
             const Fighter &donor = g_game.fighters[cand.fighter];
             /* origin (where a fighter comes from) is not the context (the data set loaded): shown only with a mod's context loaded; the Library's filter row sets it */
@@ -68,7 +68,7 @@
                 cand_edited();
             }
             if (button(IC_CAMERA "  Look through it")) apply_game_camera(view, f, cand.c, -1);
-            ImGui::SameLine();
+            same_line_if_fits("Reset to the donor's");
             if (button("Reset to the donor's")) pick(cand.fighter, cand.cam);
             if (button(IC_FIT "  Fit to this model")) {
                 GameCamera fitted;
@@ -85,7 +85,7 @@
             }
             tip("Moves the eye and the target so this model is framed as the donor's was: the boxes' centers match and distances scale with their sizes. The projection stays. It is a proposal: proportions and pose are not in a box");
             if (cand.fitK > 0) {
-                ImGui::SameLine();
+                same_line_if_fits("Undo the fit");
                 if (button("Undo the fit")) {
                     wb_begin();
                     if (cand.before.proj) cand.c = cand.before;
@@ -158,7 +158,7 @@
                     }
                     ImGui::EndCombo();
                 }
-                ImGui::Checkbox("Fit to this model", &choreo.fit);
+                check_box("Fit to this model", &choreo.fit);
                 tip("Scales the donor's cameras to this model as one sequence (the same similarity as the candidate's Fit); rotation, roll and projection are carried as they are");
                 ImGui::BeginDisabled(choreo.donorScript < 0 || choreo.targetScript < 0);
                 if (button(IC_PLAY "  Build and play", 1)) {
@@ -181,14 +181,14 @@
                 bool changed = false;
                 WbSnap wbBefore = wb_now();
                 bool fitted = app.fitK > 0;
-                if (ImGui::Checkbox("Fitted to this model", &fitted)) {
+                if (check_box("Fitted to this model", &fitted)) {
                     const Fighter *d = fighter_by_id(app.donor, false);
                     FitFrame ff = d ? fit_frame(*d, f) : FitFrame();
                     app.fitK = fitted && ff.ok ? ff.k : 0;
                     changed = true;
                 }
                 if (app.fitK > 0) {
-                    ImGui::SameLine();
+                    same_line_if_width(ImGui::CalcTextSize("x0.00: a proposal, not checked").x);
                     ImGui::TextColored(C_WARN, "x%.2f: a proposal, not checked", app.fitK);
                 }
                 std::vector<TplShot> tcmd;
@@ -200,7 +200,7 @@
                     snprintf(l, sizeof l, "%s%d  %s, line %d, over %d  ->  %s###shot", s.enabled ? "" : "(off) ", k + 1, APP_KIND[s.s.kind], s.s.line, s.s.time,
                              s.to < 0 ? "nowhere" : ("command " + std::to_string(s.to + 1)).c_str());
                     if (ImGui::TreeNode(l)) {
-                        changed |= ImGui::Checkbox("On", &s.enabled);
+                        changed |= check_box("On", &s.enabled);
                         tip("Off: the script's own camera stays at that command");
                         char gl[64] = "none";
                         if (s.to >= 0) snprintf(gl, sizeof gl, "command %d", s.to + 1);
@@ -221,7 +221,7 @@
                             if (e->kind == 2 && button(IC_CAMERA "  Look through it")) apply_cam_words(view, f, e->w, -1);
                         }
                         bool ov = s.has;
-                        if (ImGui::Checkbox("Override this shot", &ov)) {
+                        if (check_box("Override this shot", &ov)) {
                             s.has = ov, changed = true;
                             if (ov) {
                                 memcpy(s.ow, e && e->kind == 2 ? e->w : s.s.w, sizeof s.ow);
@@ -268,10 +268,14 @@
                 hint("Build a sequence in the Sequence tab to keep it as an application.");
             }
         };
+        const ImVec2 pad = ImGui::GetStyle().FramePadding;
         if (ImGui::BeginTabBar("##camtabs")) {
             static const char *const NAMES[3] = {"Camera", "Sequence", "Details"};
             for (int k = 0; k < 3; k++) {
-                if (ImGui::BeginTabItem(NAMES[k], nullptr, camTabGo == k ? ImGuiTabItemFlags_SetSelected : 0)) {
+                ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(pad.x * 0.3f, pad.y)); /* the tabs' padding: three names in a narrow panel */
+                bool tab = ImGui::BeginTabItem(NAMES[k], nullptr, camTabGo == k ? ImGuiTabItemFlags_SetSelected : 0);
+                ImGui::PopStyleVar();
+                if (tab) {
                     ImGui::BeginChild("##camtab");
                     k == 0 ? tab_camera() : k == 1 ? tab_sequence() : tab_details();
                     ImGui::EndChild();

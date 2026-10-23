@@ -33,7 +33,7 @@
         field("Fighter", "%d (kind 0x%X)", cf.id, cf.kind);
         field("Face", "%d parts", parts);
         if (cf.enemy && cf.cameraCount > 0) field("Battle view", "its partner's %d", cf.cameraCount);
-        ImGui::Checkbox("Effect points", &view.marks);
+        check_box("Effect points", &view.marks);
         tip("A cross where each effect of a played script is (pink: a sprite, blue: an effect model), to see where they land on the model");
         heading("Cameras");
         if (button(IC_CAMERA "  Free camera", view.gameCamera < 0 ? 1 : 0)) frame_model(scene, view);

@@ -214,7 +214,7 @@ bool segmented(const char *id, int *v, std::initializer_list<const char *> label
     ImGui::PushID(id);
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2, ImGui::GetStyle().ItemSpacing.y));
     for (const char *l : labels) {
-        if (i) ImGui::SameLine();
+        if (i) same_line_if_fits(l);
         bool on = *v == i;
         if (on) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
         if (ImGui::Button(l)) *v = i, changed = true;
@@ -231,6 +231,28 @@ void same_line_if_fits(const char *label) {
     float x = ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x;
     if (x + w <= ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x) ImGui::SameLine();
 }
+/* SameLine only when an item W wide still fits the line (a checkbox, a radio button: the frame, the gap, then the text) */
+void same_line_if_width(float w) {
+    float x = ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x;
+    if (x + w <= ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x) ImGui::SameLine();
+}
+float check_width(const char *label) {
+    return ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::CalcTextSize(label, nullptr, true).x;
+}
+bool check_box(const char *label, bool *v) {
+    const char *end = strstr(label, "##");
+    std::string text = end ? std::string(label, end) : std::string(label);
+    if (text.empty() || check_width(text.c_str()) <= ImGui::GetContentRegionAvail().x) return ImGui::Checkbox(label, v);
+    ImGui::PushID(label);
+    bool hit = ImGui::Checkbox("##c", v);
+    ImGui::SameLine();
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextUnformatted(text.c_str());
+    ImGui::PopTextWrapPos();
+    if (ImGui::IsItemClicked()) *v = !*v, hit = true;
+    ImGui::PopID();
+    return hit;
+}
 /* a path as people read it: no "..", Windows' slashes */
 std::string nice_path(const std::string &p) {
     std::error_code ec;
@@ -241,13 +263,22 @@ std::string nice_path(const std::string &p) {
 }
 /* a label and its value on one line, the value in the technical font */
 void field(const char *label, const char *fmt, ...) {
+    char buf[512];
     va_list a;
     va_start(a, fmt);
-    ImGui::TextDisabled("%s", label);
-    ImGui::SameLine(ImGui::GetFontSize() * 7.5f);
-    ImGui::PushFont(g_fontMono);
-    ImGui::TextV(fmt, a);
-    ImGui::PopFont();
+    vsnprintf(buf, sizeof buf, fmt, a);
     va_end(a);
+    ImGui::TextDisabled("%s", label);
+    float at = ImGui::GetFontSize() * 7.5f;
+    ImGui::PushFont(g_fontMono);
+    float w = ImGui::CalcTextSize(buf).x;
+    ImGui::PopFont();
+    bool fits = at + w <= ImGui::GetContentRegionMax().x;
+    if (fits) ImGui::SameLine(at); /* too long for the line's rest: the value goes under its label */
+    ImGui::PushFont(g_fontMono);
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextUnformatted(buf);
+    ImGui::PopTextWrapPos();
+    ImGui::PopFont();
 }
 

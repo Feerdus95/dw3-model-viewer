@@ -102,7 +102,7 @@
                 ImGui::EndTable();
             }
             bool nb = pt.noBounds;
-            if (ImGui::Checkbox("Always drawn", &nb)) part_bounds(stagePart);
+            if (check_box("Always drawn", &nb)) part_bounds(stagePart);
             tip("No bounds check: drawn even when its box seems off screen (the ground and the panorama; 8 bones at most)");
             int k = stagePart;
             const char *hide = stageHidden.count(pt.name) ? IC_EYE "  Show" : IC_HIDE "  Hide";

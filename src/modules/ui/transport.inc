@@ -51,6 +51,7 @@
         if (fxMode) snprintf(pos, sizeof pos, "tick %d / %d", (int)fxTime, std::max(fx_length() - 1, 0));
         else snprintf(pos, sizeof pos, "key %d / %d", m->keyframe, std::max(m->keyframeCount - 1, 0));
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+        if (ImGui::GetContentRegionAvail().x < ImGui::CalcTextSize(pos).x + ImGui::GetStyle().FramePadding.x * 4) snprintf(pos, sizeof pos, "%d", fxMode ? (int)fxTime : m->keyframe); /* the number alone when the slider is short */
         if (fxMode) {
             float ft = fxTime;
             if (ImGui::SliderFloat("##tick", &ft, 0, (float)std::max(fx_length() - 1, 0), pos)) fxTime = ft, playing = false;

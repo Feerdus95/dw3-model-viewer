@@ -15,7 +15,9 @@ trademark of its owners.
 
 ## What it shows
 
-- **Models**: every battle model on the disc. That's 434 files, from FIGHT/MODEL (the
+- **Models**: every battle model on the disc, in the Game tab of Files; its Modeled tab lists the Digimon made for the port (a Digimon World 2
+  model with a `dw2003.txt` beside it, converted or not: one click converts if needed and opens it, with its fighter).
+  Under that, every battle model on the disc. That's 434 files, from FIGHT/MODEL (the
   Digimon) and FIGHT/EFFECT (DNA forms and technique models), by the names the game
   gives them: the Digimon's, or the technique's for an effect model.
 - **Mesh**:
@@ -372,6 +374,10 @@ With a file it opens the viewer; every other form below opens no window (it is a
     dw3mv --shot out.bmp [--motion N] [--key K] [--cam N] [--stage N] [--fighter N] [--cull] [--orbit yaw,pitch,dist,x,y,z] file.bin
                                           one frame to a BMP: at a motion's keyframe, through a fighter's
                                           camera, with a stage's lights
+    dw3mv --ui-shot out.bmp [--section N] [--tab N] [--win WxH] [--panels B,I] [--stage-open N] [--fx-open N] file.bin
+                                          the whole window after a few frames (a developer's check that the panels
+                                          fit at a size): the section's number (Files 0 ... DW2 8), the Workbench's
+                                          or Files' tab, the window's size and the panels' widths
     dw3mv --effect ID                     a 2D effect's frames as PNGs in effects/effect_ID next to the exe
     dw3mv --export-stage ID MODS OUT      a stage as an OBJ (with its MTL and PNGs) in OUT, the mod's if it has one
     dw3mv --import-stage ID MODS OBJ      the OBJ's objects become stage ID's parts, saved in MODS as the Stages

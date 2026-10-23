@@ -55,7 +55,7 @@ void draw_motions_inspector(App &app) {
         heading("Playback");
         ImGui::SetNextItemWidth(-FLT_MIN);
         ImGui::SliderFloat("##speed", &view.speed, 0.05f, 4, "speed %.2fx");
-        ImGui::Checkbox("Loop", &view.loop);
+        check_box("Loop", &view.loop);
         hint("Space plays or pauses, the arrow keys step a keyframe. The bar under the view has the same controls.");
     }
     heading("Display");

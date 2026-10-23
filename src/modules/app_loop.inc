@@ -5,6 +5,9 @@
     double stillSince = 0; /* the mouse has rested on lastHover since */
     int vpUses = 0;        /* clicks and drags in the view: after a few, the controls hint gets small */
 
+    if (uiStage >= 0) open_stage(uiStage), section = STAGES;
+    if (uiFx >= 0) pick_effect(uiFx, true), section = EFFECTS;
+    if (uiSection >= 0 && uiSection < SECTIONS) section = uiSection;
     while (running) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
@@ -207,17 +210,26 @@
         ImGui::Begin("##sections", nullptr, BAR);
         ImGui::PopStyleColor();
         ImGui::PopStyleVar();
+        /* the sections' names when they fit (with the undo and redo buttons at the right); the icons alone when not (the name is in each one's tip) */
+        float undoW = ImGui::GetFrameHeight() * 1.3f * 2 + st.ItemSpacing.x;
+        bool compact;
+        {
+            float need = 0;
+            for (int s = 0; s < SECTIONS; s++) need += ImGui::CalcTextSize((std::string(SECTION_ICON[s]) + "  " + SECTION_NAME[s]).c_str()).x + st.FramePadding.x * 2 + 3 * dpi;
+            compact = need > ds.x - st.WindowPadding.x * 2 - undoW - 40 * dpi;
+        }
         for (int s = 0; s < SECTIONS; s++) {
             if (s) ImGui::SameLine(0, 3 * dpi);
             bool off = needs_model(s) && !scene.model, on = section == s;
             ImGui::BeginDisabled(off);
             ImGui::PushStyleColor(ImGuiCol_Button, on ? ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive) : ImVec4(0, 0, 0, 0));
-            std::string l = std::string(SECTION_ICON[s]) + "  " + SECTION_NAME[s];
+            std::string l = compact ? std::string(SECTION_ICON[s]) : std::string(SECTION_ICON[s]) + "  " + SECTION_NAME[s];
+            l += "###sec" + std::to_string(s);
             if (ImGui::Button(l.c_str())) section = s;
             ImGui::PopStyleColor();
             ImGui::EndDisabled();
-            if (off) tip("%s.\nOpen a model first (in Files).", SECTION_TIP[s]);
-            else tip("%s", SECTION_TIP[s]);
+            if (off) tip("%s: %s.\nOpen a model first (in Files).", SECTION_NAME[s], SECTION_TIP[s]);
+            else tip("%s: %s", SECTION_NAME[s], SECTION_TIP[s]);
         }
         {
             std::string open = "Nothing open";
@@ -232,7 +244,12 @@
             bool dirty = (stageDirty && stageId >= 0) || ownDirty || wbd;
             float ub = ImGui::GetFrameHeight() * 1.3f;
             float right = ds.x - st.WindowPadding.x - ub * 2 - st.ItemSpacing.x;
-            float tw = ImGui::CalcTextSize(open.c_str()).x + (dirty ? ImGui::CalcTextSize((unsaved + "   ").c_str()).x : 0);
+            float room = right - ImGui::GetCursorPosX() - 20 * dpi - st.ItemSpacing.x * 2; /* what the buttons leave for the open thing and the unsaved mark */
+            auto width = [&]() { return ImGui::CalcTextSize(open.c_str()).x + (dirty ? ImGui::CalcTextSize((unsaved + "   ").c_str()).x : 0); };
+            if (dirty && width() > room) unsaved = IC_WARN; /* the mark alone: its tip says what */
+            if (width() > room) open.clear();
+            if (width() > room) dirty = false; /* not even that fits */
+            float tw = width();
             ImGui::SameLine(std::max(ImGui::GetCursorPosX() + 20 * dpi, right - tw - st.ItemSpacing.x * 2));
             ImGui::AlignTextToFramePadding();
             if (dirty) {
@@ -290,6 +307,15 @@
         }
         browserW = std::clamp(browserW, 180 * dpi, std::max(180 * dpi, ds.x * 0.45f));
         inspectorW = std::clamp(inspectorW, 180 * dpi, std::max(180 * dpi, ds.x * 0.45f));
+        if (showBrowser && showInspector) { /* the view keeps room: the panels give it up (as far as their least), the one being dragged last */
+            float over = browserW + inspectorW - (ds.x - std::min(320 * dpi, ds.x * 0.34f));
+            float &first = splitDrag == 1 ? inspectorW : browserW, &second = splitDrag == 1 ? browserW : inspectorW;
+            if (over > 0) {
+                float cut = std::min(over / 2, std::max(first - 180 * dpi, 0.0f));
+                first -= cut;
+                second -= std::min(over - cut, std::max(second - 180 * dpi, 0.0f));
+            }
+        }
         float vx = showBrowser ? browserW : 0, vr = showInspector ? ds.x - inspectorW : ds.x;
         float vy = top, vw = std::max(vr - vx, 40.0f), vh = std::max(bottom - transH - top, 40.0f);
         ImVec2 vc(vx + vw / 2, vy + vh / 2);
@@ -1096,10 +1122,23 @@
         }
         GL(glViewport)(0, 0, ww, wh);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        if (!uiShot.empty()) {
+            static int uiFrames = 0;
+            if (uiTab >= 0 && uiFrames < 3) camTabGo = uiTab;
+            if (uiTab >= 0 && section == FILES) filesTabGo = uiTab;
+            if (++uiFrames == 8) { /* the window as drawn: ImGui's frame is in the back buffer */
+                std::vector<uint32_t> px(ww * wh), flipped(ww * wh);
+                GL(glReadPixels)(0, 0, ww, wh, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+                for (int y = 0; y < wh; y++) memcpy(&flipped[y * ww], &px[(wh - 1 - y) * ww], ww * 4);
+                save_bmp(uiShot, flipped, ww, wh);
+                printf("%dx%d -> %s\n", ww, wh, uiShot.c_str());
+                running = false;
+            }
+        }
         SDL_GL_SwapWindow(win);
         { static int frames = 0; if (frames < 3 && ++frames) startup_mark(frames == 1 ? "first frame shown" : "frame"); if (frames == 3 && getenv("DW3MV_TIMING_EXIT")) running = false; }
     }
-    if (shot.empty()) {
+    if (shot.empty() && uiShot.empty()) {
         g_cfg.max = (SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED) != 0;
         if (!g_cfg.max) { /* a maximized window's own size would come back as the restored one */
             SDL_GetWindowSize(win, &g_cfg.w, &g_cfg.h);

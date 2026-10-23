@@ -130,7 +130,7 @@ template <std::string Picked::*In, std::string Picked::*Out>
 static void json_buttons(Picked &picked, SDL_Window *win, const char *importLabel, const char *exportLabel, const char *filterName, const char *defaultFile) {
     static const SDL_DialogFileFilter FILTER = {filterName, "json"};
     if (button(importLabel)) SDL_ShowOpenFileDialog(picked_cb<In>, &picked, win, &FILTER, 1, nullptr, false);
-    ImGui::SameLine();
+    same_line_if_fits(exportLabel);
     if (button(exportLabel)) SDL_ShowSaveFileDialog(picked_cb<Out>, &picked, win, &FILTER, 1, defaultFile);
 }
 

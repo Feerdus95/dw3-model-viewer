@@ -10,12 +10,12 @@
         const Fighter &f = *scene.fighters[scene.fighter];
         hint("Play a script to see it as the battle runs it. Click a line to play its motion, look through its camera or see its effect.");
         if (!ownIds.empty()) {
-            ImGui::Checkbox("Show the own images (mod)", &shotMods);
+            check_box("Show the own images (mod)", &shotMods);
             tip("A script's sprite effects play the effect's own images (%d effects have them in the mods folder) instead of the original's; off, the original's", (int)ownIds.size());
         } else {
             hint("No effect has own images in the mods folder, so a script plays the original sprites.");
         }
-        ImGui::Checkbox("Keep the game's camera", &lockCam);
+        check_box("Keep the game's camera", &lockCam);
         tip("While a script plays the view stays where the battle puts the camera (its default view, then the script's cameras). Off, you can move around it: a sprite effect then shows from where you look, not as the game shows it");
         if (run.on && button(IC_PAUSE "  Stop the script")) run.on = false, free_fx_models();
         ImGui::BeginChild("scripts");

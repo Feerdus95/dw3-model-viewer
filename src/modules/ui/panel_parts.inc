@@ -26,20 +26,20 @@
         }
         if (ImGui::BeginTable("display", 2)) {
             ImGui::TableNextColumn();
-            ImGui::Checkbox("Face", &view.face);
+            check_box("Face", &view.face);
             tip("The blinking eyes and the other animated face parts");
             ImGui::TableNextColumn();
-            ImGui::Checkbox("Wireframe", &view.wireframe);
+            check_box("Wireframe", &view.wireframe);
             ImGui::TableNextColumn();
-            ImGui::Checkbox("Skeleton", &view.skeleton);
+            check_box("Skeleton", &view.skeleton);
             ImGui::TableNextColumn();
-            ImGui::Checkbox("Grid", &view.grid);
+            check_box("Grid", &view.grid);
             ImGui::TableNextColumn();
-            ImGui::Checkbox("Effect points", &view.marks);
+            check_box("Effect points", &view.marks);
             tip("A cross where each effect of a script is (pink: a sprite, blue: an effect model), to see where they land on the model");
             ImGui::EndTable();
         }
-        ImGui::Checkbox("Back-face culling", &view.cull);
+        check_box("Back-face culling", &view.cull);
         if (ImGui::Button(IC_EYE "  Show all")) show_all();
         tip("Shows the hidden bones again (Alt+H)");
         same_line_if_fits(IC_FIT "  Frame");

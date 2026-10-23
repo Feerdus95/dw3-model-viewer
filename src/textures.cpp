@@ -54,7 +54,7 @@ void draw_textures_inspector(App &app) {
     ImGui::PushFont(g_fontMono);
     ImGui::TextWrapped("%s", combo_label({tp, cl}).c_str());
     ImGui::PopFont();
-    ImGui::Checkbox("UVs", &view.uvs);
+    check_box("UVs", &view.uvs);
     tip("Where the polygons take their texels from");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(-FLT_MIN);

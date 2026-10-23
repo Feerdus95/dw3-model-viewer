@@ -124,9 +124,9 @@
         bool seq = b_is_sequence(choreo);
         ImGui::AlignTextToFramePadding();
         ImGui::TextDisabled("B shows");
-        ImGui::SameLine();
+        same_line_if_width(check_width("Candidate camera"));
         if (ImGui::RadioButton("Candidate camera##bsrc", !seq) && seq) choreo.on = false, choreo_refresh();
-        ImGui::SameLine();
+        same_line_if_width(check_width("Sequence"));
         ImGui::BeginDisabled(!choreo.has);
         if (ImGui::RadioButton("Sequence##bsrc", seq) && !seq) choreo.on = true, choreo_refresh();
         ImGui::EndDisabled();

@@ -3,8 +3,8 @@
         snprintf(head, sizeof head, "Props (%d)", (int)props.size());
         heading(head);
         if (button(IC_STAGE "  Catalog...")) pcatOpen = true;
-        same_line_if_fits("Select");
-        if (ImGui::Checkbox("Select", &selectMode)) marquee = false;
+        same_line_if_width(check_width("Select"));
+        if (check_box("Select", &selectMode)) marquee = false;
         tip("Drag a box over the view to pick every prop in it; then move, copy (Ctrl+C, Ctrl+V) or delete them together. Shift adds, Ctrl toggles. Ctrl+A picks all.");
         tip("Grass, flowers, petals and models as thumbnails: pick one, then click in the stage to place it");
         if (button(IC_ADD "  Billboard...")) pick_prop(0);
@@ -15,10 +15,10 @@
         same_line_if_fits(IC_ADD "  Model...");
         if (button(IC_ADD "  Model...")) pick_prop(2);
         tip("A small 3D model from an OBJ (a rock, a signpost, a tree) with a PNG texture; if the OBJ's MTL names one, it comes along");
-        if (ImGui::Checkbox("Outline all", &propOutlines)) {}
+        if (check_box("Outline all", &propOutlines)) {}
         tip("Off: only the picked prop shows its outline, so the ground stays clear. On: every billboard and emitter shows its box.");
-        same_line_if_fits("Original stage");
-        if (ImGui::Checkbox("Original stage", &showOrig)) {
+        same_line_if_width(check_width("Original stage"));
+        if (check_box("Original stage", &showOrig)) {
             if (showOrig) stage_show(stageDisc, false);
             else stage_rebuild();
         }
@@ -53,16 +53,16 @@
             ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.55f);
             me(ImGui::DragFloat("Wind", &propsMeta.wind, 0.01f, 0, 5, "%.2f"));
             tip("How hard the wind blows on the props, as a factor of the stage's own: 0 none, 1 as the trees, 2 a storm");
-            ImGui::Checkbox("Play effects", &propWind);
+            check_box("Play effects", &propWind);
             tip("Only in the view: the wind bends what sways and the particles fall, as they do in the battle. Off: everything stands still.");
             {
                 bool own = propsMeta.leaves >= 0;
-                me(ImGui::Checkbox("Own leaves", &own));
+                me(check_box("Own leaves", &own));
                 if (own != (propsMeta.leaves >= 0)) propsMeta.leaves = own ? 15 : -1, stageDirty = true;
                 tip("Leaves falling through the whole arena, in the stage's greens and browns. Off: the ones stages.ini gives the stage, if any (the view can't show those).");
                 if (propsMeta.leaves >= 0) me(ImGui::DragInt("Leaves", &propsMeta.leaves, 0.5f, 0, 5000));
             }
-            me(ImGui::Checkbox("Own fog", &propsMeta.fog));
+            me(check_box("Own fog", &propsMeta.fog));
             tip("Off: the props take the stage's fog, as its trees do. On: a fog of their own that you set here.");
             if (propsMeta.fog) {
                 float c[3] = {propsMeta.fogColor[0] / 255, propsMeta.fogColor[1] / 255, propsMeta.fogColor[2] / 255};
@@ -164,7 +164,7 @@
             pe(ImGui::DragFloat("Sway", &p.sway, 0.01f, 0, 3, "%.2f"));
             tip("How much the wind bends it, from its foot to its top (the view shows it with Play effects); 0 stands still");
             if (!p.model) {
-                pe(ImGui::Checkbox("Flat in the world", &p.fixed));
+                pe(check_box("Flat in the world", &p.fixed));
                 tip("Instead of facing the camera, a plane turned about the vertical: a path, a puddle, a banner");
             }
             if (p.fixed || p.model) pe(ImGui::DragFloat("Turn", &p.rot, 0.5f, -180, 180, "%.1f deg"));

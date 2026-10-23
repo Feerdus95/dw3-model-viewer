@@ -15,12 +15,14 @@
             static int pick = -1;
             static float rgb[3];
             bool openPal = false;
+            float sw = 20 * dpi, gap = 2 * dpi; /* the swatches in rows as wide as the panel (a 256-color page too) */
+            int per = std::max(1, (int)((ImGui::GetContentRegionAvail().x + gap) / (sw + gap)));
             for (int i = 0; i < n; i++) {
                 uint16_t c = m.vram[base + i];
                 ImGui::PushID(i);
-                if (i % 16) ImGui::SameLine(0, 2 * dpi);
+                if (i % per) ImGui::SameLine(0, gap);
                 ImVec4 col((c & 31) / 31.0f, (c >> 5 & 31) / 31.0f, (c >> 10 & 31) / 31.0f, 1);
-                if (ImGui::ColorButton("##c", col, ImGuiColorEditFlags_NoAlpha | ImGuiColorEditFlags_NoTooltip, ImVec2(20 * dpi, 20 * dpi))) {
+                if (ImGui::ColorButton("##c", col, ImGuiColorEditFlags_NoAlpha | ImGuiColorEditFlags_NoTooltip, ImVec2(sw, sw))) {
                     pick = base + i;
                     rgb[0] = col.x, rgb[1] = col.y, rgb[2] = col.z;
                     char_mark(), palSession = true, palEdited = false, openPal = true;

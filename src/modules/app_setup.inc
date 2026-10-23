@@ -2,6 +2,9 @@ int main(int argc, char **argv) {
     startup_mark("main");
     std::string shot, open_path, data;
     std::string start_obj; /* an OBJ to import once the model is open */
+    std::string uiShot; /* --ui-shot FILE: the whole window, after a few frames, to a BMP (a developer's check of the panels at a size) */
+    int uiSection = -1, uiTab = -1, uiW = 0, uiH = 0, uiStage = -1, uiFx = -1; /* --stage-open N, --fx-open N: that stage, that effect open */
+    float uiPanels[2] = {};
     std::string uses; /* --uses: a DW3 fighter's name, whose action scripts' motions are printed */
     std::vector<std::string> bounds; /* --bounds: a model file, or a fighter's name (DW3), whose posed box is printed */
     int shot_motion = 1, shot_key = 0, shot_cam = -1, shot_stage = 0, shot_fighter = 0;
@@ -19,6 +22,13 @@ int main(int argc, char **argv) {
         std::string a = argv[i];
         if (a == "--shot" && i + 1 < argc) shot = argv[++i];
         else if (a == "--motion" && i + 1 < argc) shot_motion = atoi(argv[++i]);
+        else if (a == "--ui-shot" && i + 1 < argc) uiShot = argv[++i];
+        else if (a == "--section" && i + 1 < argc) uiSection = atoi(argv[++i]);
+        else if (a == "--tab" && i + 1 < argc) uiTab = atoi(argv[++i]);
+        else if (a == "--stage-open" && i + 1 < argc) uiStage = atoi(argv[++i]);
+        else if (a == "--fx-open" && i + 1 < argc) uiFx = atoi(argv[++i]);
+        else if (a == "--win" && i + 1 < argc) sscanf(argv[++i], "%dx%d", &uiW, &uiH);
+        else if (a == "--panels" && i + 1 < argc) sscanf(argv[++i], "%f,%f", uiPanels, uiPanels + 1);
         else if (a == "--key" && i + 1 < argc) shot_key = atoi(argv[++i]);
         else if (a == "--cam" && i + 1 < argc) shot_cam = atoi(argv[++i]);
         else if (a == "--cull") shot_cull = true;
@@ -70,7 +80,7 @@ int main(int argc, char **argv) {
     startup_mark("DW2 models registered");
 
     if (!bounds.empty() || !uses.empty()) attach_console();
-    if (check || users || stages || seams || !shot.empty() || effect >= 0) attach_console();
+    if (check || users || stages || seams || !shot.empty() || effect >= 0 || !uiShot.empty()) attach_console();
     if (xstage >= 0 || istage >= 0 || compendium || testPresets || testTemplates || testCameras || testLibrary || testStage || testWorkbench || !fitArgs.empty() || !tplArgs.empty()) attach_console();
     if (!uses.empty()) { /* which of the 62 motions a fighter's action scripts play, and which scripts */
         for (const Fighter &f : g_game.fighters) {
@@ -229,15 +239,18 @@ int main(int argc, char **argv) {
     SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
     startup_mark("SDL_Init");
     cfg_load();
+    if (uiW > 0 && uiH > 0) g_cfg.w = uiW, g_cfg.h = uiH, g_cfg.max = false, g_cfg.hasPos = false; /* --ui-shot: this size, wherever */
+    if (uiPanels[0] > 0) g_cfg.bw = uiPanels[0];
+    if (uiPanels[1] > 0) g_cfg.iw = uiPanels[1];
     SDL_Window *win = SDL_CreateWindow("DW3 Model Viewer", g_cfg.w, g_cfg.h,
                                        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
-                                           (shot.empty() ? 0 : SDL_WINDOW_HIDDEN));
+                                           (shot.empty() && uiShot.empty() ? 0 : SDL_WINDOW_HIDDEN));
     if (!win) {
         SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
         SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0);
         win = SDL_CreateWindow("DW3 Model Viewer", 1440, 900, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
     }
-    if (win && shot.empty()) { /* back where it was, if that is still on a screen */
+    if (win && shot.empty() && uiShot.empty()) { /* back where it was, if that is still on a screen */
         if (g_cfg.hasPos) {
             SDL_Point p = {g_cfg.x, g_cfg.y};
             if (SDL_GetDisplayForPoint(&p)) SDL_SetWindowPosition(win, g_cfg.x, g_cfg.y);

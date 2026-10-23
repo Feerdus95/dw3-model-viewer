@@ -29,9 +29,9 @@
             int kids = 0;
             for (const Bone &o : m.bones) kids += &o != &bone && o.parent == b;
             if (bone.parent > 0) {
-                ImGui::SameLine();
                 char l[32];
                 snprintf(l, sizeof l, "parent: bone %d", bone.parent);
+                same_line_if_fits(l);
                 if (ImGui::SmallButton(l)) scene.selected = bone.parent;
                 tip("Select it");
             }
@@ -128,12 +128,12 @@
                     ImGui::EndTable();
                 }
                 bool joint = pe.joint, follow = pe.follow;
-                if (ImGui::Checkbox("Scale about the joint", &joint)) char_mark(), pe.joint = joint, changed = true;
+                if (check_box("Scale about the joint", &joint)) char_mark(), pe.joint = joint, changed = true;
                 tip("The mesh grows from the bone's joint, so a limb's segments stay attached. Off: from the mesh's own centre.");
-                if (ImGui::Checkbox("Reach follows Scale", &follow)) char_mark(), pe.follow = follow, changed = true;
+                if (check_box("Reach follows Scale", &follow)) char_mark(), pe.follow = follow, changed = true;
                 tip("Scale changes Reach too: the bones under this one move with the mesh. Off: Reach is its own.");
                 bool gone = pe.gone;
-                if (ImGui::Checkbox("Not drawn in the game", &gone)) char_mark(), pe.gone = gone, changed = true;
+                if (check_box("Not drawn in the game", &gone)) char_mark(), pe.gone = gone, changed = true;
                 tip("Collapses the piece to a point, the way to remove it without touching the animations");
                 if (changed) {
                     if (pe.any()) charEdits[b] = pe;
