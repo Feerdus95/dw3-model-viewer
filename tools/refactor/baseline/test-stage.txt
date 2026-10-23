@@ -27,4 +27,5 @@ ok    emitters, models, other pictures and far ones stay
 ok    erasing where there is nothing changes nothing
 ok    with Mix the tallest picture is 300 and the others keep their proportion to it
 ok    alone, a picture is 300 tall
+ok    a new brush starts as it always did
 all hold

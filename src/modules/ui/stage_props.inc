@@ -51,44 +51,42 @@
     /* the brush: the picture's file (or the ticked ones' with Mix) is copied once, each dab scatters a few around the mouse */
     auto mix_pool = [&]() {
         int n = 0;
-        for (const PCat &c : pcat) n += c.kind == 0 && brushMix.count(c.path);
+        for (const PCat &c : pcat) n += c.kind == 0 && brush.mix.count(c.path);
         return n;
     };
     auto brush_ready = [&]() {
-        bool pool = brushMixOn ? mix_pool() > 0 : pcatArm >= 0 && pcatArm < (int)pcat.size() && pcat[pcatArm].kind == 0;
-        return brushOn && pool && section == STAGES && stage_on();
+        bool pool = brush.mixOn ? mix_pool() > 0 : pcatArm >= 0 && pcatArm < (int)pcat.size() && pcat[pcatArm].kind == 0;
+        return brush.on && pool && section == STAGES && stage_on();
     };
     auto brush_dab = [&](const float g[3], bool erase) {
-        BrushCfg cfg;
-        cfg.radius = brushR, cfg.scale[0] = brushScale[0], cfg.scale[1] = brushScale[1], cfg.var = brushVar, cfg.sway = brushSway, cfg.n = brushN, cfg.noRepeat = brushNoRepeat;
-        DabResult r = brush_dab_props(props, brushPool, brushLastPick, cfg, BB_MAX, g, erase);
-        if (r.changed) brushAdded = stageDirty = true;
+        DabResult r = brush_dab_props(props, brush.pool, brush.lastPick, brush.cfg, brush.maxBB, g, erase);
+        if (r.changed) brush.added = stageDirty = true;
         if (erase && r.changed) propSel = -1;
-        if (r.capped) note(NOTE_WARN, "That is as many pictures as the brush places (" + std::to_string(BB_MAX) + "): erase some, or use bigger ones");
+        if (r.capped) note(NOTE_WARN, "That is as many pictures as the brush places (" + std::to_string(brush.maxBB) + "): erase some, or use bigger ones");
     };
     auto brush_begin = [&](const float g[3]) {
-        brushPool.clear(), brushLastPick = -1;
+        brush.pool.clear(), brush.lastPick = -1;
         float tall = 1;
         auto add = [&](const PCat &c, float weight) {
             std::string nm;
             if (!copy_to_props(c.path, nm)) return;
             const PropImg &pi = prop_img(nm);
             if (!pi.tex) return note(NOTE_ERROR, "Can't read " + nm);
-            brushPool.push_back({nm, pi.w, pi.h, weight});
+            brush.pool.push_back({nm, pi.w, pi.h, weight});
             tall = std::max(tall, pi.h);
         };
-        if (brushMixOn) {
+        if (brush.mixOn) {
             for (const PCat &c : pcat)
-                if (c.kind == 0 && brushMix.count(c.path)) add(c, std::max(brushMix[c.path], 0.01f));
+                if (c.kind == 0 && brush.mix.count(c.path)) add(c, std::max(brush.mix[c.path], 0.01f));
         } else {
             add(pcat[pcatArm], 1);
         }
-        if (brushPool.empty()) return false;
+        if (brush.pool.empty()) return false;
         /* the tallest is 300 and the others keep their proportion to it: reeds taller than a tuft */
-        brush_normalize(brushPool, brushMixOn, tall);
+        brush_normalize(brush.pool, brush.mixOn, tall);
         stage_mark();
-        propBrush = true, brushAdded = false;
-        for (int k = 0; k < 3; k++) brushLast[k] = g[k];
+        brush.stroke = true, brush.added = false;
+        for (int k = 0; k < 3; k++) brush.last[k] = g[k];
         brush_dab(g, ImGui::GetIO().KeyCtrl);
         return true;
     };
@@ -274,7 +272,7 @@
         /* where a catalog pick would go: a ring on the ground and, for a picture, the picture itself */
         if (ghostOn && pcatArm >= 0 && pcatArm < (int)pcat.size()) {
             const PCat &g = pcat[pcatArm];
-            float r = brushOn && (brushMixOn || g.kind == 0) ? brushR : view.cam.dist * 0.03f, gy[3] = {ghostAt[0], 0, ghostAt[2]};
+            float r = brush.on && (brush.mixOn || g.kind == 0) ? brush.cfg.radius : view.cam.dist * 0.03f, gy[3] = {ghostAt[0], 0, ghostAt[2]};
             for (int s = 0; s < 24; s++) {
                 float a = s * 6.2831853f / 24, b = (s + 1) * 6.2831853f / 24;
                 float u[3] = {gy[0] + cosf(a) * r, 0, gy[2] + sinf(a) * r}, v[3] = {gy[0] + cosf(b) * r, 0, gy[2] + sinf(b) * r};
@@ -291,7 +289,7 @@
                     }
                 }
             }
-            if (g.kind == 0 && g.gl && !brushOn) {
+            if (g.kind == 0 && g.gl && !brush.on) {
                 PropQuad gq;
                 float h = 300, w = std::max(10.0f, 300 * g.w / g.h), c[4][3], one[3] = {1, 1, 1};
                 for (int k = 0; k < 4; k++) {

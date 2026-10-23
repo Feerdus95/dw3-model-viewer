@@ -108,7 +108,7 @@
         float pic = 96 * dpi, lineH = ImGui::GetTextLineHeight();
         const ImGuiStyle &sty = ImGui::GetStyle();
         ImVec2 cell(pic + 12 * dpi, pic + lineH + 14 * dpi);
-        float foot = ImGui::GetTextLineHeightWithSpacing() * 2 + sty.ItemSpacing.y * 2 + (stage_on() ? ImGui::GetFrameHeightWithSpacing() * ((brushOn ? 3 : 1) + (brushOn && brushMixOn ? 1 : 0)) : 0);
+        float foot = ImGui::GetTextLineHeightWithSpacing() * 2 + sty.ItemSpacing.y * 2 + (stage_on() ? ImGui::GetFrameHeightWithSpacing() * ((brush.on ? 3 : 1) + (brush.on && brush.mixOn ? 1 : 0)) : 0);
         ImGui::BeginChild("##pcgrid", ImVec2(0, -foot), ImGuiChildFlags_Borders);
         int cols = std::max(1, (int)(ImGui::GetContentRegionAvail().x / (cell.x + sty.ItemSpacing.x))), n = 0, loaded = 0;
         std::string q = lower(pcatFind);
@@ -122,10 +122,10 @@
             ImGui::PushID(i);
             ImVec2 p = ImGui::GetCursorScreenPos();
             bool hov;
-            bool mixing = brushOn && brushMixOn && c.kind == 0, ticked = mixing && brushMix.count(c.path);
+            bool mixing = brush.on && brush.mixOn && c.kind == 0, ticked = mixing && brush.mix.count(c.path);
             if (ImGui::Selectable("##i", mixing ? ticked : pcatArm == i, 0, cell)) {
                 if (mixing) { /* ticks it in or out of the mix; the last one ticked is the one whose weight is edited */
-                    if (brushMix.erase(c.path) == 0) brushMix[c.path] = 1, pcatArm = i, propSel = -1, select_part(-1);
+                    if (brush.mix.erase(c.path) == 0) brush.mix[c.path] = 1, pcatArm = i, propSel = -1, select_part(-1);
                 } else {
                     pcatArm = pcatArm == i ? -1 : i, propSel = -1;
                     if (pcatArm >= 0) select_part(-1);
@@ -164,7 +164,7 @@
             if (ticked) {
                 dl->AddRect(a, b, IM_COL32(110, 220, 120, 255), 0, 0, 2 * dpi);
                 char wt[16];
-                snprintf(wt, sizeof wt, "x%.1f", brushMix[c.path]);
+                snprintf(wt, sizeof wt, "x%.1f", brush.mix[c.path]);
                 dl->AddText(ImVec2(b.x - ImGui::CalcTextSize(wt).x - 4 * dpi, a.y + 2 * dpi), IM_COL32(110, 220, 120, 255), wt);
             } else if (!mixing && pcatArm == i) {
                 dl->AddRect(a, b, IM_COL32(255, 217, 51, 255), 0, 0, 2 * dpi);
@@ -183,58 +183,58 @@
         if (!n) hint("%s", pcat.empty() ? "Nothing here yet: Open folder, add PNGs or OBJs in subfolders, and Refresh." : "Nothing matches.");
         ImGui::EndChild();
         if (stage_on()) {
-            ImGui::Checkbox("Brush", &brushOn);
+            ImGui::Checkbox("Brush", &brush.on);
             tip("Drag on the ground to scatter pictures: grass fields, flower beds. Ctrl+drag erases them.");
-            if (brushOn) {
+            if (brush.on) {
                 ImGui::SameLine();
-                ImGui::Checkbox("Mix", &brushMixOn);
+                ImGui::Checkbox("Mix", &brush.mixOn);
                 tip("Paint with several pictures at once for variety: tick the ones to use in the grid. Off: only the picked one.");
                 float w = ImGui::GetContentRegionAvail().x / 3 - 8 * dpi;
                 ImGui::SetNextItemWidth(w);
-                ImGui::DragFloat("##br", &brushR, 10, 50, 5000, "Radius %.0f");
+                ImGui::DragFloat("##br", &brush.cfg.radius, 10, 50, 5000, "Radius %.0f");
                 tip("How far around the mouse, in the game's units");
                 ImGui::SameLine();
                 ImGui::SetNextItemWidth(w);
-                ImGui::DragInt("##bn", &brushN, 0.1f, 1, 30, "%d a dab");
+                ImGui::DragInt("##bn", &brush.cfg.n, 0.1f, 1, 30, "%d a dab");
                 tip("How many it drops each time; a dab comes every half radius you drag");
                 ImGui::SameLine();
                 ImGui::SetNextItemWidth(w);
-                ImGui::DragFloat("##bs", &brushSway, 0.01f, 0, 3, "Sway %.2f");
+                ImGui::DragFloat("##bs", &brush.cfg.sway, 0.01f, 0, 3, "Sway %.2f");
                 ImGui::SetNextItemWidth(w * 2 + 8 * dpi);
-                ImGui::DragFloatRange2("##bz", &brushScale[0], &brushScale[1], 0.01f, 0.1f, 5, "Size %.2f", "to %.2f");
+                ImGui::DragFloatRange2("##bz", &brush.cfg.scale[0], &brush.cfg.scale[1], 0.01f, 0.1f, 5, "Size %.2f", "to %.2f");
                 tip("Each gets a size between these, of the 300-tall picture");
                 ImGui::SameLine();
                 ImGui::SetNextItemWidth(w);
-                ImGui::DragFloat("##bv", &brushVar, 0.01f, 0, 0.9f, "Shade %.2f");
+                ImGui::DragFloat("##bv", &brush.cfg.var, 0.01f, 0, 0.9f, "Shade %.2f");
                 tip("How much darker some come out, so the field isn't flat");
-                if (brushMixOn) {
+                if (brush.mixOn) {
                     ImGui::AlignTextToFramePadding();
                     ImGui::Text("Mixing %d", mix_pool());
                     ImGui::SameLine();
-                    if (pcatArm >= 0 && pcatArm < (int)pcat.size() && brushMix.count(pcat[pcatArm].path)) {
+                    if (pcatArm >= 0 && pcatArm < (int)pcat.size() && brush.mix.count(pcat[pcatArm].path)) {
                         ImGui::SetNextItemWidth(90 * dpi);
-                        ImGui::DragFloat("##bw", &brushMix[pcat[pcatArm].path], 0.05f, 0.1f, 20, "Weight %.1f");
+                        ImGui::DragFloat("##bw", &brush.mix[pcat[pcatArm].path], 0.05f, 0.1f, 20, "Weight %.1f");
                         tip("How often this one comes up next to the others: 2 is twice as often as 1");
                         ImGui::SameLine();
                     }
-                    ImGui::Checkbox("No repeats", &brushNoRepeat);
+                    ImGui::Checkbox("No repeats", &brush.cfg.noRepeat);
                     tip("A picture never comes right after itself, so there are no patches of one kind");
                     ImGui::SameLine();
                     if (ImGui::Button("Tick this tab")) {
                         for (const PCat &c : pcat)
-                            if (c.kind == 0 && (pcatTab.empty() || c.cat == pcatTab) && !brushMix.count(c.path)) brushMix[c.path] = 1;
+                            if (c.kind == 0 && (pcatTab.empty() || c.cat == pcatTab) && !brush.mix.count(c.path)) brush.mix[c.path] = 1;
                     }
                     tip("Adds every picture shown under this tab (not the particles or models)");
                     ImGui::SameLine();
-                    if (ImGui::Button("None")) brushMix.clear();
+                    if (ImGui::Button("None")) brush.mix.clear();
                 } else {
                     ImGui::TextDisabled("Drag on the ground. Ctrl+drag erases. One Ctrl+Z takes back a stroke.");
                 }
             }
         }
         if (!stage_on()) ImGui::TextDisabled("Open a stage first.");
-        else if (brushOn && !brush_ready()) ImGui::TextDisabled(brushMixOn ? "Tick the pictures to mix in the grid above." : "Pick a picture to paint with.");
-        else if (brushOn) ImGui::TextDisabled("Drag on the ground. Ctrl+drag erases. One Ctrl+Z takes back a stroke.");
+        else if (brush.on && !brush_ready()) ImGui::TextDisabled(brush.mixOn ? "Tick the pictures to mix in the grid above." : "Pick a picture to paint with.");
+        else if (brush.on) ImGui::TextDisabled("Drag on the ground. Ctrl+drag erases. One Ctrl+Z takes back a stroke.");
         else if (pcatArm >= 0) ImGui::TextColored(C_SELECT, "Click in the stage to place it. Shift keeps placing; Esc or right-click stops.");
         else ImGui::TextDisabled("Pick one, then click in the stage where it goes.");
         ImGui::End();

@@ -356,16 +356,7 @@ int main(int argc, char **argv) {
     std::string pcatTab;              /* the category shown, "" all */
     char pcatFind[64] = "";
     bool ghostOn = false;
-    /* the brush: dragging on the ground scatters the picked billboard; Ctrl erases its kind */
-    bool brushOn = false, propBrush = false, brushAdded = false;
-    float brushR = 600, brushScale[2] = {0.7f, 1.3f}, brushVar = 0.2f, brushSway = 0.5f, brushLast[3] = {};
-    int brushN = 4;
-    /* what a dab picks from (stage_logic.inc): one picture, or with Mix the ticked ones of the catalog, each with its weight */
-    std::vector<BrushPick> brushPool;
-    int brushLastPick = -1;
-    bool brushMixOn = false, brushNoRepeat = true;
-    std::map<std::string, float> brushMix; /* the ticked pictures, by their catalog path, and their weights */
-    const int BB_MAX = 20000; /* the viewer draws on the CPU; the port keeps up to 100000 (stagefx.c MAX_BB) */
+    BrushState brush; /* the brush: dragging on the ground scatters the picked billboard; Ctrl erases its kind (stage_logic.inc) */
     float ghostAt[3] = {0, 0, 0};     /* where, in the view's world */
     PropGpu propGpu;                        /* the props as the card has them */
     int propGen = 0;                        /* up one whenever a prop's picture or model file is replaced */

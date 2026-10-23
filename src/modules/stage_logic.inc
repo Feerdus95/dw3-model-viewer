@@ -111,6 +111,19 @@ struct DabResult {
     bool capped = false;  /* adding stopped at MAXBB billboards */
 };
 
+/* The brush's state: ON (the mode), STROKE (a drag is going on), ADDED (the stroke has changed something), what a dab does (CFG), where the
+   stroke last dabbed, what it picks from (POOL; LASTPICK the picture just before), the ticked pictures with Mix (MIX, by their catalog path,
+   with their weights) and the most billboards the viewer draws: it draws on the CPU, the port keeps up to 100000 (stagefx.c MAX_BB) */
+struct BrushState {
+    bool on = false, stroke = false, added = false, mixOn = false;
+    BrushCfg cfg;
+    float last[3] = {};
+    std::vector<BrushPick> pool;
+    int lastPick = -1;
+    std::map<std::string, float> mix;
+    int maxBB = 20000;
+};
+
 /* One dab at G on the ground, into PROPS. Erasing takes out the billboards of the pool's pictures within the radius (emitters and models
    stay). Adding scatters CFG.n pictures, drawn by weight from POOL (LASTPICK: the one before), up to MAXBB billboards in all. */
 static DabResult brush_dab_props(std::vector<StageProp> &props, const std::vector<BrushPick> &pool, int &lastPick, const BrushCfg &cfg, int maxBB,

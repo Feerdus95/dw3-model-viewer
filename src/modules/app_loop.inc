@@ -480,13 +480,13 @@
                 else p.move[0] += (d.x * cy + d.y * sy) * k, p.move[2] -= (-d.x * sy + d.y * cy) * k;
             } else if (vpDown[0] && marquee) {
                 marqB = mp;
-            } else if (vpDown[0] && propBrush) {
+            } else if (vpDown[0] && brush.stroke) {
                 float g[3];
                 if (moved && ground_hit(view, vw, vh, mp.x - vx, mp.y - vy, g)) {
-                    float dx = g[0] - brushLast[0], dz = g[2] - brushLast[2];
-                    if (dx * dx + dz * dz >= brushR * brushR * 0.25f) {
+                    float dx = g[0] - brush.last[0], dz = g[2] - brush.last[2];
+                    if (dx * dx + dz * dz >= brush.cfg.radius * brush.cfg.radius * 0.25f) {
                         brush_dab(g, io.KeyCtrl);
-                        for (int k = 0; k < 3; k++) brushLast[k] = g[k];
+                        for (int k = 0; k < 3; k++) brush.last[k] = g[k];
                     }
                 }
             } else if (vpDown[0] && moved) {
@@ -508,9 +508,9 @@
         for (int b = 0; b < 3; b++) {
             if (!vpDown[b] || ImGui::IsMouseDown(b)) continue;
             vpDown[b] = false;
-            if (b == 0 && propBrush) {
-                propBrush = false;
-                if (!brushAdded && !stageHist.undo.empty()) stageHist.undo.pop_back();
+            if (b == 0 && brush.stroke) {
+                brush.stroke = false;
+                if (!brush.added && !stageHist.undo.empty()) stageHist.undo.pop_back();
                 continue;
             }
             if (b == 0 && marquee) {
@@ -552,7 +552,7 @@
             if (io.MouseDragMaxDistanceSqr[b] > 25 * dpi * dpi || !inView) continue; /* a drag, not a click */
             if (pcatArm >= 0 && pcatArm < (int)pcat.size() && section == STAGES && stage_on()) { /* a catalog pick: a click places it, the other button stops */
                 float g[3];
-                if (b == 0 && !brushOn && vpHover && ground_hit(view, vw, vh, mp.x - vx, mp.y - vy, g)) {
+                if (b == 0 && !brush.on && vpHover && ground_hit(view, vw, vh, mp.x - vx, mp.y - vy, g)) {
                     prop_add(pcat[pcatArm].path, pcat[pcatArm].kind, g);
                     if (!io.KeyShift) pcatArm = -1;
                 } else if (b == 1) {

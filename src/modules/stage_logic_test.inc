@@ -135,6 +135,10 @@ static int stage_selftest() {
     sizes = {{"tall", 100, 600, 1}, {"short", 100, 300, 1}};
     brush_normalize(sizes, false, 600);
     ok(sizes[0].hgt == 300 && sizes[1].hgt == 300 && sizes[1].wid == 100, "alone, a picture is 300 tall");
+    BrushState fresh; /* what the brush was before it was one struct */
+    ok(!fresh.on && !fresh.stroke && !fresh.added && !fresh.mixOn && fresh.cfg.radius == 600 && fresh.cfg.scale[0] == 0.7f && fresh.cfg.scale[1] == 1.3f && fresh.cfg.var == 0.2f &&
+           fresh.cfg.sway == 0.5f && fresh.cfg.n == 4 && fresh.cfg.noRepeat && fresh.lastPick == -1 && fresh.maxBB == 20000 && fresh.pool.empty() && fresh.mix.empty(),
+       "a new brush starts as it always did");
     printf("%s\n", bad ? "FAILED" : "all hold");
     return bad != 0;
 }
