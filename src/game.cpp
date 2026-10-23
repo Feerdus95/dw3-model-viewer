@@ -341,6 +341,9 @@ bool step_face(const Fighter &f, FaceState &s, int motion, int texX, int texY, s
         default: eyes = 0; break;
         }
         if (--s.blinkTimer < 0) s.blinkTimer = 0;
+        /* the native port's tired fighters (fightstg/face.c's patch; Flamedramon's, model 7100, for now): in the weak idle (motion 1) the eyes blink
+           between half shut and shut, at the same pace, and never open */
+        if (f.modelFid == 7100 && motion == 1 && eyes == 0) eyes = 1;
     } else {
         s.blinkTimer = 0;
     }
