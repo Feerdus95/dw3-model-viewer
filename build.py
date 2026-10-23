@@ -65,7 +65,9 @@ def main():
     for src in SOURCES:
         obj = OBJ / (src.stem + ".o")
         objs.append(obj)
-        deps = [src, *HERE.glob("src/*.h"), *HERE.glob("src/modules/*.inc"), *HERE.glob("src/modules/ui/*.inc")]
+        deps = [src, *HERE.glob("src/*.h")]
+        if src.name == "main.cpp":  # only main.cpp includes the modules: touching one must not rebuild the other sources
+            deps += [*HERE.glob("src/modules/*.inc"), *HERE.glob("src/modules/ui/*.inc")]
         if obj.exists() and obj.stat().st_mtime > max(d.stat().st_mtime for d in deps):
             continue
         print("compile", src.name)
