@@ -86,6 +86,13 @@ static void apply_game_camera(View &v, const Fighter &f, const GameCamera &c, in
 }
 static void apply_camera(View &v, const Fighter &f, int index) { apply_game_camera(v, f, f.cameras[index], index); }
 
+/* A/B on the same frame: A is the camera the script last asked for (ORIG, -1 none), B the candidate. Only the view moves: no
+   script, motion, timing or preset is touched, so switching back and forth shows the same instant through the two cameras */
+static void ab_view(View &v, const Fighter &f, bool b, const GameCamera &cand, int orig) {
+    if (b) apply_game_camera(v, f, cand, -1);
+    else if (orig >= 0 && orig < (int)f.cameras.size()) apply_camera(v, f, orig);
+}
+
 static std::string g_mods; /* the port's mods folder: a model saved there is the one opened */
 
 static bool open_model(Scene &s, View &v, const std::string &name, const std::string &path, std::string &status,

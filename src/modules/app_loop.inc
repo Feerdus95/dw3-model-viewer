@@ -613,6 +613,7 @@
         if (chord(ImGuiKey_H)) hide_selected();
         if (chord(ImGuiMod_Alt | ImGuiKey_H)) show_all();
         if (chord(ImGuiKey_F)) frame_sel();
+        if (chord(ImGuiKey_B) && section == FIGHTER) set_ab(!cand.on);
         if (chord(ImGuiKey_Escape)) select_bone(-1), ownFrame = -1, pcatArm = -1, propSet.clear(), marquee = false;
         if (chord(ImGuiMod_Ctrl | ImGuiKey_A) && section == STAGES && stage_on() && !props.empty()) {
             std::set<int> all;

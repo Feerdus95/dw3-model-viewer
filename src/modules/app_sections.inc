@@ -2846,6 +2846,7 @@
         std::vector<Preset> list;
         char name[64] = "", notes[256] = "";
         int status = 0;
+        std::string ctx; /* the list shows only this context's presets; empty all */
         struct In {
             Preset p;
             bool dup, take;
@@ -2970,6 +2971,14 @@
             snap_cam();
         }
     };
+    /* A (the script's camera) or B (the candidate) now, on the frame that is showing */
+    auto set_ab = [&](bool b) {
+        const Fighter *f = scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter];
+        if (!f || cand.fighter < 0 || cand.fighter >= (int)g_game.fighters.size() || g_game.fighters[cand.fighter].enemy != f->enemy) return;
+        cand.on = b;
+        ab_view(view, *f, b, cand.c, cand.orig);
+        if (run.on) snap_cam();
+    };
     auto run_step = [&](float dt) {
         float ticks = view.playing ? dt * 60 * view.speed : 0;
         spriteDraws.clear();
@@ -3079,15 +3088,13 @@
                 cand.on = false;
             }
             if (cand.fighter < 0) return hint("This fighter is not in the fighters' list.");
-            bool was = cand.on;
-            ImGui::Checkbox("Use the candidate", &cand.on);
-            tip("Replaces the camera the script asks for with the candidate, at the same moments. Off, the game's own camera comes back at once. The script and the fighter's cameras are not changed");
+            if (ImGui::RadioButton("A  The script's camera", !cand.on)) set_ab(false);
+            ImGui::SameLine();
+            if (ImGui::RadioButton("B  The candidate", cand.on)) set_ab(true);
+            tip("B replaces the camera the script asks for with the candidate, at the same moments; A is the game's own. Switching changes only the view, on the frame that is showing: the animation, its timing and the candidate's edits stay (key B toggles)");
+            ImGui::TextColored(cand.on ? C_WARN : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled), "Showing %s", cand.on ? "B, the candidate" : "A, the script's camera");
             ImGui::Checkbox("Also at the cuts the player skips", &cand.every);
             tip("The script's explicit cameras and the other side's shots: the player doesn't move the view for them, the candidate does");
-            if (was && !cand.on && cand.orig >= 0 && cand.orig < (int)f.cameras.size()) {
-                apply_camera(view, f, cand.orig);
-                if (run.on) snap_cam();
-            }
             const Fighter &donor = g_game.fighters[cand.fighter];
             ImGui::SetNextItemWidth(-1);
             if (ImGui::BeginCombo("##donor", (donor.name + " (fighter " + std::to_string(donor.id) + ")").c_str())) {
@@ -3193,15 +3200,28 @@
             if (!canSave && !pre.blocked) hint("Play one of this fighter's scripts first: a preset is made for the script it was seen with.");
             if (canSave) hint("For script %d, donor %s", cand.script, comp::cam_id(donor.id, donor.enemy, cand.cam).c_str());
 
+            std::vector<std::string> ctxs;
+            for (const Preset &p : pre.list)
+                if (std::find(ctxs.begin(), ctxs.end(), p.context) == ctxs.end()) ctxs.push_back(p.context);
+            if (ctxs.size() > 1) {
+                ImGui::SetNextItemWidth(-1);
+                if (ImGui::BeginCombo("##pctx", pre.ctx.empty() ? "All contexts" : ("Context: " + pre.ctx).c_str())) {
+                    if (ImGui::Selectable("All contexts", pre.ctx.empty())) pre.ctx.clear();
+                    for (const std::string &c : ctxs)
+                        if (ImGui::Selectable(c.c_str(), pre.ctx == c)) pre.ctx = c;
+                    ImGui::EndCombo();
+                }
+                tip("A mod's fighter and the original it replaces are different presets: each belongs to the context it was made in");
+            }
             int mine = 0;
             for (int i = 0; i < (int)pre.list.size(); i++) {
                 Preset &p = pre.list[i];
-                if (p.fighter != f.id) continue;
+                if (p.fighter != f.id || (!pre.ctx.empty() && p.context != pre.ctx)) continue;
                 mine++;
                 ImGui::PushID(i);
                 char l[256];
-                snprintf(l, sizeof l, "%s%s  [%s]  script %d, %s%s###p", p.warn.empty() ? "" : IC_WARN " ", p.name.empty() ? "(no name)" : p.name.c_str(), p.status.c_str(), p.scriptIdx,
-                         p.donor_ref().c_str() + 4, p.every ? ", cuts" : "");
+                snprintf(l, sizeof l, "%s%s  [%s]  script %d, %s%s%s%s###p", p.warn.empty() ? "" : IC_WARN " ", p.name.empty() ? "(no name)" : p.name.c_str(), p.status.c_str(), p.scriptIdx,
+                         p.donor_ref().c_str() + 4, p.every ? ", cuts" : "", p.context == "base_game" ? "" : ", ", p.context == "base_game" ? "" : p.context.c_str());
                 if (ImGui::Selectable(l, pre.active == p.id()) && p.warn.empty()) {
                     int di = -1;
                     for (int k = 0; k < (int)g_game.fighters.size(); k++)

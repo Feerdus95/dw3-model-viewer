@@ -268,6 +268,32 @@ static int preset_selftest() {
         center_on_screen(*t, out, bx, by);
         ok(fabs(ax - bx) < 0.02f && fabs(ay - by) < 0.02f, "the model's box center lands where the donor's did");
     }
+    {
+        /* A/B: A is the script's camera exactly, B the candidate, and going back and forth moves nothing but the view */
+        auto same = [](const View &a, const View &b) {
+            return !memcmp(a.cam.target, b.cam.target, sizeof a.cam.target) && a.cam.dist == b.cam.dist && a.cam.pitch == b.cam.pitch && a.cam.yaw == b.cam.yaw && a.fov == b.fov &&
+                   a.gameCamera == b.gameCamera;
+        };
+        View want, v;
+        std::vector<GameCamera> camsBefore = t->cameras;
+        std::string presetsBefore = preset_json({p});
+        GameCamera cand = p.c;
+        apply_camera(want, *t, 9);
+        ab_view(v, *t, false, cand, 9);
+        ok(same(v, want), "A is the camera the script asked for, exactly");
+        View a1 = v;
+        ab_view(v, *t, true, cand, 9);
+        apply_game_camera(want, *t, cand, -1);
+        ok(same(v, want) && !same(v, a1), "B is the candidate (its edit included)");
+        ab_view(v, *t, false, cand, 9);
+        ab_view(v, *t, true, cand, 9);
+        ab_view(v, *t, false, cand, 9);
+        ok(same(v, a1), "back and forth lands on the same A");
+        ab_view(v, *t, false, cand, -1);
+        ok(same(v, a1), "A with no camera asked for yet leaves the view as it is");
+        ok(camsBefore.size() == t->cameras.size() && !memcmp(camsBefore.data(), t->cameras.data(), camsBefore.size() * sizeof(GameCamera)) && preset_json({p}) == presetsBefore,
+           "switching changes neither the fighter's cameras nor the preset");
+    }
     std::filesystem::path dir = std::filesystem::temp_directory_path() / "dw3mv_preset_test", file = dir / "presets.json";
     std::filesystem::remove_all(dir);
     ok(preset_save(file, {p}, err), "saves");
