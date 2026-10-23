@@ -23,6 +23,7 @@ struct AppShot {
 
 struct Application {
     std::string name, status = "candidate", notes;
+    std::string variant; /* empty, or a word that keeps several applications of one donor script on one target script apart */
     int fighter = 0, scriptFid = 0, scriptEntry = 0, scriptIdx = 0;     /* the target */
     int donor = 0, donorFid = 0, donorEntry = 0, donorIdx = 0;          /* the donor fighter and script */
     std::string context = "base_game", donorContext = "base_game";
@@ -35,7 +36,7 @@ struct Application {
     std::string donor_ref() const { return comp::script_id(donorFid, donorEntry, donorIdx); }
     std::string id() const {
         std::string c = (context == "base_game" ? "" : context + "|") + (donorContext == "base_game" ? "" : "donor@" + donorContext + "|");
-        return "application:" + c + fighter_ref() + "|" + script_ref() + "|" + donor_ref();
+        return "application:" + c + fighter_ref() + "|" + script_ref() + "|" + donor_ref() + (variant.empty() ? "" : "|v:" + variant);
     }
 };
 
@@ -225,7 +226,7 @@ static std::string app_json(const std::vector<Application> &list) {
             shots.push_back(o.done());
         }
         comp::Obj o;
-        o.str("id", a.id()).str("name", a.name).str("status", a.status).str("notes", a.notes)
+        o.str("id", a.id()).str("name", a.name).str("variant", a.variant).str("status", a.status).str("notes", a.notes)
             .raw("target", comp::Obj().str("fighter", a.fighter_ref()).str("script", a.script_ref()).str("context", a.context).done())
             .raw("donor", comp::Obj().str("fighter", "fighter:" + std::to_string(a.donor)).str("script", a.donor_ref()).str("context", a.donorContext).done());
         if (a.fitK > 0) o.raw("fit", comp::Obj().str("kind", "fit_to_model").flt("scale", a.fitK).str("provenance", "derived").done());
@@ -288,7 +289,7 @@ static bool app_parse(const std::string &text, std::vector<Application> &out, st
             skipped.push_back("application " + std::to_string(n) + " is incomplete or malformed");
             continue;
         }
-        q.name = str(&j, "name"), q.notes = str(&j, "notes"), q.status = str(&j, "status");
+        q.name = str(&j, "name"), q.notes = str(&j, "notes"), q.status = str(&j, "status"), q.variant = str(&j, "variant");
         if (q.status != PRESET_STATUS[0] && q.status != PRESET_STATUS[1] && q.status != PRESET_STATUS[2]) {
             skipped.push_back("application " + std::to_string(n) + " has status \"" + q.status + "\": read as candidate");
             q.status = PRESET_STATUS[0];
@@ -308,6 +309,13 @@ static bool app_save(const std::filesystem::path &path, const std::vector<Applic
         std::vector<std::string> skipped;
         return app_parse(back, check, perr, skipped) && check.size() == list.size() && skipped.empty();
     }, err);
+}
+
+/* The applications to their file; ERROR holds why not, or is cleared */
+static void app_persist(const std::vector<Application> &list, std::string &error) {
+    std::string err;
+    if (!app_save(app_path(), list, err)) error = err;
+    else error.clear();
 }
 
 static std::string words_text(const int w[14]) {
@@ -491,6 +499,10 @@ static int templates_selftest() {
     std::filesystem::remove_all(dir);
     ok(app_save(file, {a}, err), "saves");
     std::string first = preset_text(file);
+    Application twin = a;
+    twin.variant = "copy";
+    got.clear();
+    ok(a.id() != twin.id() && app_parse(app_json({a, twin}), got, err, skipped) && got.size() == 2 && (got[0].variant == "copy" || got[1].variant == "copy"), "a variant is another application and is kept");
     Application a2 = a;
     a2.status = "rejected";
     ok(app_save(file, {a2}, err) && preset_text(file) == app_json({a2}) && !std::filesystem::exists(dir / "applications.json.tmp") && preset_text(file.string() + ".bak") == first,
