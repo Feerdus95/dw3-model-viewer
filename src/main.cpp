@@ -27,6 +27,7 @@
 #include "effect.h"
 #include "model.h"
 #include "stage.h"
+#include "app.h"
 #include "ui_kit.h"
 #include "viewer_types.h"
 #include <algorithm>

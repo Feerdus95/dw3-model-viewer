@@ -5,7 +5,7 @@
         case FILES: files_browser(); break;
         case STAGES: stages_browser(); break;
         case MODEL: model_browser(); break;
-        case MOTIONS: motions_browser(); break;
+        case MOTIONS: draw_motions_browser(app); break;
         case FIGHTER: fighter_browser(); break;
         case CAMERAS: cameras_browser(); break;
         case EFFECTS: effects_browser(); break;
@@ -20,7 +20,7 @@
         case FILES: files_inspector(); break;
         case STAGES: stages_inspector(); break;
         case MODEL: model_inspector(); break;
-        case MOTIONS: motions_inspector(); break;
+        case MOTIONS: draw_motions_inspector(app); break;
         case FIGHTER: fighter_inspector(); break;
         case CAMERAS: cameras_inspector(); break;
         case EFFECTS: effects_inspector(); break;

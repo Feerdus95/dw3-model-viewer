@@ -19,7 +19,7 @@
 #include "ui/stages_inspector.inc" /* Stages: the inspector */
 #include "ui/dw2_size.inc" /* a DW2 model's size */
 #include "ui/model.inc" /* Model */
-#include "ui/motions.inc" /* Motions */
+#include "ui/app.inc" /* the App the separate sections take (Motions: motions.cpp) */
 #include "ui/fighter_state.inc" /* Fighter: script roles and the state of the player, the workbench and the choreography */
 #include "ui/script_player.inc" /* Fighter: the script player */
 #include "ui/ab_controls.inc" /* A/B under the view */
