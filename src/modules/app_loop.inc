@@ -94,6 +94,7 @@
                 if (std::ifstream(dir + "/names.txt")) {
                     ask_first((stageDirty && stageId >= 0) || ownDirty, "Changing the data folder drops the changes you haven't saved. Go on?", [&, dir]() {
                         std::ofstream(g_exe_dir + "data_dir.txt") << dir << "\n";
+                        scanner.stop(); /* it reads g_names and g_data */
                         find_data(dir);
                         dw2_register_all();
                         scene.model.reset(), scene.fighters.clear(), scene.fid = -1;

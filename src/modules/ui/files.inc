@@ -1,6 +1,10 @@
     /* ===== Files ===== */
     auto files_browser = [&]() {
-        if (!listed) list = scan_models(), listed = true;
+        if (!listed) {
+            if (!scanner.running) scanner.start();
+            listed = scanner.poll(list);
+        }
+        if (!listed) return hint("Listing the models...");
         ImGui::SetNextItemWidth(-FLT_MIN);
         ImGui::InputTextWithHint("##filter", IC_SEARCH "  Search: name, file or number", filter, sizeof filter);
         if (list.empty()) {

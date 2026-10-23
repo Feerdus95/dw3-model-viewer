@@ -284,6 +284,7 @@ int main(int argc, char **argv) {
     GLuint aboutIcon = 0;
     std::vector<Entry> list;
     bool listed = false;
+    ModelScan scanner; /* the Files list, made off the main thread (disc_data.inc) */
     auto open_entry = [&](const std::string &path, int fighter) {
         std::string name = path.substr(path.find_last_of("/\\") + 1);
         int fid = -1;

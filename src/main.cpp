@@ -43,6 +43,8 @@
 #include <memory>
 #include <mutex>
 #include <set>
+#include <atomic>
+#include <thread>
 #ifdef _WIN32
 #include <io.h>
 #include <windows.h>

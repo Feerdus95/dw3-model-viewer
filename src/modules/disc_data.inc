@@ -89,17 +89,134 @@ struct Entry {
     std::string label; /* who it is: the fighters' names, or the technique's */
 };
 
+/* whether file FID is a model: an archive with a bone list */
+static bool is_model_file(int fid, std::vector<uint8_t> &bytes) {
+    if (!read_file(fid_path(fid), bytes)) return false;
+    Archive a{bytes.data(), bytes.size()};
+    return a.count() > 0 && (size_t)a.count() * 4 <= a.size && find_bone_entry(a) >= 0;
+}
+
 static std::vector<Entry> scan_models() {
     std::vector<Entry> out;
     std::vector<uint8_t> bytes;
     for (int fid = 1; fid < (int)g_names.size(); fid++) {
         const std::string &n = g_names[fid];
-        if (n.empty() || n[0] != 'M' || !read_file(fid_path(fid), bytes)) continue;
-        Archive a{bytes.data(), bytes.size()};
-        if (a.count() > 0 && (size_t)a.count() * 4 <= a.size && find_bone_entry(a) >= 0) out.push_back({fid, n, g_game.fileLabel(fid, n)});
+        if (n.empty() || n[0] != 'M') continue;
+        if (is_model_file(fid, bytes)) out.push_back({fid, n, g_game.fileLabel(fid, n)});
     }
     return out;
 }
+
+/* The Files section's list without reading every file at the start. On a hard disk 434 files cost a seek each (14 s cold); the list is
+   which of the M files are models, so it is kept in models_cache.txt next to the exe with each file's size and time, and read again
+   only while all of them match (one directory listing). A scan that has to run does so on a thread of its own (ModelScan); it touches
+   no SDL, GL or ImGui, and the labels, which come from g_game, are made by the main thread. */
+struct FileStamp {
+    long long size = 0, time = 0;
+    bool operator==(const FileStamp &o) const { return size == o.size && time == o.time; }
+};
+
+/* the data folder's M files by fid, from one listing of the folder */
+static std::map<int, FileStamp> model_stamps() {
+    namespace fs = std::filesystem;
+    std::map<std::string, FileStamp> byName;
+    std::error_code ec;
+    for (fs::directory_iterator it(fs::u8path(g_data), ec), end; !ec && it != end; it.increment(ec)) {
+        std::error_code e2;
+        if (!it->is_regular_file(e2)) continue;
+        byName[it->path().filename().string()] = {(long long)it->file_size(e2), (long long)it->last_write_time(e2).time_since_epoch().count()};
+    }
+    std::map<int, FileStamp> out;
+    for (int fid = 1; fid < (int)g_names.size(); fid++) {
+        const std::string &n = g_names[fid];
+        if (n.empty() || n[0] != 'M') continue;
+        auto f = byName.find(fs::u8path(fid_path(fid)).filename().string());
+        if (f != byName.end()) out[fid] = f->second;
+    }
+    return out;
+}
+
+/* models_cache.txt: "dw3mv-models 1", the data folder, then a line a file: fid size time isModel */
+static bool models_cache_read(const std::map<int, FileStamp> &now, std::vector<int> &fids) {
+    std::ifstream f(g_exe_dir + "models_cache.txt");
+    std::string head, dir;
+    if (!f || !std::getline(f, head) || head != "dw3mv-models 1" || !std::getline(f, dir) || dir != g_data) return false;
+    std::map<int, FileStamp> seen;
+    std::vector<int> out;
+    int fid, isModel;
+    FileStamp s;
+    while (f >> fid >> s.size >> s.time >> isModel) {
+        seen[fid] = s;
+        if (isModel) out.push_back(fid);
+    }
+    if (!f.eof() || seen != now) return false; /* unreadable, or a file added, removed or changed */
+    fids = std::move(out);
+    return true;
+}
+static void models_cache_write(const std::map<int, FileStamp> &stamps, const std::vector<int> &fids) {
+    std::string path = g_exe_dir + "models_cache.txt", tmp = path + ".tmp";
+    {
+        std::ofstream f(tmp);
+        f << "dw3mv-models 1\n" << g_data << "\n";
+        for (const auto &kv : stamps) f << kv.first << " " << kv.second.size << " " << kv.second.time << " " << std::binary_search(fids.begin(), fids.end(), kv.first) << "\n";
+        if (!f) return;
+    }
+    std::error_code ec;
+    std::filesystem::rename(tmp, path, ec);
+    if (ec) std::filesystem::remove(tmp, ec);
+}
+
+/* the fids of the models, from the cache while it holds, else by reading the files (CANCEL ends it early: nothing is kept) */
+static std::vector<int> model_fids(const std::atomic<bool> &cancel) {
+    std::map<int, FileStamp> stamps = model_stamps();
+    startup_mark("models: folder listed");
+    std::vector<int> fids;
+    if (models_cache_read(stamps, fids)) {
+        startup_mark("models: cache used");
+        return fids;
+    }
+    std::vector<uint8_t> bytes;
+    for (const auto &kv : stamps) {
+        if (cancel) return {};
+        if (is_model_file(kv.first, bytes)) fids.push_back(kv.first);
+    }
+    models_cache_write(stamps, fids);
+    startup_mark("models: files read");
+    return fids;
+}
+
+struct ModelScan {
+    std::thread th;
+    std::atomic<bool> cancel{false}, done{false};
+    std::vector<int> fids; /* the worker's, read only once done */
+    bool running = false;
+    void start() {
+        stop();
+        cancel = done = false;
+        running = true;
+        th = std::thread([this]() {
+            fids = model_fids(cancel);
+            done = true;
+        });
+    }
+    /* the list, if the worker has finished; false while it runs */
+    bool poll(std::vector<Entry> &out) {
+        if (!running || !done) return false;
+        th.join();
+        running = false;
+        out.clear();
+        for (int fid : fids) out.push_back({fid, g_names[fid], g_game.fileLabel(fid, g_names[fid])});
+        startup_mark("models: list ready");
+        return true;
+    }
+    void stop() {
+        if (!running) return;
+        cancel = true;
+        th.join();
+        running = false;
+    }
+    ~ModelScan() { stop(); }
+};
 
 
 /* --- Digimon World 2: the folder dw2-extractor made (digimon/ and fx/ in it, a .dw2m in each of their folders), kept in dw2_dir.txt --- */
