@@ -8,6 +8,8 @@
    dw3mv --seams               reports how each bone's mesh meets its parent's, at rest and over every motion (a dev diagnostic)
    dw3mv --effect ID           saves 2D effect ID's frames as PNGs and exits
    dw3mv --effect-users        prints which Digimon's action scripts start each 2D effect
+   dw3mv --dump-compendium [--out DIR] [--exe SLES_039.36]
+                               writes compendium.json and audit.md (models, fighters, cameras, scripts) and exits
 
    dw3mv --data DIR            reads the data from DIR instead
 
@@ -58,6 +60,7 @@
 #include "modules/stage_validation.inc"
 #include "modules/seam_report.inc"
 #include "modules/model_camera_tree.inc"
+#include "modules/compendium.inc"
 #include "modules/app_setup.inc"
 #include "modules/app_sections.inc"
 #include "modules/app_loop.inc"

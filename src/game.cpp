@@ -266,12 +266,16 @@ static std::vector<ScriptLine> read_script(const uint8_t *p, const uint8_t *end)
         case 5: {
             int time = next(), mode = next();
             std::string when = time ? fmt(" over %d", time) : "";
+            l.camTime = time;
             if (mode == 1) {
                 int v[14];
                 for (int &x : v) x = next();
+                l.camMode = 2;
+                memcpy(l.camRaw, v, sizeof v);
                 l.text = fmt("camera: at %d, %d, %d looking at %d, %d, %d, projection %d", v[0], v[1], v[2], v[3], v[4], v[5], v[13]) + when;
             } else {
                 int id = next();
+                l.camMode = id >= 1 && id <= 7 ? 1 : 3, l.camId = id;
                 if (id >= 1 && id <= 4) l.text = fmt("camera: partner's shot %d", id), l.camera = id + 7;
                 else if (id >= 5 && id <= 7) l.text = fmt("camera: enemy's shot %d", id - 4), l.camera = 100 + id - 5;
                 else l.text = "camera: the enemy's view";

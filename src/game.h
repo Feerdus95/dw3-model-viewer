@@ -57,6 +57,9 @@ struct ScriptLine {
     int emId = 0, emPos[3] = {0, 0, 0}, emRot[3] = {0, 0, 0};
     int waitTicks = -1;       /* a wait, in ticks */
     bool waitMotion = false;  /* waits for its own model's motion to end */
+    /* a camera command as the script has it (CAMERA, op 5): 1 a fighter's shot (CAMID: its 1-7), 2 explicit values (CAMRAW,
+       14 words: eye, target, ... projection at 13), 3 the battle's own view; CAMTIME its time. Only the dump reads these. */
+    int camMode = 0, camId = 0, camTime = 0, camRaw[14] = {};
 };
 
 struct GameData {

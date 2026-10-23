@@ -4,7 +4,8 @@ int main(int argc, char **argv) {
     std::string uses; /* --uses: a DW3 fighter's name, whose action scripts' motions are printed */
     std::vector<std::string> bounds; /* --bounds: a model file, or a fighter's name (DW3), whose posed box is printed */
     int shot_motion = 1, shot_key = 0, shot_cam = -1, shot_stage = 0, shot_fighter = 0;
-    bool check = false, users = false, stages = false, seams = false;
+    bool check = false, users = false, stages = false, seams = false, compendium = false;
+    std::string outDir, exePath; /* --dump-compendium: where it writes, and the game's exe for the techniques */
     int effect = -1, xstage = -1, istage = -1;
     float orbit[6] = {}; /* --orbit yaw,pitch,dist,x,y,z (degrees, model units): the shot's camera */
     bool has_orbit = false, shot_cull = false; /* --cull: back faces dropped, as the game draws */
@@ -22,6 +23,9 @@ int main(int argc, char **argv) {
         else if (a == "--import-obj" && i + 1 < argc) start_obj = argv[++i];
         else if (a == "--data" && i + 1 < argc) data = argv[++i];
         else if (a == "--check") check = true;
+        else if (a == "--dump-compendium") compendium = true;
+        else if (a == "--out" && i + 1 < argc) outDir = argv[++i];
+        else if (a == "--exe" && i + 1 < argc) exePath = argv[++i];
         else if (a == "--bounds" && i + 1 < argc) bounds.push_back(argv[++i]);
         else if (a == "--uses" && i + 1 < argc) uses = argv[++i];
         else if (a == "--import-stage" && i + 3 < argc) istage = atoi(argv[++i]), xmods = argv[++i], iobj = argv[++i];
@@ -35,11 +39,11 @@ int main(int argc, char **argv) {
     const char *base = SDL_GetBasePath();
     g_exe_dir = base ? base : "";
     find_data(data);
-    dw2_register_all();
+    if (!compendium) dw2_register_all(); /* the compendium is the disc's: a converted DW2 model is the user's own */
 
     if (!bounds.empty() || !uses.empty()) attach_console();
     if (check || users || stages || seams || !shot.empty() || effect >= 0) attach_console();
-    if (xstage >= 0 || istage >= 0) attach_console();
+    if (xstage >= 0 || istage >= 0 || compendium) attach_console();
     if (!uses.empty()) { /* which of the 62 motions a fighter's action scripts play, and which scripts */
         for (const Fighter &f : g_game.fighters) {
             std::vector<uint8_t> bytes;
@@ -106,6 +110,7 @@ int main(int argc, char **argv) {
         }
         return 0;
     }
+    if (compendium) return dump_compendium(outDir, exePath);
     if (istage >= 0) return import_stage_cli(istage, xmods, iobj);
     if (xstage >= 0) return export_stage_cli(xstage, xmods, xdir);
     if (stages) return check_stages();
