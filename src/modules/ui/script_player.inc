@@ -74,68 +74,10 @@
         Effect *e = shot_effect(id);
         return e ? e->duration : 0;
     };
-    /* the camera on screen: the words of the track that is selected (B with the candidate on, else A) */
-    auto show_cam = [&]() {
-        const Fighter *f = scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter];
-        const CamTrack &tr = cand.on ? run.b : run.a;
-        if (!f || !tr.set) return;
-        apply_cam_words(view, *f, tr.cur, tr.shown());
-        snap_cam();
-    };
-    /* B's camera at the script's camera command ORD (LN, of fighter F): the application's effective one while it is on, else the
-       candidate, at the fighter's own shots and with "also at the cuts" at the rest. False: B stays where it is */
-    auto b_target = [&](const Fighter &f, const ScriptLine &ln, int ord, int w[14], int &time) -> bool {
-        time = ln.camTime;
-        if (choreo.on && choreo.has) {
-            if (ord >= (int)choreo.eff.size()) return false;
-            const EffShot &e = choreo.eff[ord];
-            time = e.time;
-            if (e.kind == 2) return memcpy(w, e.w, 14 * sizeof(int)), true;
-            if (e.kind == 1) {
-                int idx = e.camId <= 4 ? (f.enemy ? -1 : e.camId + 7) : (f.enemy ? e.camId - 5 : -1);
-                if (idx < 0 || idx >= (int)f.cameras.size()) return false;
-                return cam_words(f.cameras[idx], w), true;
-            }
-            if (f.enemy || f.cameras.size() < 2) return false;
-            return cam_words(f.cameras[1], w), true; /* the battle's default view */
-        }
-        int c = ln.camera >= 100 ? ln.camera - 100 : ln.camera;
-        bool own = ln.camera >= 0 && c < (int)f.cameras.size() && (ln.camera >= 100) == f.enemy;
-        if (!(own || cand.every)) return false;
-        return cam_words(cand.c, w), true;
-    };
-    /* where B starts a script: the battle's default view with an application, else the candidate */
-    auto b_start = [&](const Fighter &f, int w[14]) {
-        if (choreo.on && choreo.has && !f.enemy && f.cameras.size() > 1) cam_words(f.cameras[1], w);
-        else cam_words(cand.c, w);
-    };
-    /* B as it would be at the point the script has reached (after an edit of what B is): the last target up to there, as a cut */
-    auto rebuild_b = [&]() {
-        const Fighter *f = scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter];
-        if (!f || !run.on || !scene.model || run.script >= (int)scene.model->scripts.size()) return;
-        const std::vector<ScriptLine> &sc = scene.model->scripts[run.script];
-        int w[14], w2[14], t, ord = 0;
-        b_start(*f, w);
-        for (int n = 0; n < run.pc && n < (int)sc.size(); n++) {
-            if (!sc[n].camMode) continue;
-            if (b_target(*f, sc[n], ord, w2, t)) memcpy(w, w2, sizeof w);
-            ord++;
-        }
-        run.b.cut(w, -1);
-        if (cand.on) show_cam();
-    };
-    /* the application's effective cameras again, after any change to it */
-    auto choreo_refresh = [&]() {
-        const Fighter *f = scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter];
-        choreo.eff.clear(), choreo.notes.clear();
-        if (!f || !choreo.has) return;
-        app_check(choreo.app);
-        const Fighter *d = fighter_by_id(choreo.app.donor, false);
-        if (choreo.app.fitK > 0 && d && (choreo.ffKey != std::make_pair(d->id, f->id) || !choreo.ff.ok)) /* the boxes are read from the models: once for a pair */
-            choreo.ff = fit_frame(*d, *f), choreo.ffKey = {d->id, f->id};
-        choreo.eff = app_effective(choreo.app, *f, choreo.ff, choreo.notes);
-        rebuild_b();
-    };
+    /* A and B on the same frame (fighter_cameras.inc): these bind its functions to main's locals */
+    auto show_cam = [&]() { cams_show(view, scene, run, cand); };
+    auto b_start = [&](const Fighter &f, int w[14]) { cams_b_start(cand, choreo, f, w); };
+    auto choreo_refresh = [&]() { cams_choreo_refresh(view, scene, run, cand, choreo); };
     auto run_script = [&](int i) {
         if (!scene.model || i < 0 || i >= (int)scene.model->scripts.size()) return;
         run = ScriptRun{true, i, 0, 0, false};
@@ -156,31 +98,8 @@
             if (lockCam) show_cam();
         }
     };
-    /* A (the script's camera) or B (the candidate) now, on the frame that is showing: while a script plays, the two cameras
-       go on side by side (also through a fade), so the switch lands where each one is */
-    auto set_ab = [&](bool b) {
-        const Fighter *f = scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter];
-        bool app = choreo.on && choreo.has; /* B is the application: no candidate is needed */
-        if (!f || (!app && (cand.fighter < 0 || cand.fighter >= (int)g_game.fighters.size() || g_game.fighters[cand.fighter].enemy != f->enemy))) return;
-        cand.on = b;
-        if (run.on) show_cam();
-        else if (!app) ab_view(view, *f, b, cand.c, cand.orig);
-        else if (!b && cand.orig >= 0) apply_camera(view, *f, cand.orig);
-    };
-    /* the candidate was edited: B follows it (a fade in progress ends where the edit is) */
-    auto cand_edited = [&]() {
-        const Fighter *f = scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter];
-        if (!f || choreo.on) return; /* B is the application */
-        if (run.on) {
-            int w[14];
-            cam_words(cand.c, w);
-            if (run.b.t == 0x1000) run.b.cut(w, -1);
-            else memcpy(run.b.to, w, sizeof w);
-            if (cand.on) show_cam();
-        } else if (cand.on) {
-            apply_game_camera(view, *f, cand.c, -1);
-        }
-    };
+    auto set_ab = [&](bool b) { cams_set_ab(view, scene, run, cand, choreo, b); };
+    auto cand_edited = [&]() { cams_cand_edited(view, scene, run, cand, choreo); };
     auto run_step = [&](float dt) {
         float ticks = view.playing ? dt * 60 * view.speed : 0;
         spriteDraws.clear();
@@ -236,29 +155,9 @@
             }
             if (ln.motion > 0 && ln.motion <= (int)m.motions.size()) m.setMotion(ln.motion);
             if (f && ln.camMode) {
-                /* A: what the game does with the command (a fade of camTime frames, or a cut); B: the candidate in its place, at the
-                   fighter's own shots and, with "also at the cuts", at the rest */
-                int c = ln.camera >= 100 ? ln.camera - 100 : ln.camera;
-                bool own = ln.camera >= 0 && c < (int)f->cameras.size() && (ln.camera >= 100) == f->enemy;
-                int w[14], idx = -1, ord = run.camOrd++;
-                bool act = true;
-                if (ln.camMode == 2) {
-                    memcpy(w, ln.camRaw, sizeof w);
-                    if ((w[12] || w[9] || w[10] || w[11]) && !run.rollNoted) {
-                        run.rollNoted = true;
-                        note(NOTE_INFO, "This script has a camera with a rotation or a roll: they are applied as the game's library does, unchecked, and a roll is not drawn.");
-                    }
-                } else if (own) {
-                    cam_words(f->cameras[c], w), idx = c, cand.orig = c;
-                } else if (ln.camMode == 3 && !f->enemy && f->cameras.size() > 1) { /* the battle's default view */
-                    cam_words(f->cameras[1], w), idx = 1, cand.orig = 1;
-                } else {
-                    act = false; /* the other side's shot: its fighter is not here */
-                }
-                if (act) run.a.fade(w, ln.camTime, idx);
-                int bw[14], bt;
-                if (b_target(*f, ln, ord, bw, bt)) run.b.fade(bw, bt, -1);
-                show_cam();
+                cams_command(view, scene, run, cand, choreo, *f, ln, [&] {
+                    note(NOTE_INFO, "This script has a camera with a rotation or a roll: they are applied as the game's library does, unchecked, and a roll is not drawn.");
+                });
             }
             if (ln.emStart && f) start_fx_model(ln, *f);
             if (ln.fxStart) {

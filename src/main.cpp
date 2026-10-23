@@ -63,6 +63,7 @@
 #include "modules/compendium.inc"
 #include "modules/presets.inc"
 #include "modules/templates.inc"
+#include "modules/fighter_cameras.inc"
 #include "modules/app_setup.inc"
 #include "modules/app_sections.inc"
 #include "modules/app_loop.inc"

@@ -40,36 +40,9 @@
     std::vector<ExtraModel> extraModels;
     /* the front layer's effects (FIGHTSTG_updateSpriteEffect) draw over the models; the rest sort with them */
     auto fx_front = [](int id) { return (id >= 1000 && id < 1003) || id == 1007; };
-    struct ScriptRun {
-        bool on = false;
-        int script = 0, pc = 0;
-        float wait = 0;
-        bool waitMotion = false;
-        /* the game's camera the script has set (or the battle's default view), kept while it plays */
-        bool camSet = false;
-        Camera cam;
-        float fov = 0.8f;
-        int camIdx = -1;
-        /* the battle camera twice, on the same script: A with the cameras the script asks for, B with the candidate in their place */
-        CamTrack a, b;
-        float camAcc = 0;
-        bool rollNoted = false;
-        int camOrd = 0; /* the camera commands met so far */
-    } run;
+    ScriptRun run; /* (fighter_cameras.inc) */
     bool lockCam = true;
-    /* A candidate camera (Camera workbench): another fighter's camera, adjusted, in the place of the camera the script asks for, at the
-       same moments. FIGHTER is its donor in g_game.fighters (same side as the model); EVERY: also at the camera commands the
-       player doesn't act on (explicit ones, the other side's shots). ORIG: the game's camera the script last asked for (-1 the default view) */
-    struct Candidate {
-        bool on = false, every = false;
-        int fighter = -1, cam = 0;
-        GameCamera c = {};
-        int orig = -1;
-        int script = -1;             /* the script last played, of OF: what a preset is made for */
-        const Fighter *of = nullptr;
-        GameCamera before = {};      /* the camera before a fit, for undoing it */
-        double fitK = 0;             /* the scale of the fit the camera started from; 0 none */
-    } cand;
+    Candidate cand; /* (fighter_cameras.inc) */
     /* the presets (presets.json), read when first wanted */
     struct PresetUi {
         bool loaded = false, blocked = false;
@@ -85,24 +58,7 @@
         };
         std::vector<In> in;
     } pre;
-    /* The choreography (templates.inc): APP, an application being worked on, its EFF effective cameras on the target's script, and the
-       saved ones. ON: B is the application instead of the candidate camera */
-    struct ChoreoUi {
-        bool on = false, has = false, fit = true;
-        Application app;
-        std::vector<EffShot> eff;
-        std::vector<std::string> notes;
-        FitFrame ff;
-        std::pair<int, int> ffKey = {-1, -1};
-        int donor = -1, donorScript = -1, targetScript = -1; /* donor: index in g_game.fighters */
-        int donorOf = -2;                                      /* the donor DOPT was made for */
-        std::vector<std::pair<int, int>> dopt;                 /* the donor's scripts with camera commands: number, count */
-        bool loaded = false, blocked = false;
-        std::string error, msg, active;
-        std::vector<Application> list;
-        char name[64] = "", notes_[256] = "", variant[24] = "";
-        int status = 0;
-    } choreo;
+    ChoreoUi choreo; /* (fighter_cameras.inc) */
     /* the technique whose look a script's own (9999) sprite effect takes: TechData.scriptEffect. The Fight
        command is no technique: its effect is 2 */
     int ownTech = 0;
@@ -120,7 +76,6 @@
         const TechRow *t = own_tech(script);
         return t ? t->effect : script == 5 ? 2 : -1;
     };
-    auto snap_cam = [&]() { run.cam = view.cam, run.fov = view.fov, run.camIdx = view.gameCamera, run.camSet = true; };
     std::vector<FxShot> shots;
     std::map<int, std::unique_ptr<Effect>> shotFx;
     /* the effect's own images (the mod), when it has them and they are on: they play in the original's place */
