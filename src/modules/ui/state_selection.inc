@@ -18,11 +18,12 @@
         float move[3] = {0, 0, 0}, turn = 0, scale = 1;
         float tilt[2] = {0, 0}; /* turns about the bone's X and Z (TURN is about Y), in degrees */
         float stretch[3] = {1, 1, 1}; /* the mesh's width, length and depth along the bone's own axes (on top of Scale) */
-        float reach = 1;     /* where the bones under this one sit from its joint (the limb's length), the mesh unchanged */
+        float reach[3] = {1, 1, 1}; /* where the bones under this one sit from its joint, along its X, Y and Z (the limb's length), the mesh unchanged */
+        float place[3] = {0, 0, 0}; /* this bone's own joint moved from its parent's, in the parent's axes: only it and what hangs from it */
         bool joint = true;   /* the mesh scales about the bone's joint (a limb stays attached), not its own centre */
         bool follow = true;  /* a change of Scale carries Reach with it */
         bool gone = false; /* collapsed to a point: not drawn in the game */
-        bool any() const { return move[0] || move[1] || move[2] || turn || tilt[0] || tilt[1] || scale != 1 || stretch[0] != 1 || stretch[1] != 1 || stretch[2] != 1 || reach != 1 || gone; }
+        bool any() const { return move[0] || move[1] || move[2] || turn || tilt[0] || tilt[1] || scale != 1 || stretch[0] != 1 || stretch[1] != 1 || stretch[2] != 1 || reach[0] != 1 || reach[1] != 1 || reach[2] != 1 || place[0] || place[1] || place[2] || gone; }
     };
     std::map<int, PieceEdit> charEdits;
     std::vector<std::vector<Vec3s>> charV0, charN0; /* each bone's vertices and normals as the file has them */

@@ -5,9 +5,11 @@
         auto fit16 = [](float x) { return (int16_t)std::clamp((int)lroundf(x), -32768, 32767); };
         for (size_t b = 1; b < m.bones.size() && b < charK0.size(); b++) { /* each bone's joint: where its parent's Reach puts it */
             m.bones[b].keys[0] = charK0[b];
-            auto pe = charEdits.find(m.bones[b].parent);
-            if (pe == charEdits.end() || pe->second.reach == 1) continue;
-            for (Key &k : m.bones[b].keys[0]) k.x = fit16(k.x * pe->second.reach), k.y = fit16(k.y * pe->second.reach), k.z = fit16(k.z * pe->second.reach);
+            auto pe = charEdits.find(m.bones[b].parent), own = charEdits.find((int)b);
+            float one[3] = {1, 1, 1}, zero[3] = {0, 0, 0};
+            const float *rc = pe == charEdits.end() ? one : pe->second.reach, *pl = own == charEdits.end() ? zero : own->second.place;
+            if (rc[0] == 1 && rc[1] == 1 && rc[2] == 1 && !pl[0] && !pl[1] && !pl[2]) continue;
+            for (Key &k : m.bones[b].keys[0]) k.x = fit16(k.x * rc[0] + pl[0]), k.y = fit16(k.y * rc[1] + pl[1]), k.z = fit16(k.z * rc[2] + pl[2]);
         }
         m.evaluate();
         for (size_t b = 1; b < m.bones.size() && b < charV0.size(); b++) {
@@ -164,11 +166,11 @@
     /* the edits changed or went back: unsaved only if they differ from what was saved */
     auto char_same_edits = [&](const std::map<int, PieceEdit> &a, const std::map<int, PieceEdit> &b) {
         auto v = [](const std::map<int, PieceEdit> &m) {
-            std::vector<std::array<float, 15>> out;
+            std::vector<std::array<float, 21>> out;
             for (const auto &kv : m)
                 if (kv.second.any())
                     out.push_back({(float)kv.first, kv.second.move[0], kv.second.move[1], kv.second.move[2], kv.second.turn, kv.second.scale,
-                                   (float)kv.second.gone, kv.second.reach, (float)kv.second.joint, (float)kv.second.follow, kv.second.stretch[0], kv.second.stretch[1], kv.second.stretch[2], kv.second.tilt[0], kv.second.tilt[1]});
+                                   (float)kv.second.gone, kv.second.reach[0], kv.second.reach[1], kv.second.reach[2], kv.second.place[0], kv.second.place[1], kv.second.place[2], (float)kv.second.joint, (float)kv.second.follow, kv.second.stretch[0], kv.second.stretch[1], kv.second.stretch[2], kv.second.tilt[0], kv.second.tilt[1]});
             return out;
         };
         return v(a) == v(b);

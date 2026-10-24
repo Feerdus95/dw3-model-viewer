@@ -468,7 +468,7 @@
                     }
                 } else if (gzDrag == 4 && moved) {
                     pe.scale = std::clamp(pe.scale * powf(1.01f, d.x - d.y), 0.05f, 20.0f);
-                    if (pe.follow) pe.reach = pe.scale;
+                    if (pe.follow) pe.reach[0] = pe.reach[1] = pe.reach[2] = pe.scale;
                     did = true;
                 }
                 if (did) {

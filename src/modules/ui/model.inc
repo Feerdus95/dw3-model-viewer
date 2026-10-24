@@ -120,9 +120,15 @@
                             tip("In the view: drag the box.");
                         },
                         [&]() {
-                            if (ImGui::DragFloat("##v", &pe.scale, 0.01f, 0.05f, 20, "%.2f")) changed = true, pe.reach = pe.follow ? pe.scale : pe.reach;
+                            if (ImGui::DragFloat("##v", &pe.scale, 0.01f, 0.05f, 20, "%.2f")) {
+                                changed = true;
+                                if (pe.follow) pe.reach[0] = pe.reach[1] = pe.reach[2] = pe.scale;
+                            }
                         },
-                        [&]() { pe.scale = 1, pe.reach = pe.follow ? 1 : pe.reach; });
+                        [&]() {
+                            pe.scale = 1;
+                            if (pe.follow) pe.reach[0] = pe.reach[1] = pe.reach[2] = 1;
+                        });
                     static const char *SN[3] = {"Width", "Length", "Depth"}, *ST[3] = {"Along the bone's X: how wide the mesh is.", "Along the bone's Y: how long the mesh is.", "Along the bone's Z: how deep the mesh is."};
                     for (int a = 0; a < 3; a++)
                         row(SN[a],
@@ -132,13 +138,29 @@
                                 tip("%s Proportion, not position: the joint stays where it is and so do the bones under it.", ST[a]);
                             },
                             [&]() { changed |= ImGui::DragFloat("##v", &pe.stretch[a], 0.01f, 0.05f, 20, "x %.2f"); }, [&]() { pe.stretch[a] = 1; });
-                    row("reach",
-                        [&]() {
-                            ImGui::AlignTextToFramePadding();
-                            ImGui::TextUnformatted("Reach");
-                            tip("Where the bones under this one sit from its joint: the limb's length. The mesh stays as it is.");
-                        },
-                        [&]() { changed |= ImGui::DragFloat("##v", &pe.reach, 0.01f, 0.05f, 20, "%.2f"); }, [&]() { pe.reach = 1; });
+                    {
+                        static const char *RN[3] = {"Reach X", "Reach Y", "Reach Z"}, *PN[3] = {"Place X", "Place Y", "Place Z"};
+                        for (int a = 0; a < 3; a++)
+                            row(RN[a],
+                                [&]() {
+                                    ImGui::AlignTextToFramePadding();
+                                    ImGui::TextUnformatted(RN[a]);
+                                    tip("Where the bones under this one sit from its joint along its %c axis: the skeleton's width, length or depth here. The mesh stays as it is.", "XYZ"[a]);
+                                },
+                                [&]() { changed |= ImGui::DragFloat("##v", &pe.reach[a], 0.01f, 0.05f, 20, "x %.2f"); }, [&]() { pe.reach[a] = 1; });
+                        for (int a = 0; a < 3; a++)
+                            row(PN[a],
+                                [&]() {
+                                    ImGui::AlignTextToFramePadding();
+                                    ImGui::TextUnformatted(PN[a]);
+                                    tip("This bone's own joint moved from its parent's, along the parent's %c axis, in the game's units%s. Only this bone and what hangs from it move; its brothers stay.", "XYZ"[a], a == 1 ? " (up is positive)" : "");
+                                },
+                                [&]() {
+                                    float v = a == 1 ? 0.0f - pe.place[1] : pe.place[a];
+                                    if (ImGui::DragFloat("##v", &v, 2, -4000, 4000, "%.0f")) pe.place[a] = a == 1 ? -v : v, changed = true;
+                                },
+                                [&]() { pe.place[a] = 0; });
+                    }
                     ImGui::EndTable();
                 }
                 bool joint = pe.joint, follow = pe.follow;
