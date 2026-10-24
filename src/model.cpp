@@ -4,6 +4,9 @@
 #include "model.h"
 #include <algorithm>
 #include <cmath>
+#include <functional>
+#include <cstdlib>
+#include <map>
 #include <cstring>
 
 static uint32_t rd32(const uint8_t *p) { uint32_t v; memcpy(&v, p, 4); return v; }
@@ -448,7 +451,150 @@ void Model::evaluate() {
         else
             pose_bone(bones[b], pose[b], frame);
     }
+    static const bool envTpose = getenv("DW3MV_TPOSE") != nullptr; /* a diagnostic for --shot: the T-pose */
+    if (tpose || envTpose) apply_tpose();
+    if (const char *hid = getenv("DW3MV_HIDE")) /* a diagnostic: the bones in the list ("17,22") draw no mesh */
+        for (const char *c = hid; *c; ) {
+            int b = atoi(c);
+            if (b > 0 && b < (int)pose.size()) pose[b].hide = true;
+            while (*c && *c != ',') c++;
+            if (*c == ',') c++;
+        }
     computeWorld();
+}
+
+/* The T-pose: arms out along x, legs straight down, found from the skeleton as it stands with every rotation zero (nothing is
+   read from the model's names). A limb is a chain of bones, each following its deepest child, that starts off the model's
+   middle line; it is a leg when it ends near the floor, an arm when it does not (a chain at the middle, like a tail, a
+   neck or a wing's root, is left as it is). Each bone of a limb is turned the shortest way so that its child lies along the
+   target; what hangs off a limb's side (a shoulder blade, a foot) keeps the world's axes. The keys' positions and scales stay,
+   so the pose is the current frame's with the rotations replaced */
+namespace {
+struct V3 { float x, y, z; };
+void rot_euler(const float R[3][3], Vec3s &out) {
+    const float k = 4096 / 6.2831853f;
+    out.y = (int16_t)lroundf(asinf(std::max(-1.0f, std::min(1.0f, -R[2][0]))) * k);
+    out.x = (int16_t)lroundf(atan2f(R[2][1], R[2][2]) * k);
+    out.z = (int16_t)lroundf(atan2f(R[1][0], R[0][0]) * k);
+}
+V3 unit(V3 v) { float n = sqrtf(v.x * v.x + v.y * v.y + v.z * v.z); return n > 1e-6f ? V3{v.x / n, v.y / n, v.z / n} : V3{0, 1, 0}; }
+/* the shortest rotation taking unit a to unit b */
+void arc_matrix(V3 a, V3 b, float R[3][3]) {
+    V3 v = {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+    float c = a.x * b.x + a.y * b.y + a.z * b.z;
+    float K[3][3] = {{0, -v.z, v.y}, {v.z, 0, -v.x}, {-v.y, v.x, 0}};
+    if (c < -0.9999f) { /* opposite: half a turn about any axis across them */
+        V3 ax = unit(fabsf(a.x) < 0.9f ? V3{0, -a.z, a.y} : V3{a.z, 0, -a.x});
+        float A[3] = {ax.x, ax.y, ax.z};
+        for (int i = 0; i < 3; i++)
+            for (int j = 0; j < 3; j++) R[i][j] = 2 * A[i] * A[j] - (i == j);
+        return;
+    }
+    for (int i = 0; i < 3; i++)
+        for (int j = 0; j < 3; j++) {
+            float k2 = K[i][0] * K[0][j] + K[i][1] * K[1][j] + K[i][2] * K[2][j];
+            R[i][j] = (i == j) + K[i][j] + k2 / (1 + c);
+        }
+}
+bool inv3(const float m[3][3], float o[3][3]) {
+    float det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    if (fabsf(det) < 1e-9f) return false;
+    o[0][0] = (m[1][1] * m[2][2] - m[1][2] * m[2][1]) / det; o[0][1] = (m[0][2] * m[2][1] - m[0][1] * m[2][2]) / det; o[0][2] = (m[0][1] * m[1][2] - m[0][2] * m[1][1]) / det;
+    o[1][0] = (m[1][2] * m[2][0] - m[1][0] * m[2][2]) / det; o[1][1] = (m[0][0] * m[2][2] - m[0][2] * m[2][0]) / det; o[1][2] = (m[0][2] * m[1][0] - m[0][0] * m[1][2]) / det;
+    o[2][0] = (m[1][0] * m[2][1] - m[1][1] * m[2][0]) / det; o[2][1] = (m[0][1] * m[2][0] - m[0][0] * m[2][1]) / det; o[2][2] = (m[0][0] * m[1][1] - m[0][1] * m[1][0]) / det;
+    return true;
+}
+} // namespace
+
+void Model::apply_tpose() {
+    const int n = (int)bones.size();
+    if (n < 3) return;
+    for (int b = 1; b < n; b++) pose[b].rot = Vec3s{0, 0, 0};
+    computeWorld();
+    auto joint = [&](int b) { return V3{pose[b].world[12], pose[b].world[13], pose[b].world[14]}; };
+    std::vector<std::vector<int>> kids(n);
+    for (int b = 1; b < n; b++)
+        if (bones[b].parent >= 1 && bones[b].parent < n && bones[b].parent != b) kids[bones[b].parent].push_back(b);
+    std::vector<int> height(n, 0), depth(n, 0);
+    std::function<int(int, int)> measure = [&](int b, int d) {
+        if (d > n) return 0;
+        depth[b] = d;
+        int h = 0;
+        for (int c : kids[b]) h = std::max(h, 1 + measure(c, d + 1));
+        return height[b] = h;
+    };
+    for (int b = 1; b < n; b++) if (bones[b].parent < 1 || bones[b].parent >= n) measure(b, 0);
+    float minX = 1e9f, maxX = -1e9f, minY = 1e9f, maxY = -1e9f;
+    for (int b = 1; b < n; b++) {
+        V3 j = joint(b);
+        minX = std::min(minX, j.x), maxX = std::max(maxX, j.x), minY = std::min(minY, j.y), maxY = std::max(maxY, j.y);
+    }
+    float midX = (minX + maxX) / 2, range = maxY - minY;
+    std::vector<int> role(n, 0), next(n, 0); /* 0 free, 1 leg, 2 arm, 3 the end of an arm, 4 hangs off a limb */
+    std::vector<V3> target(n, V3{0, 0, 0});
+    std::vector<int> order(n - 1);
+    for (int b = 1; b < n; b++) order[b - 1] = b;
+    std::stable_sort(order.begin(), order.end(), [&](int a, int b) { return depth[a] < depth[b]; });
+    std::vector<char> done(n, 0), floor(n, 0); /* FLOOR: some bone of its subtree is down at the floor */
+    for (auto it = order.rbegin(); it != order.rend(); ++it) {
+        int b = *it;
+        floor[b] |= joint(b).y >= maxY - 0.15f * range;
+        if (bones[b].parent >= 1) floor[bones[b].parent] |= floor[b];
+    }
+    for (int s : order) {
+        if (done[s] || (bones[s].parent >= 1 && role[bones[s].parent])) continue;
+        int low = 0;
+        for (int k : kids[s]) low += floor[k];
+        if (low >= 2) continue; /* a pelvis: two legs leave it, it is no leg's start */
+        std::vector<int> chain = {s};
+        for (int c = s; !kids[c].empty() && (int)chain.size() <= n;) {
+            int best = kids[c][0];
+            for (int k : kids[c]) if (height[k] > height[best]) best = k;
+            chain.push_back(best), c = best;
+        }
+        if (chain.size() < 2) continue;
+        V3 a = joint(chain.front()), z = joint(chain.back());
+        int kind = 0;
+        if (z.y >= maxY - 0.15f * range && a.y < maxY - 0.15f * range) kind = 1;
+        else if (fabsf(a.x - midX) > 0.05f * range && z.y < maxY - 0.15f * range) kind = 2;
+        if (!kind) continue;
+        float sx = a.x >= midX ? 1.0f : -1.0f;
+        for (size_t i = 0; i < chain.size(); i++) {
+            int b = chain[i];
+            done[b] = 1;
+            bool last = i + 1 == chain.size();
+            role[b] = !last ? kind : kind == 1 ? 4 : 3; /* a foot lies flat; a hand follows its arm */
+            next[b] = last ? 0 : chain[i + 1];
+            target[b] = kind == 1 ? V3{0, 1, 0} : V3{sx, 0, 0};
+        }
+        for (int b : chain) for (int c : kids[b]) if (!role[c]) role[c] = 4;
+    }
+    for (int b : order) {
+        if (role[b] != 1 && role[b] != 2 && role[b] != 4) continue;
+        computeWorld();
+        float pl[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+        if (bones[b].parent >= 1) {
+            const float *w = pose[bones[b].parent].world;
+            for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) pl[i][j] = w[j * 4 + i];
+        }
+        float R[3][3];
+        if (role[b] == 4) { /* the world's axes: the parent's rotation undone */
+            float c[3][3];
+            for (int j = 0; j < 3; j++) {
+                V3 col = unit(V3{pl[0][j], pl[1][j], pl[2][j]});
+                c[0][j] = col.x, c[1][j] = col.y, c[2][j] = col.z;
+            }
+            for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) R[i][j] = c[j][i];
+        } else {
+            int c = next[b];
+            V3 v = {pose[c].pos.x * pose[b].scale.x / 4096.0f, pose[c].pos.y * pose[b].scale.y / 4096.0f, pose[c].pos.z * pose[b].scale.z / 4096.0f};
+            float pi[3][3];
+            if (!inv3(pl, pi)) continue;
+            V3 u = target[b], w = {pi[0][0] * u.x + pi[0][1] * u.y + pi[0][2] * u.z, pi[1][0] * u.x + pi[1][1] * u.y + pi[1][2] * u.z, pi[2][0] * u.x + pi[2][1] * u.y + pi[2][2] * u.z};
+            arc_matrix(unit(v), unit(w), R);
+        }
+        rot_euler(R, pose[b].rot);
+    }
 }
 
 /* The second half of FIGHTSTG_stepMotion: on by the frames gone by */

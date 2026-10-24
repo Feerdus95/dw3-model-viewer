@@ -129,6 +129,8 @@ struct Model {
     bool stepFace(); /* one battle frame of the face; true when VRAM changed */
     void setMotion(int m);  /* 1-based, as the game's */
     void evaluate();        /* the pose at the current keyframe */
+    bool tpose = false;     /* the rotations replaced by a T-pose (apply_tpose); the keys' positions and scales stay */
+    void apply_tpose();
     /* steps the keyframe on, as FIGHTSTG_stepMotion. ONCE: a jump back (the motion's own loop) ends it as the terminator does, holding the last keyframe */
     void advance(int ticks, bool once = false);
     void computeWorld();

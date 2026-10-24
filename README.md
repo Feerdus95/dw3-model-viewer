@@ -65,6 +65,8 @@ trademark of its owners.
   - each of a fighter's motions (62 for the Digimon);
   - play, pause, step one keyframe, restart, loop, speed from 0.05x to 4x, and a
     keyframe slider;
+  - **T** puts the model in a T-pose (arms out, legs straight, found from the skeleton) to compare
+    proportions; it pauses the animation, and a body without arms and legs, like a snake's, stays as it is;
   - **Loop** on restarts a motion that ends; off plays it once and holds its last
     keyframe, also a motion that repeats itself inside its own keys. (A motion that has
     no end key just holds its last keyframe either way.)

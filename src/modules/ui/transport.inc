@@ -30,6 +30,14 @@
         if (ImGui::Button(IC_LOOP, ImVec2(b, 0))) loop = !loop;
         ImGui::PopStyleColor();
         tip(loop ? "Loop: on" : "Loop: off");
+        if (!fxMode) {
+            ImGui::SameLine();
+            if (m->tpose) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_HeaderActive));
+            else ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+            if (ImGui::Button("T", ImVec2(b, 0))) m->tpose = !m->tpose, playing = false, m->evaluate();
+            ImGui::PopStyleColor();
+            tip(m->tpose ? "T-pose: on (arms out, legs straight; the animation is paused)" : "T-pose: arms out and legs straight, to compare proportions");
+        }
         if (speed) {
             ImGui::SameLine();
             ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6);
