@@ -23,15 +23,20 @@
             }
             float c[3] = {(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2};
             if (e.joint) c[0] = c[1] = c[2] = 0;
-            float s = e.gone ? 0.0f : e.scale, cs = cosf(e.turn * 0.017453293f), sn = sinf(e.turn * 0.017453293f);
+            float s = e.gone ? 0.0f : e.scale, d2r = 0.017453293f;
+            float ca = cosf(e.tilt[0] * d2r), sa = sinf(e.tilt[0] * d2r), cb = cosf(e.turn * d2r), sb = sinf(e.turn * d2r), cc = cosf(e.tilt[1] * d2r), sc = sinf(e.tilt[1] * d2r);
+            const float R[3][3] = {{cc * cb, cc * sb * sa - sc * ca, cc * sb * ca + sc * sa}, /* Rz * Ry * Rx; about Y alone it is the old Turn */
+                                   {sc * cb, sc * sb * sa + cc * ca, sc * sb * ca - cc * sa},
+                                   {-sb, cb * sa, cb * ca}};
             auto fit = [](float x) { return (int16_t)std::clamp((int)lroundf(x), -32768, 32767); };
             for (Vec3s &v : me.verts) {
                 float dx = (v.x - c[0]) * s * e.stretch[0], dy = (v.y - c[1]) * s * e.stretch[1], dz = (v.z - c[2]) * s * e.stretch[2];
-                v = {fit(c[0] + e.move[0] + dx * cs + dz * sn), fit(c[1] + e.move[1] + dy), fit(c[2] + e.move[2] - dx * sn + dz * cs)};
+                v = {fit(c[0] + e.move[0] + R[0][0] * dx + R[0][1] * dy + R[0][2] * dz), fit(c[1] + e.move[1] + R[1][0] * dx + R[1][1] * dy + R[1][2] * dz),
+                     fit(c[2] + e.move[2] + R[2][0] * dx + R[2][1] * dy + R[2][2] * dz)};
             }
             for (Vec3s &n : me.normals) {
-                float x = n.x, z = n.z;
-                n.x = fit(x * cs + z * sn), n.z = fit(-x * sn + z * cs);
+                float x = n.x, y = n.y, z = n.z;
+                n = {fit(R[0][0] * x + R[0][1] * y + R[0][2] * z), fit(R[1][0] * x + R[1][1] * y + R[1][2] * z), fit(R[2][0] * x + R[2][1] * y + R[2][2] * z)};
             }
         }
         /* the view keeps its camera and what's hidden */
@@ -159,11 +164,11 @@
     /* the edits changed or went back: unsaved only if they differ from what was saved */
     auto char_same_edits = [&](const std::map<int, PieceEdit> &a, const std::map<int, PieceEdit> &b) {
         auto v = [](const std::map<int, PieceEdit> &m) {
-            std::vector<std::array<float, 13>> out;
+            std::vector<std::array<float, 15>> out;
             for (const auto &kv : m)
                 if (kv.second.any())
                     out.push_back({(float)kv.first, kv.second.move[0], kv.second.move[1], kv.second.move[2], kv.second.turn, kv.second.scale,
-                                   (float)kv.second.gone, kv.second.reach, (float)kv.second.joint, (float)kv.second.follow, kv.second.stretch[0], kv.second.stretch[1], kv.second.stretch[2]});
+                                   (float)kv.second.gone, kv.second.reach, (float)kv.second.joint, (float)kv.second.follow, kv.second.stretch[0], kv.second.stretch[1], kv.second.stretch[2], kv.second.tilt[0], kv.second.tilt[1]});
             return out;
         };
         return v(a) == v(b);

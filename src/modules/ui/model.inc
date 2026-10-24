@@ -101,13 +101,18 @@
                                 if (ImGui::DragFloat("##v", &v, 2, -4000, 4000, "%.0f")) pe.move[a] = a == 1 ? -v : v, changed = true;
                             },
                             [&]() { pe.move[a] = 0; });
-                    row("turn",
-                        [&]() {
-                            ImGui::AlignTextToFramePadding();
-                            ImGui::TextUnformatted("Turn");
-                            tip("About the bone's vertical axis.");
-                        },
-                        [&]() { changed |= ImGui::DragFloat("##v", &pe.turn, 0.5f, -180, 180, "%.1f deg"); }, [&]() { pe.turn = 0; });
+                    {
+                        static const char *TN[3] = {"Turn X", "Turn Y", "Turn Z"};
+                        float *tv[3] = {&pe.tilt[0], &pe.turn, &pe.tilt[1]};
+                        for (int a = 0; a < 3; a++)
+                            row(TN[a],
+                                [&]() {
+                                    ImGui::AlignTextToFramePadding();
+                                    ImGui::TextUnformatted(TN[a]);
+                                    tip("The mesh turned about the bone's %c axis, at its joint: the animation still moves the bone, and the bones under it do not turn.", "XYZ"[a]);
+                                },
+                                [&]() { changed |= ImGui::DragFloat("##v", tv[a], 0.5f, -180, 180, "%.1f deg"); }, [&]() { *tv[a] = 0; });
+                    }
                     row("scale",
                         [&]() {
                             ImGui::AlignTextToFramePadding();
