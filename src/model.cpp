@@ -2,6 +2,7 @@
    its files (dw3_decomp src/fightstg/fightstg.c, src/main/gfx/tim_loader.c;
    MIT, see CREDITS.md) */
 #include "model.h"
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -216,7 +217,7 @@ static bool read_motions(const Archive &a, std::vector<std::vector<MotionStep>> 
 }
 
 bool Model::load(const std::string &n, std::vector<uint8_t> bytes, const Fighter *f, int entry, int motionsAt) {
-    if (bytes.size() > 8 && !memcmp(bytes.data(), "DW2M", 4)) return load_dw2(n, std::move(bytes));
+    if (bytes.size() > 8 && (!memcmp(bytes.data(), "DW2M", 4) || !memcmp(bytes.data(), "DCBM", 4))) return load_dw2(n, std::move(bytes));
     name = n;
     fighter = f;
     file = std::move(bytes);
@@ -352,6 +353,9 @@ static void pose_bone(const Bone &bone, Pose &p, int frame) {
         int dp = span ? ((frame - prev.frame) << 12) / span : 0;
         *outs[t] = lerp({prev.x, prev.y, prev.z}, {cur.x, cur.y, cur.z}, dp);
     }
+    p.hide = false;
+    auto it = std::upper_bound(bone.hide.begin(), bone.hide.end(), frame, [](int f, const Key &k) { return f < k.frame; });
+    if (it != bone.hide.begin()) p.hide = std::prev(it)->x != 0;
 }
 
 /* FIGHTSTG_blendBone */
@@ -481,7 +485,7 @@ void Model::computeWorld() {
             p.visible = false;
             continue;
         }
-        p.visible = true;
+        p.visible = !p.hide;
         float local[16];
         bone_matrix(p.pos, p.rot, p.scale, local);
         if (b == 0) {

@@ -49,6 +49,7 @@ struct Bone {
     int mesh;     /* index in Model.meshes, -1 for the root */
     int keyEntry; /* its keys' archive, an entry of the file */
     std::vector<Key> keys[3]; /* positions, rotations (4096 = 360°), scales (4096 = 1) */
+    std::vector<Key> hide;    /* DCB: x = 1 while the mesh is not drawn (the key's attribute, or a collapsed scale); the matrix still stands for the children */
 };
 
 /* A motion: its steps (MotionStep), as in the motions' archive */
@@ -71,6 +72,7 @@ struct Pose {
     Vec3s pos, rot, scale;
     Vec3s prevPos, prevRot, prevScale;
     bool visible;
+    bool hide = false; /* the mesh is hidden by the animation, the matrix is not */
     float world[16]; /* column-major, model units */
 };
 
@@ -92,7 +94,8 @@ struct Model {
     std::vector<Tim> tims;
     std::vector<std::vector<MotionStep>> motions; /* [i] is motion i + 1 */
     std::string error;
-    bool dw2 = false; /* a Digimon World 2 model (load_dw2) */
+    bool dw2 = false; /* a Digimon World 2 or Digital Card Battle model (load_dw2) */
+    bool dcb = false; /* a Digital Card Battle one (.dcbm: 16-bit vertex indices, flat-colored faces) */
     /* its size, adjustable (dw2.cpp): the whole model by SCALE, each bone's own mesh by MESH[bone] (about its joint), and
        where its children's joints sit by REACH[bone] (their offsets from it). All 1 is the model as the disc has it; the
        bones' lists are indexed as bones, [0] the root */

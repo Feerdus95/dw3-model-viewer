@@ -23,6 +23,7 @@ bool Model::load_dw2(const std::string &n, std::vector<uint8_t> bytes) {
     name = n;
     dw2 = true;
     file = std::move(bytes);
+    dcb = file[0] == 'D' && file[1] == 'C';
     Rd r{file.data() + 4, file.data() + file.size()};
     int ver = r.u16(), nb = r.u16(), imgW = r.u16(), imgH = r.u16();
     if (ver != 1 || !r.ok || nb <= 0 || imgW % 4 || imgH <= 0 || imgW > 256 || imgH > 256) {
@@ -30,7 +31,7 @@ bool Model::load_dw2(const std::string &n, std::vector<uint8_t> bytes) {
         return false;
     }
     int hw = imgW / 4;
-    if (!r.need((size_t)hw * imgH * 2)) { error = "DW2 model: cut short"; return false; }
+    if (!r.need((size_t)hw * imgH * 2)) { error = "DW2/DCB model: cut short"; return false; }
     vram.assign(1024 * 512, 0);
     for (int y = 0; y < imgH; y++)
         for (int x = 0; x < hw; x++) vram[(TEX_Y + y) * 1024 + TEX_X + x] = (uint16_t)r.u16();
@@ -54,6 +55,20 @@ bool Model::load_dw2(const std::string &n, std::vector<uint8_t> bytes) {
         }
         for (int i = 0; i < nf; i++) {
             Poly p = {};
+            if (dcb) { /* flags (1 quad, 2 textured, 4 semi-transparent), four 16-bit vertices, the UVs, the CLUT, the flat color */
+                int flags = r.u8(), v[4], uv[8];
+                for (int k = 0; k < 4; k++) v[k] = r.u16();
+                for (int k = 0; k < 8; k++) uv[k] = r.u8();
+                int clut = r.u16(), rgb[3] = {r.u8(), r.u8(), r.u8()};
+                if (v[0] >= nv || v[1] >= nv || v[2] >= nv || ((flags & 1) && v[3] >= nv)) { error = "DCB model: bad vertex"; return false; }
+                p.quad = flags & 1, p.textured = flags & 2, p.abr = flags & 4 ? 1 : 0;
+                for (int k = 0; k < 4; k++) p.idx[k] = v[k], p.uv[k][0] = (uint8_t)uv[2 * k], p.uv[k][1] = (uint8_t)uv[2 * k + 1];
+                p.tpage = (uint16_t)(TEX_X / 64 | (TEX_Y >= 256 ? 16 : 0));
+                p.clut = (uint16_t)(((TEX_Y + (clut >> 6)) << 6) | ((TEX_X >> 4) + (clut & 63)));
+                for (int k = 0; k < 3; k++) p.color[k] = (uint8_t)(p.textured ? 128 : rgb[k]);
+                mesh.polys.push_back(p);
+                continue;
+            }
             int cnt = r.u8(), semi = r.u8();
             int v[4], uv[8];
             for (int k = 0; k < 4; k++) v[k] = r.u8();
@@ -92,7 +107,20 @@ bool Model::load_dw2(const std::string &n, std::vector<uint8_t> bytes) {
         base += m.frames;
         if (base >= 14000) break;
     }
-    if (!r.ok) { error = "DW2 model: cut short"; return false; }
+    if (dcb) { /* the hidden flags, a byte a bone a frame: the mesh is not drawn, the bone still moves its children */
+        int hbase = 0;
+        for (const Mot &m : mots) {
+            for (int f = 0; f < m.frames; f++)
+                for (int b = 1; b <= nb; b++) {
+                    Key k;
+                    k.x = (int16_t)r.u8(), k.y = k.z = 0, k.frame = (int16_t)(2 * (hbase + f));
+                    bones[b].hide.push_back(k);
+                }
+            hbase += m.frames;
+            if (hbase >= 14000) break;
+        }
+    }
+    if (!r.ok) { error = "DW2/DCB model: cut short"; return false; }
     for (size_t b = 1; b < bones.size(); b++)
         for (int t = 0; t < 3; t++) {
             if (bones[b].keys[t].empty()) bones[b].keys[t].push_back({t == 2 ? (int16_t)4096 : (int16_t)0, t == 2 ? (int16_t)4096 : (int16_t)0, t == 2 ? (int16_t)4096 : (int16_t)0, 0});

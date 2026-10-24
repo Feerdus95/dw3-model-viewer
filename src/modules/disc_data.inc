@@ -257,7 +257,7 @@ static std::vector<Dw2Entry> dw2_scan() {
     return out;
 }
 
-/* --- Digital Card Battle: the folder dcb-extract made (digimon/<id>_<name>/<id>_<name>.dw2m, the same file format as a DW2 model), kept in dcb_dir.txt --- */
+/* --- Digital Card Battle: the folder dcb-extract made (digimon/<id>_<name>/<id>_<name>.dcbm, a DW2 model's file format with 16-bit vertices and flat colors), kept in dcb_dir.txt --- */
 
 static std::string g_dcb;
 
@@ -275,7 +275,7 @@ static std::vector<Dw2Entry> dcb_scan() {
     for (fs::directory_iterator it(fs::u8path(g_dcb) / "digimon", ec), end; !ec && it != end; it.increment(ec)) {
         if (!it->is_directory(ec)) continue;
         std::string dir = it->path().filename().u8string();
-        fs::path file = it->path() / (dir + ".dw2m");
+        fs::path file = it->path() / (dir + ".dcbm");
         if (!fs::exists(file, ec)) continue;
         Dw2Entry e;
         size_t us = dir.find('_');

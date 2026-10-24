@@ -38,8 +38,9 @@ trademark of its owners.
     (`digimon/` and `fx/` in it, picked once and kept in `dw2_dir.txt`), and plays their motions. A `.dw2m` also opens by drop or
     Ctrl+O. Scripts, faces and edits are Digimon World 2003's and don't apply to them. The DW3 tabs are as they were.
   - **DCB tab** (Digital Card Battle): lists the Digimon models of the folder `dcb-extract` made from your own copy of the disc
-    (`digimon/` in it, picked once and kept in `dcb_dir.txt`), and plays their motions, with the game's own key easing. They are
-    `.dw2m` files, so the Model section's bones and size work the same. No scripts or cameras: those are Digimon World 3's.
+    (`digimon/` in it, picked once and kept in `dcb_dir.txt`), and plays their motions with the game's own key easing, and hides
+    a bone's mesh when the animation does (the bone still moves its children). They are `.dcbm` files, so the Model section's
+    bones and size work as for DW2. No scripts or cameras: those are Digimon World 3's.
   - **Export OBJ / Import OBJ** (Model): one object per bone (`part_N`, at rest), the model's
     texture pages as PNGs. Move vertices, add or remove faces, change UVs in Blender; a bone
     whose faces changed gets a new mesh (up to 256 vertices, the model's own pages, a smooth
