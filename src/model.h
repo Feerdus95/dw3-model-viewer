@@ -102,6 +102,7 @@ struct Model {
     struct Dw2Tuning {
         float scale = 1;
         std::vector<float> mesh, reach;
+        std::vector<float> shape; /* shape.txt beside tuning.txt (DCB): three factors a bone, a mesh stretched per axis about its joint; not edited here */
     } tune;
     std::vector<std::vector<Vec3s>> dw2BaseVerts; /* each bone's mesh as loaded */
     std::vector<std::vector<Key>> dw2BasePos;     /* each bone's position keys as loaded */

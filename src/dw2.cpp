@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <cstdio>
+#include <filesystem>
 #include <fstream>
 
 namespace {
@@ -163,8 +165,10 @@ void Model::dw2_retune() {
     for (size_t b = 1; b < bones.size() && b < dw2BaseVerts.size(); b++) {
         std::vector<Vec3s> &v = meshes[bones[b].mesh].verts;
         float f = tune.scale * tune.mesh[b];
+        float sx = 1, sy = 1, sz = 1;
+        if (tune.shape.size() >= (b + 1) * 3) sx = tune.shape[b * 3], sy = tune.shape[b * 3 + 1], sz = tune.shape[b * 3 + 2];
         for (size_t i = 0; i < v.size(); i++)
-            v[i] = {clamp16(dw2BaseVerts[b][i].x * f), clamp16(dw2BaseVerts[b][i].y * f), clamp16(dw2BaseVerts[b][i].z * f)};
+            v[i] = {clamp16(dw2BaseVerts[b][i].x * f * sx), clamp16(dw2BaseVerts[b][i].y * f * sy), clamp16(dw2BaseVerts[b][i].z * f * sz)};
         float g = tune.scale * tune.reach[bones[b].parent];
         for (size_t k = 0; k < bones[b].keys[0].size(); k++) {
             const Key &o = dw2BasePos[b][k];
@@ -175,6 +179,19 @@ void Model::dw2_retune() {
 }
 
 bool Model::dw2_load_tuning(const std::string &path) {
+    tune.shape.clear();
+    {   /* shape.txt, "bone N sx sy sz" (N from 1, as tuning.txt's): DCB's per-axis stretch of a bone's mesh */
+        std::ifstream sf(std::filesystem::u8path(path).parent_path() / "shape.txt");
+        std::string line;
+        while (std::getline(sf, line)) {
+            int n;
+            float a, b, c;
+            if (sscanf(line.c_str(), "bone %d %f %f %f", &n, &a, &b, &c) == 4 && n >= 0 && n < (int)bones.size()) {
+                if (tune.shape.empty()) tune.shape.assign(bones.size() * 3, 1.0f);
+                tune.shape[n * 3] = a, tune.shape[n * 3 + 1] = b, tune.shape[n * 3 + 2] = c;
+            }
+        }
+    }
     std::ifstream f(path);
     if (!f) return false;
     tune.scale = 1;
