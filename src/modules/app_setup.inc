@@ -8,6 +8,7 @@ int main(int argc, char **argv) {
     std::string uiWin; /* --window about|help|log|catalog|pcat: that window open in the --ui-shot */
     std::string uses; /* --uses: a DW3 fighter's name, whose action scripts' motions are printed */
     std::vector<std::string> bounds; /* --bounds: a model file, or a fighter's name (DW3), whose posed box is printed */
+    std::vector<std::pair<int, int>> shot_fx; /* --fx ID:TICK: an effect model (450-458) TICK ticks into its motion, with the fighter in the shot */
     int shot_motion = 1, shot_key = 0, shot_cam = -1, shot_stage = 0, shot_fighter = 0;
     bool check = false, users = false, stages = false, seams = false, compendium = false, testPresets = false;
     std::vector<std::string> fitArgs; /* --fit DONOR TARGET [CAMERA]: a partner's camera fitted to another partner, printed */
@@ -32,6 +33,7 @@ int main(int argc, char **argv) {
         else if (a == "--win" && i + 1 < argc) sscanf(argv[++i], "%dx%d", &uiW, &uiH);
         else if (a == "--panels" && i + 1 < argc) sscanf(argv[++i], "%f,%f", uiPanels, uiPanels + 1);
         else if (a == "--key" && i + 1 < argc) shot_key = atoi(argv[++i]);
+        else if (a == "--fx" && i + 1 < argc) { int id = 0, t = 0; if (sscanf(argv[++i], "%d:%d", &id, &t) == 2) shot_fx.push_back({id, t}); }
         else if (a == "--cam" && i + 1 < argc) shot_cam = atoi(argv[++i]);
         else if (a == "--cull") shot_cull = true;
         else if (a == "--orbit" && i + 1 < argc) has_orbit = sscanf(argv[++i], "%f,%f,%f,%f,%f,%f", orbit, orbit + 1, orbit + 2, orbit + 3, orbit + 4, orbit + 5) == 6;
@@ -670,7 +672,30 @@ int main(int argc, char **argv) {
             view.cam.yaw = orbit[0] * 3.14159265f / 180, view.cam.pitch = orbit[1] * 3.14159265f / 180, view.cam.dist = orbit[2];
             for (int k = 0; k < 3; k++) view.cam.target[k] = orbit[3 + k];
         }
-        render(scene, view, 0, 0, W, H);
+        if (const char *fol = getenv("DW3MV_FOLLOW")) { /* a diagnostic: the camera's target rides this bone (viewer number) */
+            int b = atoi(fol);
+            if (b >= 0 && b < (int)scene.model->pose.size()) {
+                const float *w = scene.model->pose[b].world;
+                view.cam.target[0] = w[12], view.cam.target[1] = -w[13], view.cam.target[2] = -w[14]; fprintf(stderr, "follow %d %.0f %.0f %.0f", b, w[12], w[13], w[14]); fputc(10, stderr);
+            }
+        }
+        std::vector<std::unique_ptr<Scene>> fxScenes;
+        std::vector<ExtraModel> fxExtras;
+        for (auto [id, t] : shot_fx) { /* the effect models the port's own (script_player.inc), in the fighter's space, as the script puts them */
+            int fid = id == 450 ? 7101 : id == 451 ? 7102 : id >= 452 && id <= 459 ? 7121 + id - 452 : 0;
+            std::vector<uint8_t> bytes;
+            if (!fid || !read_file(mod_path(fid), bytes) || bytes.size() < 4) continue;
+            int entry = (int)(*(const uint32_t *)bytes.data() / 4) - 1;
+            auto sc = std::make_unique<Scene>();
+            sc->model = std::make_unique<Model>();
+            if (!sc->model->load("effect model " + std::to_string(id), std::move(bytes), nullptr, entry, 0)) continue;
+            upload(*sc);
+            for (int i = 0; i < t; i++) sc->model->advance(1), sc->model->evaluate();
+            sc->model->evaluate();
+            fxExtras.push_back({sc.get(), {{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}}});
+            fxScenes.push_back(std::move(sc));
+        }
+        render(scene, view, 0, 0, W, H, {}, fxExtras);
         std::vector<uint32_t> px(W * H), flipped(W * H);
         GL(glReadPixels)(0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
         for (int y = 0; y < H; y++) memcpy(&flipped[y * W], &px[(H - 1 - y) * W], W * 4);

@@ -4,7 +4,27 @@
         int id = 0;
         std::unique_ptr<Scene> scene;
         float acc = 0;
+        int age = 0;
         M4 pre;
+    };
+    /* Digital Card Battle's scrolling textures (SUG_scrollTexture; the port's SCROLLS in bladegaru.c): the effect's image, 32x56 halfwords, rolls STEP
+       to the right every PERIOD ticks, START ticks in already for a model DCB starts after another that shares the image */
+    auto fx_scroll = [&](FxModel &e) {
+        static const int S[][4] = {{452, 3, 1, 0}, {455, 3, 1, 43}, {456, 3, 1, 0}, {458, 3, 1, 124}, {457, 1, 2, 0}};
+        for (const auto &s : S) {
+            if (s[0] != e.id) continue;
+            int dx = 0, a = ++e.age;
+            if (a == 1) dx = s[1] * ((s[3] + s[2] - 1) / s[2]);
+            else if ((a - 1) % s[2] == 0) dx = s[1];
+            if ((dx %= 32) == 0) return;
+            std::vector<uint16_t> &v = e.scene->model->vram;
+            for (int y = 0; y < 56; y++) {
+                uint16_t row[32], *p = &v[(TEX_Y + y) * 1024 + TEX_X];
+                for (int x = 0; x < 32; x++) row[(x + dx) % 32] = p[x];
+                std::copy(row, row + 32, p);
+            }
+            upload_vram(*e.scene);
+        }
     };
     std::vector<FxModel> fxModels;
     auto free_fx_models = [&]() {
@@ -21,14 +41,21 @@
         const EffectModelRow *row = nullptr;
         for (const EffectModelRow &r : EFFECT_MODELS)
             if (r.id == ln.emId) row = &r;
-        if (!row || fxModels.size() >= 3) return;
-        char b[32];
-        snprintf(b, sizeof b, "/%04d.bin", (int)(row->file >> 16));
+        /* the port's own (native_effect_model in bladegaru.c): 450, 451 are files 7101, 7102 and 452-459 files 7121-7128, in the mods folder, the bones last */
+        int modFid = ln.emId == 450 ? 7101 : ln.emId == 451 ? 7102 : ln.emId >= 452 && ln.emId <= 459 ? 7121 + ln.emId - 452 : 0;
+        if ((!row && !modFid) || fxModels.size() >= 3) return;
         std::vector<uint8_t> bytes;
         auto sc = std::make_unique<Scene>();
         sc->model = std::make_unique<Model>();
-        if (!read_file(g_data + b, bytes) ||
-            !sc->model->load("effect model " + std::to_string(ln.emId), std::move(bytes), nullptr, (int)(row->file & 0xFFFF), (int)(row->motions & 0xFFFF))) {
+        int entry = 0, motions = 0;
+        bool ok;
+        if (row) {
+            char b[32];
+            snprintf(b, sizeof b, "/%04d.bin", (int)(row->file >> 16));
+            ok = read_file(g_data + b, bytes), entry = (int)(row->file & 0xFFFF), motions = (int)(row->motions & 0xFFFF);
+        } else
+            ok = read_file(mod_path(modFid), bytes) && bytes.size() >= 4, entry = ok ? (int)(*(const uint32_t *)bytes.data() / 4) - 1 : 0;
+        if (!ok || !sc->model->load("effect model " + std::to_string(ln.emId), std::move(bytes), nullptr, entry, motions)) {
             note(NOTE_INFO, "Effect model " + std::to_string(ln.emId) + " couldn't be read: " + sc->model->error);
             return;
         }
@@ -141,7 +168,7 @@
             e.acc += ticks;
             int n = (int)e.acc;
             e.acc -= n;
-            for (int i = 0; i < std::min(n, 8); i++) em.advance(1), em.evaluate();
+            for (int i = 0; i < std::min(n, 8); i++) em.advance(1), em.evaluate(), fx_scroll(e);
         }
         fxModels.erase(std::remove_if(fxModels.begin(), fxModels.end(), [&](FxModel &e) {
                            if (!e.scene->model->motionDone) return false;
