@@ -68,7 +68,7 @@
                 static const ImU32 AXC[3] = {IM_COL32(236, 84, 84, 255), IM_COL32(118, 208, 96, 255), IM_COL32(84, 142, 245, 255)};
                 static const char *AXN[3] = {"X", "Y", "Z"};
                 if (ImGui::BeginTable("##piece", 3, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings)) {
-                    ImGui::TableSetupColumn("##l", ImGuiTableColumnFlags_WidthFixed, std::max(bw, ImGui::CalcTextSize("Scale").x));
+                    ImGui::TableSetupColumn("##l", ImGuiTableColumnFlags_WidthFixed, std::max(bw, ImGui::CalcTextSize("Length").x));
                     ImGui::TableSetupColumn("##f", ImGuiTableColumnFlags_WidthStretch);
                     ImGui::TableSetupColumn("##r", ImGuiTableColumnFlags_WidthFixed, bw);
                     auto row = [&](const char *id, const std::function<void()> &label, const std::function<void()> &field,
@@ -118,6 +118,15 @@
                             if (ImGui::DragFloat("##v", &pe.scale, 0.01f, 0.05f, 20, "%.2f")) changed = true, pe.reach = pe.follow ? pe.scale : pe.reach;
                         },
                         [&]() { pe.scale = 1, pe.reach = pe.follow ? 1 : pe.reach; });
+                    static const char *SN[3] = {"Width", "Length", "Depth"}, *ST[3] = {"Along the bone's X: how wide the mesh is.", "Along the bone's Y: how long the mesh is.", "Along the bone's Z: how deep the mesh is."};
+                    for (int a = 0; a < 3; a++)
+                        row(SN[a],
+                            [&]() {
+                                ImGui::AlignTextToFramePadding();
+                                ImGui::TextUnformatted(SN[a]);
+                                tip("%s Proportion, not position: the joint stays where it is and so do the bones under it.", ST[a]);
+                            },
+                            [&]() { changed |= ImGui::DragFloat("##v", &pe.stretch[a], 0.01f, 0.05f, 20, "x %.2f"); }, [&]() { pe.stretch[a] = 1; });
                     row("reach",
                         [&]() {
                             ImGui::AlignTextToFramePadding();

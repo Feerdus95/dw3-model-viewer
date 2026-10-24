@@ -16,11 +16,12 @@
     /* a model's pieces (bones) adjusted: each bone's mesh moved, turned or scaled about its middle, in the bone's own axes */
     struct PieceEdit {
         float move[3] = {0, 0, 0}, turn = 0, scale = 1;
+        float stretch[3] = {1, 1, 1}; /* the mesh's width, length and depth along the bone's own axes (on top of Scale) */
         float reach = 1;     /* where the bones under this one sit from its joint (the limb's length), the mesh unchanged */
         bool joint = true;   /* the mesh scales about the bone's joint (a limb stays attached), not its own centre */
         bool follow = true;  /* a change of Scale carries Reach with it */
         bool gone = false; /* collapsed to a point: not drawn in the game */
-        bool any() const { return move[0] || move[1] || move[2] || turn || scale != 1 || reach != 1 || gone; }
+        bool any() const { return move[0] || move[1] || move[2] || turn || scale != 1 || stretch[0] != 1 || stretch[1] != 1 || stretch[2] != 1 || reach != 1 || gone; }
     };
     std::map<int, PieceEdit> charEdits;
     std::vector<std::vector<Vec3s>> charV0, charN0; /* each bone's vertices and normals as the file has them */

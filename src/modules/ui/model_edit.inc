@@ -26,7 +26,7 @@
             float s = e.gone ? 0.0f : e.scale, cs = cosf(e.turn * 0.017453293f), sn = sinf(e.turn * 0.017453293f);
             auto fit = [](float x) { return (int16_t)std::clamp((int)lroundf(x), -32768, 32767); };
             for (Vec3s &v : me.verts) {
-                float dx = (v.x - c[0]) * s, dy = (v.y - c[1]) * s, dz = (v.z - c[2]) * s;
+                float dx = (v.x - c[0]) * s * e.stretch[0], dy = (v.y - c[1]) * s * e.stretch[1], dz = (v.z - c[2]) * s * e.stretch[2];
                 v = {fit(c[0] + e.move[0] + dx * cs + dz * sn), fit(c[1] + e.move[1] + dy), fit(c[2] + e.move[2] - dx * sn + dz * cs)};
             }
             for (Vec3s &n : me.normals) {
@@ -159,11 +159,11 @@
     /* the edits changed or went back: unsaved only if they differ from what was saved */
     auto char_same_edits = [&](const std::map<int, PieceEdit> &a, const std::map<int, PieceEdit> &b) {
         auto v = [](const std::map<int, PieceEdit> &m) {
-            std::vector<std::array<float, 10>> out;
+            std::vector<std::array<float, 13>> out;
             for (const auto &kv : m)
                 if (kv.second.any())
                     out.push_back({(float)kv.first, kv.second.move[0], kv.second.move[1], kv.second.move[2], kv.second.turn, kv.second.scale,
-                                   (float)kv.second.gone, kv.second.reach, (float)kv.second.joint, (float)kv.second.follow});
+                                   (float)kv.second.gone, kv.second.reach, (float)kv.second.joint, (float)kv.second.follow, kv.second.stretch[0], kv.second.stretch[1], kv.second.stretch[2]});
             return out;
         };
         return v(a) == v(b);
