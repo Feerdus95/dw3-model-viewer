@@ -333,7 +333,10 @@ std::vector<std::vector<ScriptLine>> read_scripts(const uint8_t *a, size_t size)
 
 bool step_face(const Fighter &f, FaceState &s, int motion, int texX, int texY, std::vector<uint16_t> &vram) {
     motion--; /* the viewer's motions count from 1 (setMotion), the game's from 0: getEyesFrame's numbers are the game's */
-    int eyes = motion >= 4 && motion <= 11 ? 2 : motion == 2 ? 1 : 0;
+    /* the native port's tired fighters (fightstg/face.c's patch; Flamedramon's, models 7100 and 7120, for now): in the weak idle (motion 2) the eyes blink
+       between half shut and shut, at the same pace, and never open */
+    bool tired = (f.modelFid == 7100 || f.modelFid == 7120) && motion == 2;
+    int eyes = tired ? 0 : motion >= 4 && motion <= 11 ? 2 : motion == 2 ? 1 : 0;
     if (eyes == 0) {
         switch (s.blinkTimer >> 1) {
         case 0: s.blinkTimer = (rand() & 0x7F) + 60; eyes = 0; break;
@@ -342,9 +345,7 @@ bool step_face(const Fighter &f, FaceState &s, int motion, int texX, int texY, s
         default: eyes = 0; break;
         }
         if (--s.blinkTimer < 0) s.blinkTimer = 0;
-        /* the native port's tired fighters (fightstg/face.c's patch; Flamedramon's, model 7100, for now): in the weak idle (motion 1) the eyes blink
-           between half shut and shut, at the same pace, and never open */
-        if (f.modelFid == 7100 && motion == 1 && eyes == 0) eyes = 1;
+        if (tired && eyes == 0) eyes = 1;
     } else {
         s.blinkTimer = 0;
     }
