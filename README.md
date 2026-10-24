@@ -15,7 +15,7 @@ trademark of its owners.
 
 ## What it shows
 
-- **Models**: every battle model on the disc, in the Game tab of Files; its Modeled tab lists the Digimon made for the port (a Digimon World 2
+- **Models**: every battle model on the disc, in the Game tab of Files; its Modded tab lists the Digimon made for the port (a Digimon World 2 or Digital Card Battle
   model with a `dw2003.txt` beside it, converted or not: one click converts if needed and opens it, with its fighter).
   Under that, every battle model on the disc. That's 434 files, from FIGHT/MODEL (the
   Digimon) and FIGHT/EFFECT (DNA forms and technique models), by the names the game

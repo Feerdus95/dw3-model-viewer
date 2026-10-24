@@ -352,10 +352,12 @@ static bool dw2_register(const Dw2Link &l) {
 }
 static std::vector<Dw2Entry> dw2_scan();
 static void dw2_register_all() {
-    dw2_load_dir();
-    if (g_dw2.empty()) return;
-    for (const Dw2Entry &e : dw2_scan())
-        if (!e.fx) dw2_register(dw2_link(e.path));
+    dw2_load_dir(), dcb_load_dir();
+    if (!g_dw2.empty())
+        for (const Dw2Entry &e : dw2_scan())
+            if (!e.fx) dw2_register(dw2_link(e.path));
+    if (!g_dcb.empty())
+        for (const Dw2Entry &e : dcb_scan()) dw2_register(dw2_link(e.path));
 }
 
 /* a DW2 model's size tuning sits beside it: tuning.txt in its folder */
