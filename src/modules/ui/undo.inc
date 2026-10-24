@@ -44,7 +44,7 @@
     auto can_undo = [&](bool redo) {
         if (wb_undo_on()) return wb_undo_can(redo);
         if (undo_own()) return fx.id >= 0 && !(redo ? ownHist.redo : ownHist.undo).empty();
-        if (scene.model && scene.model->dw2 && (section == DW2 || section == MODEL)) return !(redo ? dw2Redo : dw2Undo).empty();
+        if (scene.model && scene.model->dw2 && (section == DW2 || section == DCB || section == MODEL)) return !(redo ? dw2Redo : dw2Undo).empty();
         if (section == MODEL && char_on()) return !(redo ? charRedo : charUndo).empty();
         return stage_on() && !(redo ? stageHist.redo : stageHist.undo).empty();
     };
@@ -57,7 +57,7 @@
             OwnSnap s = std::move(from.back());
             from.pop_back();
             own_restore(s);
-        } else if (scene.model && scene.model->dw2 && (section == DW2 || section == MODEL)) {
+        } else if (scene.model && scene.model->dw2 && (section == DW2 || section == DCB || section == MODEL)) {
             auto &from = redo ? dw2Redo : dw2Undo, &to = redo ? dw2Undo : dw2Redo;
             to.push_back(scene.model->tune);
             scene.model->tune = std::move(from.back());

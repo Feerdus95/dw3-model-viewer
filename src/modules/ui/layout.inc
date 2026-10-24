@@ -1,5 +1,5 @@
     auto browser = [&]() {
-        static const char *TITLE[SECTIONS] = {"Models", "Stages", "Bones", "Motions", "Action scripts", "Library", "Effects", "Texture pages", "Digimon World 2"};
+        static const char *TITLE[SECTIONS] = {"Models", "Stages", "Bones", "Motions", "Action scripts", "Library", "Effects", "Texture pages", "Digimon World 2", "Digital Card Battle"};
         panel_title(SECTION_ICON[section], TITLE[section]);
         switch (section) {
         case FILES: files_browser(); break;
@@ -11,10 +11,11 @@
         case EFFECTS: effects_browser(); break;
         case TEXTURES: draw_textures_browser(app); break;
         case DW2: dw2_browser(); break;
+        case DCB: dcb_browser(); break;
         }
     };
     auto inspector = [&]() {
-        static const char *TITLE[SECTIONS] = {"Details", "Stage editor", "Model", "Playback", "Fighter", "Workbench", "Effect", "Texture", "Digimon World 2"};
+        static const char *TITLE[SECTIONS] = {"Details", "Stage editor", "Model", "Playback", "Fighter", "Workbench", "Effect", "Texture", "Digimon World 2", "Digital Card Battle"};
         panel_title(IC_INFO, TITLE[section]);
         switch (section) {
         case FILES: files_inspector(); break;
@@ -26,6 +27,7 @@
         case EFFECTS: effects_inspector(); break;
         case TEXTURES: draw_textures_inspector(app); break;
         case DW2: dw2_inspector(); break;
+        case DCB: dcb_inspector(); break;
         }
     };
 

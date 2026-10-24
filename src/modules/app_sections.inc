@@ -32,5 +32,6 @@
 #include "ui/cameras_workbench.inc" /* Cameras: the Workbench */
 #include "ui/effects.inc" /* Effects */
 #include "ui/dw2.inc" /* DW2 */
+#include "ui/dcb.inc" /* DCB */
 #include "ui/layout.inc" /* the sections' browser and inspector */
 #include "ui/transport.inc" /* the playback bar */

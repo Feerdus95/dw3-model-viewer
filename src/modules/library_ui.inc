@@ -5,7 +5,7 @@
 struct Picked { /* what the file dialogs gave, maybe from another thread */
     std::mutex m;
     std::vector<std::string> files;
-    std::string folder, data, obj, bin, prop, propTex, dw2, presetIn, presetOut, appIn, appOut; /* a presets or applications file to read, or to write */
+    std::string folder, data, obj, bin, prop, propTex, dw2, dcb, presetIn, presetOut, appIn, appOut; /* a presets or applications file to read, or to write */
 };
 
 /* the question before a change that can't be undone (drawn as a modal by the app loop) */

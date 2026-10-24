@@ -279,7 +279,7 @@
         float statusH = ImGui::GetFrameHeight() + 6 * dpi;
         float top = menuH + barH, bottom = ds.y - statusH;
         bool motionBar = scene.model && !view.stageView && !scene.model->motions.empty() &&
-                         (section == FILES || section == DW2 || section == MODEL || section == MOTIONS || section == FIGHTER || section == CAMERAS);
+                         (section == FILES || section == DW2 || section == DCB || section == MODEL || section == MOTIONS || section == FIGHTER || section == CAMERAS);
         bool transportOn = (section == EFFECTS && fx.id >= 0) || motionBar;
         bool abBar = motionBar && (section == FIGHTER || section == CAMERAS) && !scene.fighters.empty() && !scene.model->dw2;
         float transH = transportOn ? ImGui::GetFrameHeight() * (abBar ? 2 : 1) + (abBar ? 16 : 12) * dpi : 0;

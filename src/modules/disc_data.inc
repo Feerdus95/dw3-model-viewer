@@ -257,6 +257,36 @@ static std::vector<Dw2Entry> dw2_scan() {
     return out;
 }
 
+/* --- Digital Card Battle: the folder dcb-extract made (digimon/<id>_<name>/<id>_<name>.dw2m, the same file format as a DW2 model), kept in dcb_dir.txt --- */
+
+static std::string g_dcb;
+
+static void dcb_load_dir() {
+    std::ifstream f(g_exe_dir + "dcb_dir.txt");
+    std::getline(f, g_dcb);
+    while (!g_dcb.empty() && (g_dcb.back() == '\r' || g_dcb.back() == '\n')) g_dcb.pop_back();
+}
+static void dcb_save_dir() { std::ofstream(g_exe_dir + "dcb_dir.txt") << g_dcb << "\n"; }
+
+static std::vector<Dw2Entry> dcb_scan() {
+    namespace fs = std::filesystem;
+    std::vector<Dw2Entry> out;
+    std::error_code ec;
+    for (fs::directory_iterator it(fs::u8path(g_dcb) / "digimon", ec), end; !ec && it != end; it.increment(ec)) {
+        if (!it->is_directory(ec)) continue;
+        std::string dir = it->path().filename().u8string();
+        fs::path file = it->path() / (dir + ".dw2m");
+        if (!fs::exists(file, ec)) continue;
+        Dw2Entry e;
+        size_t us = dir.find('_');
+        e.label = us == std::string::npos ? dir : dir.substr(0, us) + "  " + dir.substr(us + 1);
+        e.path = file.u8string();
+        out.push_back(e);
+    }
+    std::sort(out.begin(), out.end(), [](const Dw2Entry &a, const Dw2Entry &b) { return a.label < b.label; });
+    return out;
+}
+
 /* What a DW2 model becomes in Digimon World 2003: dw2003.txt beside it names the converter that makes the DW2003 model file, where it goes,
    and the fighter that file is (the one it is like, with its own name and cameras moved), so the same sections (Model, Motions, Fighter: the
    scripts, the portraits) show it as the game will. Lines: `key value`; cam I px py pz rx ry rz moves the like's camera I's eye and target. */

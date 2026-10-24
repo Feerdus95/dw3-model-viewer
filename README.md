@@ -37,6 +37,9 @@ trademark of its owners.
   - **DW2 tab** (Digimon World 2): lists the Digimon and effect models of the folder `dw2-extractor` made from your own SLUS-01193 disc
     (`digimon/` and `fx/` in it, picked once and kept in `dw2_dir.txt`), and plays their motions. A `.dw2m` also opens by drop or
     Ctrl+O. Scripts, faces and edits are Digimon World 2003's and don't apply to them. The DW3 tabs are as they were.
+  - **DCB tab** (Digital Card Battle): lists the Digimon models of the folder `dcb-extract` made from your own copy of the disc
+    (`digimon/` in it, picked once and kept in `dcb_dir.txt`), and plays their motions, with the game's own key easing. They are
+    `.dw2m` files, so the Model section's bones and size work the same. No scripts or cameras: those are Digimon World 3's.
   - **Export OBJ / Import OBJ** (Model): one object per bone (`part_N`, at rest), the model's
     texture pages as PNGs. Move vertices, add or remove faces, change UVs in Blender; a bone
     whose faces changed gets a new mesh (up to 256 vertices, the model's own pages, a smooth
@@ -376,7 +379,7 @@ With a file it opens the viewer; every other form below opens no window (it is a
                                           camera, with a stage's lights
     dw3mv --ui-shot out.bmp [--section N] [--tab N] [--win WxH] [--panels B,I] [--stage-open N] [--fx-open N] file.bin
                                           the whole window after a few frames (a developer's check that the panels
-                                          fit at a size): the section's number (Files 0 ... DW2 8), the Workbench's
+                                          fit at a size): the section's number (Files 0 ... DW2 8, DCB 9), the Workbench's
                                           or Files' tab, the window's size and the panels' widths
     dw3mv --effect ID                     a 2D effect's frames as PNGs in effects/effect_ID next to the exe
     dw3mv --export-stage ID MODS OUT      a stage as an OBJ (with its MTL and PNGs) in OUT, the mod's if it has one
