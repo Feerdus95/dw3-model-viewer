@@ -40,7 +40,8 @@ trademark of its owners.
   - **DCB tab** (Digital Card Battle): lists the Digimon models of the folder `dcb-extract` made from your own copy of the disc
     (`digimon/` in it, picked once and kept in `dcb_dir.txt`), and plays their motions with the game's own key easing, and hides
     a bone's mesh when the animation does (the bone still moves its children). They are `.dcbm` files, so the Model section's
-    bones and size work as for DW2. No scripts or cameras: those are Digimon World 3's.
+    bones and size work as for DW2; the size controls also set a bone's own place (its joint from its parent's, apart from the parent's reach) and its shape
+    (the mesh stretched per axis, kept in `shape.txt`). No scripts or cameras: those are Digimon World 3's.
   - **Export OBJ / Import OBJ** (Model): one object per bone (`part_N`, at rest), the model's
     texture pages as PNGs. Move vertices, add or remove faces, change UVs in Blender; a bone
     whose faces changed gets a new mesh (up to 256 vertices, the model's own pages, a smooth

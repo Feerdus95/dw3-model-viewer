@@ -1,4 +1,4 @@
-    /* ===== a DW2 model's size: the whole model, and the selected bone's mesh and reach, live, kept in tuning.txt beside the model ===== */
+    /* ===== a DW2 model's size: the whole model, and the selected bone's mesh and reach, live, kept in tuning.txt (and shape.txt) beside the model ===== */
     auto dw2_size = [&]() {
         Model &m = *scene.model;
         dw2_sync();
@@ -48,17 +48,28 @@
                     changed |= ImGui::SliderFloat("##dw2reach", &t.reach[sb], 0.2f, 3.0f, "Its reach  x %.3f", ImGuiSliderFlags_Logarithmic);
                     slider_done();
                     tip("How far the bones under it sit from its joint: longer or shorter limbs, without growing the mesh");
-                    if (ImGui::Button("Reset this bone")) dw2_mark(), t.mesh[sb] = t.reach[sb] = 1, changed = true;
+                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    changed |= ImGui::SliderFloat("##dw2place", &t.place[sb], 0.2f, 3.0f, "Its place  x %.3f", ImGuiSliderFlags_Logarithmic);
+                    slider_done();
+                    tip("Where this bone's own joint sits from its parent's, and nothing else: the parent's reach moves every bone under it, this only this one (and what hangs from it)");
+                    static const char *AXIS[3] = {"##dw2sx", "##dw2sy", "##dw2sz"}, *AXIS_FMT[3] = {"Its width  x %.3f", "Its length  y %.3f", "Its depth  z %.3f"};
+                    for (int a = 0; a < 3; a++) {
+                        ImGui::SetNextItemWidth(-FLT_MIN);
+                        changed |= ImGui::SliderFloat(AXIS[a], &t.shape[sb * 3 + a], 0.2f, 3.0f, AXIS_FMT[a], ImGuiSliderFlags_Logarithmic);
+                        slider_done();
+                    }
+                    tip("The mesh stretched along one axis of the bone, about its joint (shape.txt): slimmer without shorter");
+                    if (ImGui::Button("Reset this bone")) dw2_mark(), t.mesh[sb] = t.reach[sb] = t.place[sb] = 1, t.shape[sb * 3] = t.shape[sb * 3 + 1] = t.shape[sb * 3 + 2] = 1, changed = true;
                     ImGui::SameLine();
                 } else {
                     hint("Click a bone in the view or the Model tab to tune it alone.");
                 }
-                if (ImGui::Button("Reset all")) dw2_mark(), t.scale = 1, std::fill(t.mesh.begin(), t.mesh.end(), 1.0f), std::fill(t.reach.begin(), t.reach.end(), 1.0f), changed = true;
+                if (ImGui::Button("Reset all")) dw2_mark(), t.scale = 1, std::fill(t.mesh.begin(), t.mesh.end(), 1.0f), std::fill(t.reach.begin(), t.reach.end(), 1.0f), std::fill(t.place.begin(), t.place.end(), 1.0f), std::fill(t.shape.begin(), t.shape.end(), 1.0f), changed = true;
                 if (button(IC_SAVE "  Save", 0)) {
                     if (m.dw2_save_tuning(dw2_tuning_path(scene.path))) note(NOTE_OK, "Saved the size to " + dw2_tuning_path(scene.path));
                     else note(NOTE_ERROR, "Can't write " + dw2_tuning_path(scene.path));
                 }
-                tip("Writes tuning.txt beside the model: the converter reads the same file");
+                tip("Writes tuning.txt (and shape.txt) beside the model: the converter reads the same files");
                 if (changed) m.dw2_retune(), upload(scene);
         }
     };

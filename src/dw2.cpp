@@ -130,7 +130,7 @@ bool Model::load_dw2(const std::string &n, std::vector<uint8_t> bytes) {
             e.frame = 30000;
             bones[b].keys[t].push_back(e);
         }
-    tune.mesh.assign(bones.size(), 1.0f), tune.reach.assign(bones.size(), 1.0f);
+    tune.mesh.assign(bones.size(), 1.0f), tune.reach.assign(bones.size(), 1.0f), tune.place.assign(bones.size(), 1.0f), tune.shape.assign(bones.size() * 3, 1.0f);
     for (size_t b = 1; b < bones.size(); b++) dw2BaseVerts.push_back(meshes[bones[b].mesh].verts), dw2BasePos.push_back(bones[b].keys[0]);
     dw2BaseVerts.insert(dw2BaseVerts.begin(), std::vector<Vec3s>()), dw2BasePos.insert(dw2BasePos.begin(), std::vector<Key>());
     pose.assign(bones.size(), Pose{});
@@ -169,7 +169,7 @@ void Model::dw2_retune() {
         if (tune.shape.size() >= (b + 1) * 3) sx = tune.shape[b * 3], sy = tune.shape[b * 3 + 1], sz = tune.shape[b * 3 + 2];
         for (size_t i = 0; i < v.size(); i++)
             v[i] = {clamp16(dw2BaseVerts[b][i].x * f * sx), clamp16(dw2BaseVerts[b][i].y * f * sy), clamp16(dw2BaseVerts[b][i].z * f * sz)};
-        float g = tune.scale * tune.reach[bones[b].parent];
+        float g = tune.scale * tune.reach[bones[b].parent] * (b < tune.place.size() ? tune.place[b] : 1.0f);
         for (size_t k = 0; k < bones[b].keys[0].size(); k++) {
             const Key &o = dw2BasePos[b][k];
             bones[b].keys[0][k] = {clamp16(o.x * g), clamp16(o.y * g), clamp16(o.z * g), o.frame};
@@ -179,7 +179,7 @@ void Model::dw2_retune() {
 }
 
 bool Model::dw2_load_tuning(const std::string &path) {
-    tune.shape.clear();
+    tune.shape.assign(bones.size() * 3, 1.0f), tune.place.assign(bones.size(), 1.0f);
     {   /* shape.txt, "bone N sx sy sz" (N from 1, as tuning.txt's): DCB's per-axis stretch of a bone's mesh */
         std::ifstream sf(std::filesystem::u8path(path).parent_path() / "shape.txt");
         std::string line;
@@ -187,7 +187,6 @@ bool Model::dw2_load_tuning(const std::string &path) {
             int n;
             float a, b, c;
             if (sscanf(line.c_str(), "bone %d %f %f %f", &n, &a, &b, &c) == 4 && n >= 0 && n < (int)bones.size()) {
-                if (tune.shape.empty()) tune.shape.assign(bones.size() * 3, 1.0f);
                 tune.shape[n * 3] = a, tune.shape[n * 3 + 1] = b, tune.shape[n * 3 + 2] = c;
             }
         }
@@ -204,7 +203,7 @@ bool Model::dw2_load_tuning(const std::string &path) {
             std::string what;
             float v;
             f >> b >> what >> v;
-            if (b >= 0 && b < (int)bones.size()) (what == "mesh" ? tune.mesh : tune.reach)[b] = v;
+            if (b >= 0 && b < (int)bones.size()) (what == "mesh" ? tune.mesh : what == "place" ? tune.place : tune.reach)[b] = v;
         }
     }
     dw2_retune();
@@ -218,6 +217,17 @@ bool Model::dw2_save_tuning(const std::string &path) const {
     for (size_t b = 0; b < bones.size(); b++) {
         if (tune.mesh[b] != 1) f << "bone " << b << " mesh " << tune.mesh[b] << '\n';
         if (tune.reach[b] != 1) f << "bone " << b << " reach " << tune.reach[b] << '\n';
+        if (b < tune.place.size() && tune.place[b] != 1) f << "bone " << b << " place " << tune.place[b] << '\n';
     }
+    bool shaped = false; /* shape.txt beside it: a bone's mesh stretched per axis (kept only when something is) */
+    for (float s : tune.shape) shaped |= s != 1;
+    std::filesystem::path sp = std::filesystem::u8path(path).parent_path() / "shape.txt";
+    std::error_code ec;
+    if (shaped) {
+        std::ofstream sf(sp);
+        for (size_t b = 0; b < bones.size() && (b + 1) * 3 <= tune.shape.size(); b++)
+            if (tune.shape[b * 3] != 1 || tune.shape[b * 3 + 1] != 1 || tune.shape[b * 3 + 2] != 1)
+                sf << "bone " << b << ' ' << tune.shape[b * 3] << ' ' << tune.shape[b * 3 + 1] << ' ' << tune.shape[b * 3 + 2] << '\n';
+    } else std::filesystem::remove(sp, ec);
     return (bool)f;
 }
