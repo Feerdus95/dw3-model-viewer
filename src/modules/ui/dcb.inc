@@ -59,6 +59,19 @@
             field("Vertices", "%d", (int)verts);
             field("Motions", "%d", (int)m.motions.size());
             model_inspector(); /* the selected bone, and the size: as in Model */
+            heading("In Digimon World 2003");
+            Dw2Link l = dw2_link(scene.path);
+            if (!l.ok) {
+                hint("No dw2003.txt beside this model, so it has no converter, no file or fighter in DW2003 yet.");
+            } else {
+                field("File", "%s", nice_path(l.out).c_str());
+                field("Fighter", "%s, like %s", l.name.c_str(), l.like.c_str());
+                if (button(IC_RESTART "  Convert", 0)) dw2_convert(scene.path);
+                tip("Runs the converter on this model: it writes the file above, with the motions and scripts of the fighter it is like");
+                same_line_if_fits(IC_PLAY "  Open the DW2003 version");
+                if (button(IC_PLAY "  Open the DW2003 version", 1)) dw2_open_converted(scene.path);
+                tip("The converted file with its fighter, in the same sections: its action scripts, its portraits and cameras, its motions");
+            }
         } else {
             title("No Digital Card Battle model open");
             hint("Pick one on the left.");
