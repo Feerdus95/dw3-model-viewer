@@ -55,6 +55,32 @@ static int export_stage_cli(int id, const std::string &mods, const std::string &
     return 1;
 }
 
+/* --export-gltf NAME OUT: fighter NAME (or a model file) as OUT/<name>.glb with its textures */
+static int export_gltf_cli(const std::string &what, const std::string &dir) {
+    std::vector<uint8_t> bytes;
+    Model m;
+    bool ok = false;
+    if (read_file(what, bytes)) ok = m.load(what, std::move(bytes));
+    else
+        for (const Fighter &f : g_game.fighters)
+            if (f.name == what && read_file(fid_path(f.modelFid), bytes)) {
+                ok = m.load(what, std::move(bytes), &f);
+                break;
+            }
+    if (!ok) {
+        fprintf(stderr, "%s: %s\n", what.c_str(), m.error.empty() ? "not found" : m.error.c_str());
+        return 1;
+    }
+    std::string err, nm = what.substr(what.find_last_of("/\\") + 1);
+    nm = nm.substr(0, nm.find('.'));
+    if (!export_gltf(m, dir, nm, err)) {
+        fprintf(stderr, "%s\n", err.c_str());
+        return 1;
+    }
+    printf("%s: %d bones, %d motions -> %s/%s.glb\n", what.c_str(), (int)m.bones.size(), (int)m.motions.size(), dir.c_str(), nm.c_str());
+    return 0;
+}
+
 /* --stages: each stage read, built back (and through an OBJ) and read
    again; what changed of its polygons and their corners' texels */
 static int check_stages() {

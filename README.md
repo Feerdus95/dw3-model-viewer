@@ -49,6 +49,10 @@ trademark of its owners.
     materials and PNGs' sizes. A new object named `new_P_anything` becomes a new bone after the model's
     on bone P (`new_0_...` on the root): its keys don't move it from where its parent is, so it follows
     that bone's animation. Up to 255 bones; the game's scripts and effects don't know the new ones. `--import-obj FILE` imports at start.
+  - **Export glTF** (Model): the model as a `.glb` for Blender's File > Import > glTF: the bones as a skeleton (a joint each,
+    every vertex whole on its bone), the faces with their texture pages as PNGs beside it, and every motion as an animation (30 a
+    second, the game's blends included). One way: it can't be imported back. A bone the game hides keeps its last matrix, as in the
+    game, but its mesh stays drawn. `--export-gltf NAME OUT` (a fighter's name or a model file) does it without the window.
   - a texture's PNG (texN.png of the export) can be painted too: its changed texels take the nearest
     color of that page's own palette (the palette itself changes in Textures); 4 and 8-bit pages.
     The file grows by sectors when its textures pack bigger.

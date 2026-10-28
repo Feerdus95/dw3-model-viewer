@@ -136,6 +136,12 @@
         if (e.exportObj(charDir, nm)) note(NOTE_OK, "Exported " + scene.model->name + " to " + charDir);
         else note(NOTE_ERROR, "Can't write " + charDir);
     };
+    auto char_export_gltf = [&]() {
+        std::string nm = lower(scene.model->name.substr(0, scene.model->name.find('.'))), err;
+        charDir = g_exe_dir + "models/" + nm;
+        if (export_gltf(*scene.model, charDir, nm, err)) note(NOTE_OK, "Exported " + scene.model->name + " to " + charDir + "/" + nm + ".glb");
+        else note(NOTE_ERROR, err);
+    };
     /* the model as bytes, shown again (the camera and the motion kept) */
     auto char_reload = [&](std::vector<uint8_t> bytes) {
         const Fighter *f = scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter];

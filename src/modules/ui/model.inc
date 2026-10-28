@@ -198,6 +198,10 @@
             if (ImGui::Button(IC_EXPORT "  Export OBJ")) char_export();
             tip("One object per bone, named part_N, at rest (y up, 1 unit = 100 of the game's), with the model's texture pages as PNGs. "
                 "Move vertices, edit faces and UVs; keep the names, the materials and the PNGs as they are.");
+            same_line_if_fits(IC_EXPORT "  Export glTF");
+            if (ImGui::Button(IC_EXPORT "  Export glTF")) char_export_gltf();
+            tip("The skeleton (a joint a bone, every vertex whole on its bone), the faces with their texture pages as PNGs, and every motion as an animation "
+                "(30 a second, the game's blends included): a .glb for Blender's File > Import > glTF. It can't be imported back.");
             same_line_if_fits(IC_IMPORT "  Import OBJ...");
             if (ImGui::Button(IC_IMPORT "  Import OBJ...")) {
                 static const SDL_DialogFileFilter OBJ = {"OBJ models", "obj"};

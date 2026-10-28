@@ -25,6 +25,7 @@
 #include "backends/imgui_impl_sdl3.h"
 #include "custom.h"
 #include "effect.h"
+#include "gltf.h"
 #include "model.h"
 #include "stage.h"
 #include "app.h"
