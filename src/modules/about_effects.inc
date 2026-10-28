@@ -1,4 +1,4 @@
-static const char *VERSION = "0.15.1";
+static const char *VERSION = "0.16.0";
 
 /* The exe's icon (res/dw3mv.rc's icon 1) as a texture, for the About window; 0 without one */
 static GLuint icon_texture(int size) {

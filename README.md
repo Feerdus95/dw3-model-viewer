@@ -378,9 +378,11 @@ With a file it opens the viewer; every other form below opens no window (it is a
 
 **Files they write:**
 
-    dw3mv --shot out.bmp [--motion N] [--key K] [--cam N] [--stage N] [--fighter N] [--cull] [--orbit yaw,pitch,dist,x,y,z] file.bin
+    dw3mv --shot out.bmp [--motion N] [--key K] [--cam N] [--stage N] [--fighter N] [--cull] [--orbit yaw,pitch,dist,x,y,z] [--fx ID:TICK] [--dummy] [--guide] file.bin
                                           one frame to a BMP: at a motion's keyframe, through a fighter's
                                           camera, with a stage's lights
+                                          `--fx` draws an effect model with the fighter, `--dummy` puts a stand-in enemy at its battle
+                                          home, `--guide` draws the aim guide (dotted rays from the fist and the ball to what they hit)
     dw3mv --ui-shot out.bmp [--section N] [--tab N] [--win WxH] [--panels B,I] [--stage-open N] [--fx-open N] file.bin
                                           the whole window after a few frames (a developer's check that the panels
                                           fit at a size): the section's number (Files 0 ... DW2 8, DCB 9), the Workbench's
