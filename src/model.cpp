@@ -674,6 +674,18 @@ void Model::computeWorld() {
             }
         }
     }
+    if (live && it->second.count(0) && bones.size() > 1) { /* adj[motion][0]: the whole body turned about the pelvis's joint (the first bone's), last */
+        float r[3][3], pv[3] = {pose[1].world[12], pose[1].world[13], pose[1].world[14]};
+        rzyx_deg(it->second.at(0), r);
+        for (size_t b = 1; b < bones.size(); b++) {
+            float *w = pose[b].world, o[3][3], d[3] = {w[12] - pv[0], w[13] - pv[1], w[14] - pv[2]};
+            for (int c = 0; c < 3; c++)
+                for (int i = 0; i < 3; i++) o[c][i] = r[i][0] * w[c * 4] + r[i][1] * w[c * 4 + 1] + r[i][2] * w[c * 4 + 2];
+            for (int c = 0; c < 3; c++)
+                for (int i = 0; i < 3; i++) w[c * 4 + i] = o[c][i];
+            for (int i = 0; i < 3; i++) w[12 + i] = pv[i] + r[i][0] * d[0] + r[i][1] * d[1] + r[i][2] * d[2];
+        }
+    }
 }
 
 void bone_matrix(const Vec3s &pos, const Vec3s &rot, const Vec3s &scale, float out[16]) {

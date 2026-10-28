@@ -107,7 +107,7 @@ static void flame_sync(Model &m) {
     m.adj.clear();
     for (auto &c : g_flLive.bones)
         for (auto &b : c.second)
-            if (b.second[0] || b.second[1] || b.second[2]) m.adj[flame_motion(c.first)][b.first + 1] = b.second;
+            if (b.second[0] || b.second[1] || b.second[2]) m.adj[flame_motion(c.first)][b.first < 0 ? 0 : b.first + 1] = b.second;
     m.evaluate();
 }
 

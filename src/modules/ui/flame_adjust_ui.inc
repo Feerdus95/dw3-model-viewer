@@ -2,7 +2,7 @@
     auto flame_panel = [&]() {
         if (!scene.model || !flame_model(*scene.model) || !std::filesystem::exists(flame_dir())) return;
         static bool loaded = false;
-        static int bone = 16, fxId = 456;
+        static int bone = -1, fxId = 456;
         static std::atomic<int> job{0}; /* the rebuild: 0 none, 1 running, 2 done, 3 failed */
         Model &m = *scene.model;
         if (!loaded) g_flBase = flame_read(), loaded = true;
@@ -12,13 +12,13 @@
         if (!clip) {
             hint("Play motion 51 (Fire Rocket), 63 (Knuckle Fire) or 64 (Express Claw) to turn its bones.");
         } else {
-            static const char *BONES[19] = {"0 (leg)", "1 (leg)", "2 (leg)", "3 (leg)", "4 (foot)", "5 (leg)", "6 (leg)", "7 (leg)", "8 (foot)", "9 (tail)",
+            static const char *BONES[20] = {"whole body (about the pelvis)", "0 (leg)", "1 (leg)", "2 (leg)", "3 (leg)", "4 (foot)", "5 (leg)", "6 (leg)", "7 (leg)", "8 (foot)", "9 (tail)",
                                             "10 (tail)", "11 (tail)", "12 (body)", "13 (chest)", "14 (head)", "15 (right arm)", "16 (right hand)", "17 (left arm)", "18 (left hand)"};
             hint("Body: this attack's %s. A bone turns with everything under it, in every frame", clip == 1 ? "Fire Rocket" : clip == 2 ? "Knuckle Fire" : "Express Claw");
             ImGui::SetNextItemWidth(-FLT_MIN);
-            if (ImGui::BeginCombo("##flbone", BONES[bone])) {
-                for (int i = 0; i < 19; i++)
-                    if (ImGui::Selectable(BONES[i], i == bone)) bone = i;
+            if (ImGui::BeginCombo("##flbone", BONES[bone + 1])) {
+                for (int i = -1; i < 19; i++)
+                    if (ImGui::Selectable(BONES[i + 1], i == bone)) bone = i;
                 ImGui::EndCombo();
             }
             std::array<float, 3> &a = g_flLive.bones[clip][bone];
