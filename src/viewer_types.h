@@ -71,6 +71,7 @@ struct View {
     bool face = true;
     bool wireframe = false, skeleton = false, cull = false, grid = true;
     bool marks = false; /* a cross where each effect of a script is */
+    bool dummy = false; /* a stand-in enemy at its battle home, and the ground out to it */
     bool playing = true, loop = true;
     float speed = 1, ticks = 0;
     int texCombo = 0;

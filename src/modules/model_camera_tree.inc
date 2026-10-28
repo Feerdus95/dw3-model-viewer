@@ -24,6 +24,42 @@ static void view_to_battle(const Fighter &f, const float v[3], float out[3]) {
     out[0] = f.enemy ? v[0] : -v[0], out[1] = v[1] + (float)f.height, out[2] = f.enemy ? v[2] + home : -v[2] + home;
 }
 
+/* A stand-in opponent, to see where an attack lands: the first enemy whose model loads, at its battle home
+   (FIGHTSTG_faceModel: no turn, as a partner's is 0x800), in the space of partner F. It idles on motion 1. */
+static std::unique_ptr<Scene> g_dummy;
+static const Fighter *g_dummyFighter;
+static void dummy_extras(const Fighter *f, std::vector<ExtraModel> &out) {
+    if (!f || f->enemy) return;
+    if (!g_dummy) {
+        for (int pass = 0; pass < 2 && !g_dummy; pass++) /* Icemon (a mid-size enemy, 384 from its home) if it loads, else the first that does */
+            for (const Fighter &e : g_game.fighters) {
+                std::vector<uint8_t> bytes;
+                auto sc = std::make_unique<Scene>();
+                sc->model = std::make_unique<Model>();
+                if (!e.enemy || e.name.empty() || (!pass && e.name != "Icemon") || !read_file(fid_path(e.modelFid), bytes) ||
+                    !sc->model->load(e.name, std::move(bytes), &e))
+                    continue;
+                upload(*sc), sc->model->setMotion(1), sc->model->evaluate();
+                g_dummy = std::move(sc), g_dummyFighter = &e;
+                break;
+            }
+        if (!g_dummy) return;
+    }
+    float bp[3] = {0, (float)g_dummyFighter->height, -(float)(0x1400 + g_dummyFighter->distance)}, v[3];
+    battle_to_view(*f, bp, v);
+    M4 w = {{-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1, 0, v[0], -v[1], -v[2], 1}}; /* a partner's view turns x and z about y */
+    out.push_back({g_dummy.get(), w});
+}
+static void dummy_step(int ticks) {
+    if (!g_dummy) return;
+    Model &m = *g_dummy->model;
+    for (int i = 0; i < std::min(ticks, 8); i++) {
+        m.advance(1);
+        if (m.motionDone) m.setMotion(m.motion);
+        m.evaluate();
+    }
+}
+
 /* What a fighter's camera is for, by where the game looks through it: the
    battle's own view (FIGHTSTG_getEnemyView, which the scripts' camera 0, the
    idle between actions and the ends of the entrances and Digimon changes go

@@ -271,13 +271,15 @@ static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vec
     M4 vp = mul(perspective(v.fov, (float)w / std::max(h, 1), v.cam.dist * 0.01f, v.cam.dist * 50), v.cam.view());
     if (v.grid && !v.stageView) {
         std::vector<float> g;
-        float step = 250, n = 8;
+        float step = 250, n = 8, z1 = v.dummy ? 11000 : n * step; /* out to the stand-in enemy's side */
         for (int i = -8; i <= 8; i++) {
-            float a[3] = {i * step, 0, -n * step}, b[3] = {i * step, 0, n * step};
-            float c[3] = {-n * step, 0, i * step}, d[3] = {n * step, 0, i * step};
+            float a[3] = {i * step, 0, -n * step}, b[3] = {i * step, 0, z1};
             float k = i == 0 ? 0.5f : 0.3f;
             line(g, a, b, k, k, k);
-            line(g, c, d, k, k, k);
+        }
+        for (float z = -n * step; z <= z1; z += step) {
+            float c[3] = {-n * step, 0, z}, d[3] = {n * step, 0, z};
+            line(g, c, d, z == 0 ? 0.5f : 0.3f, z == 0 ? 0.5f : 0.3f, z == 0 ? 0.5f : 0.3f);
         }
         GL(glEnable)(GL_DEPTH_TEST);
         GL(glDepthMask)(GL_TRUE);

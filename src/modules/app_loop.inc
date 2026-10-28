@@ -47,6 +47,7 @@
         }
 
         run_step(dt);
+        if (view.dummy && view.playing) dummy_step((int)(dt * 60 * view.speed));
         if (fx.id >= 0 && fxPlaying) { /* in ticks, 60 a second, as FIGHTSTG_battle.frames counts */
             fxTime += dt * 60 * view.speed;
             if (fxTime >= fx_length()) fxTime = fxLoop ? 0 : (float)fx_length();
@@ -185,6 +186,7 @@
                 ImGui::MenuItem("Wireframe", nullptr, &view.wireframe);
                 ImGui::MenuItem("Skeleton", nullptr, &view.skeleton);
                 ImGui::MenuItem("Grid", nullptr, &view.grid);
+                ImGui::MenuItem("Stand-in enemy", nullptr, &view.dummy);
                 ImGui::MenuItem("Back-face culling", nullptr, &view.cull);
                 ImGui::EndMenu();
             }
@@ -1117,7 +1119,9 @@
             ghostOn = pcatArm >= 0 && section == STAGES && stage_on() && inView && !ImGui::GetIO().WantCaptureMouse &&
                       ground_hit(view, vw, vh, mp.x - vx, mp.y - vy, ghostAt);
             if (stage_on()) props_build(propQuads, propLines);
-            render(scene, view, (int)(vx * sx), (int)((ds.y - vy - vh) * sy), (int)(vw * sx), (int)(vh * sy), spriteDraws, extraModels, propQuads,
+            std::vector<ExtraModel> drawModels = extraModels;
+            if (view.dummy && !scene.fighters.empty()) dummy_extras(scene.fighters[scene.fighter], drawModels);
+            render(scene, view, (int)(vx * sx), (int)((ds.y - vy - vh) * sy), (int)(vw * sx), (int)(vh * sy), spriteDraws, drawModels, propQuads,
                    propLines, stage_on() ? &propGpu : nullptr);
         }
         GL(glViewport)(0, 0, ww, wh);
