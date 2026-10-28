@@ -621,7 +621,25 @@ void Model::advance(int ticks, bool once) {
 /* Each bone's matrix: Rz * Ry * Rx (RotMatrixZYX), its columns scaled, at its
    position, under its parent's; a bone scaled to 48 or less is hidden and
    keeps its last matrix (FIGHTSTG_updateModel) */
+static void rzyx_deg(const std::array<float, 3> &d, float r[3][3]) {
+    const float k = 3.14159265f / 180;
+    float cx = cosf(d[0] * k), sx = sinf(d[0] * k), cy = cosf(d[1] * k), sy = sinf(d[1] * k), cz = cosf(d[2] * k), sz = sinf(d[2] * k);
+    float m[3][3] = {{cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx}, {sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx}, {-sy, cy * sx, cy * cx}};
+    memcpy(r, m, sizeof m);
+}
+
 void Model::computeWorld() {
+    auto it = adj.find(motion);
+    bool live = it != adj.end() && !it->second.empty();
+    if (live) {
+        std::map<int, std::map<int, std::array<float, 3>>> keep;
+        keep.swap(adj);
+        computeWorld(); /* the bones as the file has them */
+        keep.swap(adj);
+        rawWorld.resize(bones.size());
+        for (size_t b = 0; b < bones.size(); b++) memcpy(rawWorld[b].data(), pose[b].world, sizeof pose[b].world);
+    } else
+        rawWorld.clear();
     for (size_t b = 0; b < bones.size(); b++) {
         Pose &p = pose[b];
         if (b == 0) {
@@ -644,6 +662,17 @@ void Model::computeWorld() {
             for (int i = 0; i < 4; i++)
                 w[c * 4 + i] = a[i] * local[c * 4] + a[4 + i] * local[c * 4 + 1] + a[8 + i] * local[c * 4 + 2] + a[12 + i] * local[c * 4 + 3];
         memcpy(p.world, w, sizeof w);
+        if (live) { /* its own turn about its joint: the bones under it hang from this world */
+            auto a = it->second.find((int)b);
+            if (a != it->second.end()) {
+                float r[3][3], o[3][3];
+                rzyx_deg(a->second, r);
+                for (int c = 0; c < 3; c++)
+                    for (int i = 0; i < 3; i++) o[c][i] = r[i][0] * p.world[c * 4] + r[i][1] * p.world[c * 4 + 1] + r[i][2] * p.world[c * 4 + 2];
+                for (int c = 0; c < 3; c++)
+                    for (int i = 0; i < 3; i++) p.world[c * 4 + i] = o[c][i];
+            }
+        }
     }
 }
 

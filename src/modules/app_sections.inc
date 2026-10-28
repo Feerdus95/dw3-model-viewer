@@ -26,6 +26,7 @@
 #include "ui/ab_controls.inc" /* A/B under the view */
 #include "ui/workbench_ops.inc" /* the workbench's history */
 #include "ui/fighter_browser.inc" /* Fighter: the browser (the scripts and the player's options) */
+#include "ui/flame_adjust_ui.inc" /* Fighter: Flamedramon's hand adjustment */
 #include "ui/fighter_inspector.inc" /* Fighter: the inspector */
 #include "ui/cameras_library.inc" /* Cameras: the Library */
 #include "ui/workbench_save.inc" /* saving what the workbench holds, and the undo and save hooks */

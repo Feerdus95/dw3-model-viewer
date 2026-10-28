@@ -100,7 +100,7 @@
             }
         }
         extraModels.clear();
-        for (FxModel &e : fxModels) extraModels.push_back({e.scene.get(), e.pre});
+        for (FxModel &e : fxModels) extraModels.push_back({e.scene.get(), scene.model ? flame_pre(*scene.model, e.id, *e.scene->model, e.pre) : e.pre});
     };
     GLuint shotTex[8] = {};
     std::vector<uint32_t> shotPx, shotWhite;
@@ -206,7 +206,7 @@
                            return true;
                        }),
                        fxModels.end());
-        for (FxModel &e : fxModels) extraModels.push_back({e.scene.get(), e.pre});
+        for (FxModel &e : fxModels) extraModels.push_back({e.scene.get(), scene.model ? flame_pre(*scene.model, e.id, *e.scene->model, e.pre) : e.pre});
         for (FxShot &s : shots) s.t += ticks;
         shots.erase(std::remove_if(shots.begin(), shots.end(),
                                    [&](const FxShot &s) { return !shot_effect(s.id) || s.t >= shot_len(s.id); }),

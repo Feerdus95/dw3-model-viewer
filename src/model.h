@@ -3,6 +3,7 @@
    here knows about OpenGL. */
 #pragma once
 #include "game.h"
+#include <array>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -118,6 +119,10 @@ struct Model {
     bool motionDone = false, blending = false;
     int blend = 0, blendTarget = 0, idleFrames[2] = {0, 0};
     std::vector<uint16_t> keyframes, blendTargets, blendSources;
+    /* a live turn, in degrees about the model's axes (x y z, as Rz*Ry*Rx), of a bone and all under it, while MOTION plays: adj[motion][bone]. A
+       hand adjustment (flame_adjust.inc) to look at before it is baked; rawWorld then holds the bones' worlds without it */
+    std::map<int, std::map<int, std::array<float, 3>>> adj;
+    std::vector<std::array<float, 16>> rawWorld;
 
     /* FIGHTER, when given, names its bone list, motions and scripts; else
        ENTRY (a stage's), else the first entry that reads as one; MOTIONS

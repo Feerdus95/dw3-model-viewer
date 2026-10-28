@@ -35,6 +35,7 @@
         if (cf.enemy && cf.cameraCount > 0) field("Battle view", "its partner's %d", cf.cameraCount);
         check_box("Effect points", &view.marks);
         tip("A cross where each effect of a played script is (pink: a sprite, blue: an effect model), to see where they land on the model");
+        flame_panel();
         heading("Cameras");
         if (button(IC_CAMERA "  Free camera", view.gameCamera < 0 ? 1 : 0)) frame_model(scene, view);
         tip("Orbit freely: dragging in the view leaves the game's camera too");

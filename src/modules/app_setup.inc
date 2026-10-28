@@ -19,6 +19,7 @@ int main(int argc, char **argv) {
     int effect = -1, xstage = -1, istage = -1;
     float orbit[6] = {}; /* --orbit yaw,pitch,dist,x,y,z (degrees, model units): the shot's camera */
     bool has_orbit = false, shot_cull = false; /* --cull: back faces dropped, as the game draws */
+    bool shot_flame = false; /* --flame-live: flame_adjust.txt shown as a live change over the file, in a --shot */
     bool shot_dummy = false; /* --dummy: a stand-in enemy at its battle home in the shot */
     std::string xdir, xmods, iobj; /* --export-stage ID MODS OUT: the stage's OBJ as the game has it (the mod, if any) */
     for (int i = 1; i < argc; i++) {
@@ -38,6 +39,7 @@ int main(int argc, char **argv) {
         else if (a == "--cam" && i + 1 < argc) shot_cam = atoi(argv[++i]);
         else if (a == "--cull") shot_cull = true;
         else if (a == "--dummy") shot_dummy = true;
+        else if (a == "--flame-live") shot_flame = true;
         else if (a == "--orbit" && i + 1 < argc) has_orbit = sscanf(argv[++i], "%f,%f,%f,%f,%f,%f", orbit, orbit + 1, orbit + 2, orbit + 3, orbit + 4, orbit + 5) == 6;
         else if (a == "--stage" && i + 1 < argc) shot_stage = atoi(argv[++i]);
         else if (a == "--fighter" && i + 1 < argc) shot_fighter = atoi(argv[++i]);
@@ -683,6 +685,7 @@ int main(int argc, char **argv) {
         }
         std::vector<std::unique_ptr<Scene>> fxScenes;
         std::vector<ExtraModel> fxExtras;
+        if (shot_flame) g_flLive = flame_read(), flame_sync(*scene.model);
         for (auto [id, t] : shot_fx) { /* the effect models the port's own (script_player.inc), in the fighter's space, as the script puts them */
             int fid = id == 450 ? 7101 : id == 451 ? 7102 : id >= 452 && id <= 459 ? 7121 + id - 452 : 0;
             std::vector<uint8_t> bytes;
@@ -694,7 +697,7 @@ int main(int argc, char **argv) {
             upload(*sc);
             for (int i = 0; i < t; i++) sc->model->advance(1), sc->model->evaluate();
             sc->model->evaluate();
-            fxExtras.push_back({sc.get(), {{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}}});
+            fxExtras.push_back({sc.get(), flame_pre(*scene.model, id, *sc->model, {{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}})});
             fxScenes.push_back(std::move(sc));
         }
         view.dummy = shot_dummy;

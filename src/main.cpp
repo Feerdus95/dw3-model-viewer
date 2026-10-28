@@ -43,6 +43,8 @@
 #include <memory>
 #include <mutex>
 #include <set>
+#include <sstream>
+#include <array>
 #include <atomic>
 #include <thread>
 #ifdef _WIN32
@@ -66,6 +68,7 @@
 #include "modules/stage_validation.inc"
 #include "modules/seam_report.inc"
 #include "modules/model_camera_tree.inc"
+#include "modules/flame_adjust.inc"
 #include "modules/compendium.inc"
 #include "modules/presets.inc"
 #include "modules/templates.inc"
