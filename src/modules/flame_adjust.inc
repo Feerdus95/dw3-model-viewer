@@ -187,12 +187,18 @@ static void guide_ray(std::vector<float> &out, const float o[3], const float d[3
         t0 = std::max(t0, a), t1 = std::min(t1, b);
         if (t0 > t1) hit = false;
     }
-    float len = hit ? t0 : 14000.0f, k = hit ? 1.0f : 0.8f, c[3] = {col[0] * k, col[1] * k, col[2] * k};
+    float ground = d[1] < -1e-6f && o[1] > 0 ? -o[1] / d[1] : 1e9f; /* the ground: the view's plane y = 0 */
+    bool onGround = ground < (hit ? t0 : 14000.0f);
+    float len = onGround ? ground : hit ? t0 : 14000.0f, k = hit || onGround ? 1.0f : 0.8f, c[3] = {col[0] * k, col[1] * k, col[2] * k};
+    if (onGround) hit = false; /* it is the ground that stops it */
     guide_dashed(out, o, d, len, c[0], c[1], c[2]);
     float p[3] = {o[0] + d[0] * len, o[1] + d[1] * len, o[2] + d[2] * len};
-    guide_cross(out, p, hit ? 160.0f : 90.0f, c[0], c[1], c[2]);
+    guide_cross(out, p, hit || onGround ? 160.0f : 90.0f, c[0], c[1], c[2]);
     char b[160];
-    if (box) { /* how far the ray passes from the enemy's middle */
+    if (onGround) {
+        float dx = box ? p[0] - (lo[0] + hi[0]) / 2 : 0, dz = box ? p[2] - (lo[2] + hi[2]) / 2 : 0;
+        snprintf(b, sizeof b, "%s: stops on the ground at %.0f, %.0f from the enemy's middle\n", name, len, sqrtf(dx * dx + dz * dz));
+    } else if (box) { /* how far the ray passes from the enemy's middle */
         float m[3] = {(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2}, v[3], s = 0, off = 0;
         for (int i = 0; i < 3; i++) v[i] = m[i] - o[i], s += v[i] * d[i];
         for (int i = 0; i < 3; i++) off += (v[i] - d[i] * s) * (v[i] - d[i] * s);
