@@ -20,7 +20,7 @@
         if (ImGui::Button(IC_STEP, ImVec2(b, 0))) {
             playing = false;
             if (fxMode) fxTime = std::min(fxTime + 1, (float)std::max(fx_length() - 1, 0));
-            else m->advance(1), m->evaluate();
+            else m->advance(1), m->evaluate(), fx_seek();
         }
         tip("Step (Right arrow; Left steps back)");
         ImGui::PopStyleColor();
@@ -69,7 +69,7 @@
             if (ImGui::SliderInt("##key", &key, 0, std::max(m->keyframeCount - 1, 0), pos)) {
                 playing = false;
                 m->keyframe = key, m->motionDone = false;
-                m->evaluate();
+                m->evaluate(), fx_seek();
             }
             tip("frame %d%s%s", m->frame, m->blending ? " (blending)" : "", m->motionDone ? ", done" : "");
         }
@@ -84,6 +84,6 @@
             view.playing = false;
             if (dir > 0) m.advance(1);
             else m.keyframe = std::max(m.keyframe - 1, 0), m.motionDone = false;
-            m.evaluate();
+            m.evaluate(), fx_seek();
         }
     };

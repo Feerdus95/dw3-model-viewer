@@ -27,6 +27,12 @@
         }
     };
     std::vector<FxModel> fxModels;
+    /* where in its motion each started, so a key moved to by hand (fx_seek) can have them as they were then */
+    struct FxStart {
+        ScriptLine ln;
+        int motion, key;
+    };
+    std::vector<FxStart> fxLog;
     auto free_fx_models = [&]() {
         for (FxModel &e : fxModels) {
             GL(glDeleteBuffers)(1, &e.scene->vbo);
@@ -37,7 +43,7 @@
     };
     /* Starts the effect model of LN (FIGHTSTG_runScriptEffectModel) where the script puts it: its position and
        rotation are the battle's (y and z negated into the model's PSX space), the fighter standing at its home */
-    auto start_fx_model = [&](const ScriptLine &ln, const Fighter &f) {
+    auto start_fx_model = [&](const ScriptLine &ln, const Fighter &f, bool log = true) {
         const EffectModelRow *row = nullptr;
         for (const EffectModelRow &r : EFFECT_MODELS)
             if (r.id == ln.emId) row = &r;
@@ -73,6 +79,28 @@
         FxModel e;
         e.id = ln.emId, e.scene = std::move(sc), e.pre = w;
         fxModels.push_back(std::move(e));
+        if (log && scene.model) fxLog.push_back({ln, scene.model->motion, scene.model->keyframe});
+    };
+    /* the effect models at the motion's current key, as the script started them: after the key is moved by hand */
+    auto fx_seek = [&]() {
+        if (!scene.model || scene.fighters.empty() || fxLog.empty()) return;
+        const Model &m = *scene.model;
+        free_fx_models();
+        for (const FxStart &st : fxLog) {
+            if (st.motion != m.motion || st.key > m.keyframe) continue;
+            start_fx_model(st.ln, *scene.fighters[scene.fighter], false);
+            if (fxModels.empty()) continue;
+            FxModel &e = fxModels.back();
+            for (int i = st.key; i < m.keyframe && !e.scene->model->motionDone; i++) e.scene->model->advance(1), e.scene->model->evaluate(), fx_scroll(e);
+            if (e.scene->model->motionDone) { /* over by then */
+                GL(glDeleteBuffers)(1, &e.scene->vbo);
+                GL(glDeleteVertexArrays)(1, &e.scene->vao);
+                GL(glDeleteTextures)(1, &e.scene->vram);
+                fxModels.pop_back();
+            }
+        }
+        extraModels.clear();
+        for (FxModel &e : fxModels) extraModels.push_back({e.scene.get(), e.pre});
     };
     GLuint shotTex[8] = {};
     std::vector<uint32_t> shotPx, shotWhite;
@@ -111,7 +139,7 @@
         cand.script = i, cand.of = scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter];
         shots.clear();
         shotOwnFx.clear(), ownIds = own_effects(ownRoot); /* the mod's files may have changed since */
-        free_fx_models();
+        free_fx_models(), fxLog.clear();
         scene.model->setMotion(1);
         view.playing = true;
         /* the battle's default view, which the script's cameras then change: a partner's camera 2, the one
