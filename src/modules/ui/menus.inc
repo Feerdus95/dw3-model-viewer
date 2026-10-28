@@ -52,6 +52,7 @@
             ImGui::Separator();
             if (!view.stageView) ImGui::MenuItem("Grid", nullptr, &view.grid);
             if (!view.stageView) ImGui::MenuItem("Stand-in enemy", nullptr, &view.dummy);
+            ImGui::MenuItem("Aim guide", nullptr, &view.guide);
             ImGui::MenuItem("Skeleton", nullptr, &view.skeleton);
             ImGui::MenuItem("Wireframe", nullptr, &view.wireframe);
             ImGui::MenuItem("Back-face culling", nullptr, &view.cull);

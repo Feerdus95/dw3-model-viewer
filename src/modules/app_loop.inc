@@ -187,6 +187,7 @@
                 ImGui::MenuItem("Skeleton", nullptr, &view.skeleton);
                 ImGui::MenuItem("Grid", nullptr, &view.grid);
                 ImGui::MenuItem("Stand-in enemy", nullptr, &view.dummy);
+                ImGui::MenuItem("Aim guide", nullptr, &view.guide);
                 ImGui::MenuItem("Back-face culling", nullptr, &view.cull);
                 ImGui::EndMenu();
             }
@@ -1121,6 +1122,7 @@
             if (stage_on()) props_build(propQuads, propLines);
             std::vector<ExtraModel> drawModels = extraModels;
             if (view.dummy && !scene.fighters.empty()) dummy_extras(scene.fighters[scene.fighter], drawModels);
+            if (view.guide && scene.model) guide_lines(*scene.model, drawModels, propLines);
             render(scene, view, (int)(vx * sx), (int)((ds.y - vy - vh) * sy), (int)(vw * sx), (int)(vh * sy), spriteDraws, drawModels, propQuads,
                    propLines, stage_on() ? &propGpu : nullptr);
         }

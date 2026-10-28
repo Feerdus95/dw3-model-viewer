@@ -62,6 +62,7 @@ struct SpriteDraw {
 struct ExtraModel {
     Scene *scene = nullptr;
     M4 pre;
+    int id = 0; /* an effect model's number (the aim guide finds the ball by it) */
 };
 
 /* A billboard's corners (top left, top right, bottom left, bottom right) in

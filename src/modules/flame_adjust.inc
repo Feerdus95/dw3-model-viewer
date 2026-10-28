@@ -153,3 +153,102 @@ static M4 flame_pre(const Model &fighter, int id, const Model &fxm, const M4 &pr
     M4 s = {{f.scale, 0, 0, 0, 0, f.scale, 0, 0, 0, 0, f.scale, 0, 0, 0, 0, 1}};
     return mul(fl_translate(p), mul(s, mul(fl_translate(q), w)));
 }
+
+/* ===== The aim guide: a dotted ray, like the Laser Gun's, from Flamedramon's fist and from the ball to what each hits =====
+   The stand-in enemy's joints, padded, make its box; a ray that misses runs on dimmed. What it measures goes to g_guideInfo (the panel shows it). */
+static std::string g_guideInfo;
+static int g_guideAxis = 0; /* 0 the wrist to the hand's middle, 1 shoulder to wrist, 2.. the hand bone's +X -X +Y -Y +Z -Z */
+
+static void guide_dashed(std::vector<float> &out, const float a[3], const float d[3], float len, float r, float g, float b) {
+    for (float t = 0; t < len; t += 150) {
+        float p[3], q[3], e = std::min(t + 60, len);
+        for (int i = 0; i < 3; i++) p[i] = a[i] + d[i] * t, q[i] = a[i] + d[i] * e;
+        line(out, p, q, r, g, b);
+    }
+}
+static void guide_cross(std::vector<float> &out, const float p[3], float k, float r, float g, float b) {
+    for (int a = 0; a < 3; a++) {
+        float lo[3] = {p[0], p[1], p[2]}, hi[3] = {p[0], p[1], p[2]};
+        lo[a] -= k, hi[a] += k;
+        line(out, lo, hi, r, g, b);
+    }
+}
+/* one ray from O along D (unit, in the view): to the box's entry point, or dimmed on past it; what it finds goes to g_guideInfo */
+static void guide_ray(std::vector<float> &out, const float o[3], const float d[3], const float lo[3], const float hi[3], bool box, const char *name, const float col[3]) {
+    float t0 = 0, t1 = 1e9f;
+    bool hit = box;
+    for (int i = 0; i < 3 && hit; i++) {
+        if (fabsf(d[i]) < 1e-6f) {
+            if (o[i] < lo[i] || o[i] > hi[i]) hit = false;
+            continue;
+        }
+        float a = (lo[i] - o[i]) / d[i], b = (hi[i] - o[i]) / d[i];
+        if (a > b) std::swap(a, b);
+        t0 = std::max(t0, a), t1 = std::min(t1, b);
+        if (t0 > t1) hit = false;
+    }
+    float len = hit ? t0 : 14000.0f, k = hit ? 1.0f : 0.8f, c[3] = {col[0] * k, col[1] * k, col[2] * k};
+    guide_dashed(out, o, d, len, c[0], c[1], c[2]);
+    float p[3] = {o[0] + d[0] * len, o[1] + d[1] * len, o[2] + d[2] * len};
+    guide_cross(out, p, hit ? 160.0f : 90.0f, c[0], c[1], c[2]);
+    char b[160];
+    if (box) { /* how far the ray passes from the enemy's middle */
+        float m[3] = {(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2}, v[3], s = 0, off = 0;
+        for (int i = 0; i < 3; i++) v[i] = m[i] - o[i], s += v[i] * d[i];
+        for (int i = 0; i < 3; i++) off += (v[i] - d[i] * s) * (v[i] - d[i] * s);
+        if (hit) snprintf(b, sizeof b, "%s: hits the enemy at %.0f, %.0f off its middle\n", name, t0, sqrtf(off));
+        else snprintf(b, sizeof b, "%s: misses the enemy, %.0f off its middle at the closest\n", name, sqrtf(off));
+    } else
+        snprintf(b, sizeof b, "%s: no enemy to hit (View > Stand-in enemy)\n", name);
+    g_guideInfo += b;
+}
+static void guide_lines(const Model &fighter, const std::vector<ExtraModel> &models, std::vector<float> &out) {
+    g_guideInfo.clear();
+    float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
+    bool box = false;
+    for (const ExtraModel &e : models) {
+        if (!e.scene || e.scene != g_dummy.get() || !e.scene->model) continue;
+        const Model &m = *e.scene->model;
+        for (size_t b = 1; b < m.pose.size(); b++) {
+            M4 w;
+            memcpy(w.m, m.pose[b].world, sizeof w.m);
+            w = mul(e.pre, w);
+            float v[3] = {w.m[12], -w.m[13], -w.m[14]};
+            for (int i = 0; i < 3; i++) lo[i] = std::min(lo[i], v[i] - 350), hi[i] = std::max(hi[i], v[i] + 350);
+        }
+        box = true;
+    }
+    static const float RED[3] = {1.0f, 0.15f, 0.1f}, GOLD[3] = {1.0f, 0.8f, 0.1f};
+    if (flame_model(fighter) && fighter.bones.size() > 17 && fighter.bones[17].mesh >= 0 && !fighter.meshes[fighter.bones[17].mesh].verts.empty()) {
+        const auto &vs = fighter.meshes[fighter.bones[17].mesh].verts;
+        double mx = 0, my = 0, mz = 0;
+        for (const Vec3s &v : vs) mx += v.x, my += v.y, mz += v.z;
+        float c[3] = {(float)(mx / vs.size()), (float)(my / vs.size()), (float)(mz / vs.size())}, o[3], wr[3], sh[3], d[3] = {0, 0, 0};
+        const float *w = fighter.pose[17].world;
+        for (int i = 0; i < 3; i++) o[i] = w[i] * c[0] + w[4 + i] * c[1] + w[8 + i] * c[2] + w[12 + i], wr[i] = w[12 + i], sh[i] = fighter.pose[16].world[12 + i];
+        if (g_guideAxis == 0) for (int i = 0; i < 3; i++) d[i] = o[i] - wr[i];
+        else if (g_guideAxis == 1) for (int i = 0; i < 3; i++) d[i] = wr[i] - sh[i];
+        else for (int i = 0; i < 3; i++) d[i] = w[4 * ((g_guideAxis - 2) / 2) + i] * ((g_guideAxis & 1) ? -1.0f : 1.0f);
+        float n = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+        if (n > 1e-3f) {
+            float ov[3] = {o[0], -o[1], -o[2]}, dv[3] = {d[0] / n, -d[1] / n, -d[2] / n};
+            guide_ray(out, ov, dv, lo, hi, box, "Hand", RED);
+        }
+    }
+    for (const ExtraModel &e : models) {
+        if (e.id != 458 || !e.scene || !e.scene->model || e.scene->model->pose.size() < 2) continue;
+        M4 w;
+        memcpy(w.m, e.scene->model->pose[1].world, sizeof w.m);
+        w = mul(e.pre, w);
+        float ov[3] = {w.m[12], -w.m[13], -w.m[14]}, dv[3] = {w.m[8], -w.m[9], -w.m[10]};
+        float n = sqrtf(dv[0] * dv[0] + dv[1] * dv[1] + dv[2] * dv[2]);
+        if (n < 1e-3f) continue;
+        for (float &x : dv) x /= n;
+        if (box) { /* the ball's z runs one way or the other in its model: it goes the way the enemy is */
+            float s = 0;
+            for (int i = 0; i < 3; i++) s += dv[i] * ((lo[i] + hi[i]) / 2 - ov[i]);
+            if (s < 0) for (float &x : dv) x = -x;
+        }
+        guide_ray(out, ov, dv, lo, hi, box, "Ball", GOLD);
+    }
+}

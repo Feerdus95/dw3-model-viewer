@@ -71,6 +71,7 @@ struct View {
     bool face = true;
     bool wireframe = false, skeleton = false, cull = false, grid = true;
     bool marks = false; /* a cross where each effect of a script is */
+    bool guide = false; /* the aim guide: rays from the hand and the ball to what they hit (flame_adjust.inc) */
     bool dummy = false; /* a stand-in enemy at its battle home, and the ground out to it */
     bool playing = true, loop = true;
     float speed = 1, ticks = 0;

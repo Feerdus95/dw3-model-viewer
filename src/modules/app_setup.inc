@@ -20,6 +20,7 @@ int main(int argc, char **argv) {
     float orbit[6] = {}; /* --orbit yaw,pitch,dist,x,y,z (degrees, model units): the shot's camera */
     bool has_orbit = false, shot_cull = false; /* --cull: back faces dropped, as the game draws */
     bool shot_flame = false; /* --flame-live: flame_adjust.txt shown as a live change over the file, in a --shot */
+    bool shot_guide = false; /* --guide: the aim guide in the shot */
     bool shot_dummy = false; /* --dummy: a stand-in enemy at its battle home in the shot */
     std::string xdir, xmods, iobj; /* --export-stage ID MODS OUT: the stage's OBJ as the game has it (the mod, if any) */
     for (int i = 1; i < argc; i++) {
@@ -39,6 +40,7 @@ int main(int argc, char **argv) {
         else if (a == "--cam" && i + 1 < argc) shot_cam = atoi(argv[++i]);
         else if (a == "--cull") shot_cull = true;
         else if (a == "--dummy") shot_dummy = true;
+        else if (a == "--guide") shot_guide = true;
         else if (a == "--flame-live") shot_flame = true;
         else if (a == "--orbit" && i + 1 < argc) has_orbit = sscanf(argv[++i], "%f,%f,%f,%f,%f,%f", orbit, orbit + 1, orbit + 2, orbit + 3, orbit + 4, orbit + 5) == 6;
         else if (a == "--stage" && i + 1 < argc) shot_stage = atoi(argv[++i]);
@@ -697,13 +699,16 @@ int main(int argc, char **argv) {
             upload(*sc);
             for (int i = 0; i < t; i++) sc->model->advance(1), sc->model->evaluate();
             sc->model->evaluate();
-            fxExtras.push_back({sc.get(), flame_pre(*scene.model, id, *sc->model, {{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}})});
+            fxExtras.push_back({sc.get(), flame_pre(*scene.model, id, *sc->model, {{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}}), id});
             fxScenes.push_back(std::move(sc));
         }
         view.dummy = shot_dummy;
         if (shot_dummy && !scene.fighters.empty()) dummy_extras(scene.fighters[scene.fighter], fxExtras);
         if (shot_dummy && g_dummyFighter) printf("stand-in enemy: %s (file %d), %d apart\n", g_dummyFighter->name.c_str(), g_dummyFighter->modelFid, 0x2800 + g_dummyFighter->distance + scene.fighters[scene.fighter]->distance);
-        render(scene, view, 0, 0, W, H, {}, fxExtras);
+        std::vector<float> guideLines;
+        view.guide = shot_guide;
+        if (shot_guide) guide_lines(*scene.model, fxExtras, guideLines), printf("%s", g_guideInfo.c_str());
+        render(scene, view, 0, 0, W, H, {}, fxExtras, {}, guideLines);
         std::vector<uint32_t> px(W * H), flipped(W * H);
         GL(glReadPixels)(0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
         for (int y = 0; y < H; y++) memcpy(&flipped[y * W], &px[(H - 1 - y) * W], W * 4);

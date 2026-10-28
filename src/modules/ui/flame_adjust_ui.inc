@@ -50,6 +50,18 @@
         ImGui::SetNextItemWidth(-FLT_MIN);
         ImGui::DragFloat("##flsc", &f.scale, 0.01f, 0.05f, 6, "size x%.2f");
         tip("Size about the effect's own centre");
+        if (view.guide) {
+            static const char *AX[8] = {"wrist to the hand's middle", "shoulder to wrist", "hand +X", "hand -X", "hand +Y", "hand -Y", "hand +Z", "hand -Z"};
+            hint("Aim guide: the red ray leaves the fist along...");
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            if (ImGui::BeginCombo("##flaxis", AX[g_guideAxis])) {
+                for (int i = 0; i < 8; i++)
+                    if (ImGui::Selectable(AX[i], i == g_guideAxis)) g_guideAxis = i;
+                ImGui::EndCombo();
+            }
+            tip("Which way the hand points: the red ray runs that way to the stand-in enemy; the gold one is the ball's own path");
+            if (!g_guideInfo.empty()) hint("%s", g_guideInfo.c_str());
+        }
         int j = job.load();
         if (j == 1) hint("Rebuilding...");
         if (button("Reset", 0)) g_flLive = FlameAdj(), flame_sync(m);
