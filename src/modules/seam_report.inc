@@ -20,6 +20,11 @@ struct SeamJoint {
     float cover = 0, minGap = 0, drift = 0, normalDeg = 0, maxSep = 0;
     int poses = 0, apart = 0, sepMotion = 0, sepKey = 0; /* poses seen, and those where the two pieces' boxes are 1% of the model apart */
     std::vector<std::pair<int, int>> pv; /* child vertex, parent vertex */
+    /* the drift's spread within one motion (its sampled keyframes): the worst motion's p95, and the pair that opened the most */
+    float p95 = 0, worstD = 0;
+    int p95Motion = 0, worstMotion = 0, worstKey = 0;
+    std::pair<int, int> worstPair = {-1, -1};
+    std::vector<float> cur; /* this motion's per-keyframe drift (the pairs' farthest) */
 };
 
 static int check_seams() {
@@ -106,6 +111,7 @@ static int check_seams() {
         /* every motion's poses (at most ~30 keyframes of each) */
         for (size_t mo = 1; mo <= m.motions.size(); mo++) {
             m.setMotion((int)mo);
+            for (SeamJoint &j : js) j.cur.clear();
             int n = m.keyframeCount, step = std::max(1, n / 30);
             for (int k = 0; k < std::max(n, 1); k += step) {
                 m.keyframe = k;
@@ -137,18 +143,29 @@ static int check_seams() {
                     }
                     if (!m.pose[j.bone].visible || !m.pose[j.parent].visible) continue;
                     const Mesh &cm = m.meshes[m.bones[j.bone].mesh], &pm = m.meshes[m.bones[j.parent].mesh];
+                    float fm = 0;
                     for (auto &pr : j.pv) {
-                        float d = seam_dist(seam_tf(m.pose[j.bone].world, cm.verts[pr.first]), seam_tf(m.pose[j.parent].world, pm.verts[pr.second]));
-                        j.drift = std::max(j.drift, d / D);
+                        float d = seam_dist(seam_tf(m.pose[j.bone].world, cm.verts[pr.first]), seam_tf(m.pose[j.parent].world, pm.verts[pr.second])) / D;
+                        j.drift = std::max(j.drift, d);
+                        fm = std::max(fm, d);
+                        if (d > j.worstD) j.worstD = d, j.worstPair = pr, j.worstMotion = (int)mo, j.worstKey = k;
                     }
+                    j.cur.push_back(fm);
                 }
+            }
+            for (SeamJoint &j : js) {
+                if (j.cur.empty()) continue;
+                std::sort(j.cur.begin(), j.cur.end());
+                float p = j.cur[(size_t)(0.95f * (j.cur.size() - 1))];
+                if (p > j.p95) j.p95 = p, j.p95Motion = (int)mo;
             }
         }
         for (SeamJoint &j : js) all.push_back(std::move(j));
     }
     for (const SeamJoint &j : all)
-        printf("%04d %-13s b%-3d <- b%-3d %-4s pairs %3d/%-3d cover %3.0f%% gap %5.2f%% drift %6.2f%% normals %5.1f deg  apart %3d%% of poses, up to %5.1f%% (motion %d key %d)\n", j.fid,
-               j.model.c_str(), j.bone, j.parent, j.cls, j.pairs, j.verts, j.cover * 100, j.minGap * 100, j.drift * 100, j.normalDeg,
+        printf("%04d %-13s b%-3d <- b%-3d %-4s pairs %3d/%-3d cover %3.0f%% gap %5.2f%% drift %6.2f%% p95 %6.2f%% (motion %d) worst pair c%d/p%d (motion %d key %d) normals %5.1f deg  apart %3d%% of poses, up to %5.1f%% (motion %d key %d)\n", j.fid,
+               j.model.c_str(), j.bone, j.parent, j.cls, j.pairs, j.verts, j.cover * 100, j.minGap * 100, j.drift * 100, j.p95 * 100, j.p95Motion, j.worstPair.first,
+               j.worstPair.second, j.worstMotion, j.worstKey, j.normalDeg,
                j.poses ? j.apart * 100 / j.poses : 0, j.maxSep * 100, j.sepMotion, j.sepKey);
     /* the summary */
     const char *names[] = {"COIN", "OVER", "GAP", "FAR"};
@@ -166,6 +183,12 @@ static int check_seams() {
         for (float x : d) o2 += x > 0.02f, o5 += x > 0.05f;
         for (const SeamJoint &j : all)
             if (!strcmp(j.cls, c)) ap += j.apart > 0, ap25 += j.poses && j.apart * 4 > j.poses;
+        std::vector<float> p;
+        for (const SeamJoint &j : all)
+            if (!strcmp(j.cls, c)) p.push_back(j.p95);
+        std::sort(p.begin(), p.end());
+        printf("%s: per-motion p95 of the drift (worst motion of each joint): median %.2f%% p90 %.2f%% max %.2f%%\n", c, p[p.size() / 2] * 100,
+               p[(size_t)(0.9f * (p.size() - 1))] * 100, p.back() * 100);
         printf("%s: %d joints; drift median %.2f%% p90 %.2f%% max %.2f%% of the model's size; over 2%%: %d, over 5%%: %d; normals apart %.1f deg; "
                "boxes ever apart: %d, apart in over a quarter of the poses: %d\n",
                c, (int)d.size(), q(0.5f), q(0.9f), q(1), o2, o5, ang / d.size(), ap, ap25);
@@ -178,5 +201,17 @@ static int check_seams() {
     for (size_t i = 0; i < worst.size() && i < 25; i++)
         printf("  %04d %-13s b%d <- b%d drift %.2f%% cover %.0f%%\n", worst[i]->fid, worst[i]->model.c_str(), worst[i]->bone, worst[i]->parent,
                worst[i]->drift * 100, worst[i]->cover * 100);
+    /* by the p95 within a motion: a joint that stays open, against one that opens for a frame */
+    for (const char *c : {"COIN", "OVER"}) {
+        worst.clear();
+        for (const SeamJoint &j : all)
+            if (!strcmp(j.cls, c)) worst.push_back(&j);
+        std::sort(worst.begin(), worst.end(), [](const SeamJoint *a, const SeamJoint *b) { return a->p95 > b->p95; });
+        printf("\nthe 25 %s joints with the highest per-motion p95:\n", c);
+        for (size_t i = 0; i < worst.size() && i < 25; i++)
+            printf("  %04d %-13s b%d <- b%d p95 %.2f%% (motion %d) max %.2f%% (motion %d key %d, pair c%d/p%d)\n", worst[i]->fid, worst[i]->model.c_str(),
+                   worst[i]->bone, worst[i]->parent, worst[i]->p95 * 100, worst[i]->p95Motion, worst[i]->worstD * 100, worst[i]->worstMotion,
+                   worst[i]->worstKey, worst[i]->worstPair.first, worst[i]->worstPair.second);
+    }
     return 0;
 }
