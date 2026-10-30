@@ -12,6 +12,43 @@ static float seam_dist(const SeamPt &a, const SeamPt &b) {
     return sqrtf((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z));
 }
 
+/* One point of a joint's neighbourhood at rest, for the overlap diagnostic: role 0 is a child vertex against the parent's
+   nearest vertex (and its normal), role 1 a parent vertex against the child's. rel0 is the pair's offset in the other bone's
+   frame at rest, s0 the point's signed distance along the other surface's normal (negative: behind that surface) */
+struct SeamReg {
+    int role, a, o;
+    float rel0[3], s0;
+};
+
+/* A mesh's vertex normals: its polygons name normals by corner (Poly::nrm), not by vertex, so a vertex's is the sum of those
+   its corners use (zero for a vertex no lit polygon uses) */
+static std::vector<SeamPt> seam_vnormals(const Mesh &m) {
+    std::vector<SeamPt> v(m.verts.size(), SeamPt{0, 0, 0});
+    for (const Poly &p : m.polys) {
+        if (!p.lit) continue;
+        for (int k = 0; k < (p.quad ? 4 : 3); k++) {
+            const Vec3s &n = m.normals[p.nrm[k]];
+            v[p.idx[k]].x += n.x, v[p.idx[k]].y += n.y, v[p.idx[k]].z += n.z;
+        }
+    }
+    return v;
+}
+
+/* P against Q (a vertex of the other piece, with its normal): their offset in Q's bone frame, and P's signed distance along
+   Q's normal. The offset moves only as the two bones do */
+static void seam_eval(const float *wp, const Vec3s &pv, const float *wq, const Vec3s &qv, const SeamPt *qn, float rel[3], float *s, float *dist = nullptr) {
+    SeamPt a = seam_tf(wp, pv), b = seam_tf(wq, qv);
+    float d[3] = {a.x - b.x, a.y - b.y, a.z - b.z};
+    for (int j = 0; j < 3; j++) rel[j] = wq[4 * j] * d[0] + wq[4 * j + 1] * d[1] + wq[4 * j + 2] * d[2];
+    *s = 0;
+    if (dist) *dist = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    if (qn) {
+        SeamPt n = {wq[0] * qn->x + wq[4] * qn->y + wq[8] * qn->z, wq[1] * qn->x + wq[5] * qn->y + wq[9] * qn->z, wq[2] * qn->x + wq[6] * qn->y + wq[10] * qn->z};
+        float l = sqrtf(n.x * n.x + n.y * n.y + n.z * n.z);
+        if (l > 1e-3f) *s = (d[0] * n.x + d[1] * n.y + d[2] * n.z) / l;
+    }
+}
+
 struct SeamJoint {
     int fid = 0, bone = 0, parent = 0;
     std::string model, who; /* who: the fighter's name, empty for a model no fighter uses (an effect) */
@@ -26,6 +63,13 @@ struct SeamJoint {
     int p95Motion = 0, worstMotion = 0, worstKey = 0;
     std::pair<int, int> worstPair = {-1, -1};
     std::vector<float> cur; /* this motion's per-keyframe drift (the pairs' farthest) */
+    /* the overlap diagnostic, over the neighbourhood's points and every sampled keyframe, as shares of the model's size: how far
+       a pair moves from its rest offset (rel), how much deeper than at rest a point sinks behind the other surface (pen; penAbs:
+       in all), how far a point that was behind the other surface at rest comes out in front of it (exp); pen and exp count only the pairs still within the neighbourhood's radius (6% of the model) at that keyframe */
+    std::vector<SeamReg> reg;
+    bool hasN = false;
+    float relMax = 0, penMax = 0, penAbs = 0, expMax = 0;
+    int relM = 0, relK = 0, penM = 0, penK = 0, expM = 0, expK = 0, covered = 0;
 };
 
 static int check_seams() {
@@ -43,7 +87,7 @@ static int check_seams() {
         models++;
         m.setMotion(1);
         size_t nb = m.bones.size();
-        std::vector<std::vector<SeamPt>> rest(nb);
+        std::vector<std::vector<SeamPt>> rest(nb), vn(nb);
         float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
         std::vector<std::array<float, 6>> box(nb);
         for (size_t b = 1; b < nb; b++) {
@@ -59,6 +103,7 @@ static int check_seams() {
                 }
             }
             box[b] = bx;
+            vn[b] = seam_vnormals(m.meshes[m.bones[b].mesh]);
         }
         float D = sqrtf((hi[0] - lo[0]) * (hi[0] - lo[0]) + (hi[1] - lo[1]) * (hi[1] - lo[1]) + (hi[2] - lo[2]) * (hi[2] - lo[2]));
         if (D < 1) continue;
@@ -107,6 +152,34 @@ static int check_seams() {
                 j.normalDeg = n ? (float)(sum / n) : 0;
             }
             j.minGap /= D;
+            /* the neighbourhood: child points near the parent and parent points near the child, 64 of each at most */
+            {
+                j.hasN = !vn[b].empty() && !vn[p].empty();
+                std::vector<std::tuple<float, int, int>> back; /* distance, parent vertex, its nearest child vertex */
+                for (size_t k = 0; k < rest[p].size(); k++) {
+                    float best = 1e30f;
+                    int bi = 0;
+                    for (size_t i = 0; i < rest[b].size(); i++) {
+                        float d = seam_dist(rest[p][k], rest[b][i]);
+                        if (d < best) best = d, bi = (int)i;
+                    }
+                    back.emplace_back(best, (int)k, bi);
+                }
+                std::sort(back.begin(), back.end());
+                auto add = [&](int role, int a, int o) {
+                    SeamReg r;
+                    r.role = role, r.a = a, r.o = o;
+                    if (role == 0) seam_eval(m.pose[b].world, cm.verts[a], m.pose[p].world, pm.verts[o], j.hasN ? &vn[p][o] : nullptr, r.rel0, &r.s0);
+                    else seam_eval(m.pose[p].world, pm.verts[a], m.pose[b].world, cm.verts[o], j.hasN ? &vn[b][o] : nullptr, r.rel0, &r.s0);
+                    j.covered += r.s0 < 0;
+                    j.reg.push_back(r);
+                };
+                int n0 = 0, n1 = 0;
+                for (auto &t : near_pairs)
+                    if (std::get<0>(t) <= closeD && n0++ < 64) add(0, std::get<1>(t), std::get<2>(t));
+                for (auto &t : back)
+                    if (std::get<0>(t) <= closeD && n1++ < 64) add(1, std::get<1>(t), std::get<2>(t));
+            }
             js.push_back(std::move(j));
         }
         /* every motion's poses (at most ~30 keyframes of each) */
@@ -152,6 +225,19 @@ static int check_seams() {
                         if (d > j.worstD) j.worstD = d, j.worstPair = pr, j.worstMotion = (int)mo, j.worstKey = k;
                     }
                     j.cur.push_back(fm);
+                    for (const SeamReg &r : j.reg) {
+                        float rel[3], sv, dist;
+                        if (r.role == 0) seam_eval(m.pose[j.bone].world, cm.verts[r.a], m.pose[j.parent].world, pm.verts[r.o], j.hasN ? &vn[j.parent][r.o] : nullptr, rel, &sv, &dist);
+                        else seam_eval(m.pose[j.parent].world, pm.verts[r.a], m.pose[j.bone].world, cm.verts[r.o], j.hasN ? &vn[j.bone][r.o] : nullptr, rel, &sv, &dist);
+                        float dr = sqrtf((rel[0] - r.rel0[0]) * (rel[0] - r.rel0[0]) + (rel[1] - r.rel0[1]) * (rel[1] - r.rel0[1]) + (rel[2] - r.rel0[2]) * (rel[2] - r.rel0[2])) / D;
+                        if (dr > j.relMax) j.relMax = dr, j.relM = (int)mo, j.relK = k;
+                        if (!j.hasN || dist > closeD) continue; /* the surface test holds only while the two points are still near */
+                        float pen = std::max(0.0f, -sv), pen0 = std::max(0.0f, -r.s0), dp = std::max(0.0f, pen - pen0) / D;
+                        j.penAbs = std::max(j.penAbs, pen / D);
+                        if (dp > j.penMax) j.penMax = dp, j.penM = (int)mo, j.penK = k;
+                        float e = r.s0 < 0 ? std::max(0.0f, sv) / D : 0;
+                        if (e > j.expMax) j.expMax = e, j.expM = (int)mo, j.expK = k;
+                    }
                 }
             }
             for (SeamJoint &j : js) {
@@ -243,6 +329,49 @@ static int check_seams() {
         printf("FIGHTERS %s: %d models, %d joints; the models' median p95: median %.2f%% p90 %.2f%% max %.2f%%; share of a model's joints over 5%%: median %.0f%% p90 %.0f%%; overall %d/%d joints\n",
                c, (int)med.size(), joints, med[med.size() / 2] * 100, med[(size_t)(0.9f * (med.size() - 1))] * 100, med.back() * 100,
                hi5[hi5.size() / 2] * 100, hi5[(size_t)(0.9f * (hi5.size() - 1))] * 100, over5, joints);
+    }
+    /* the overlap diagnostic, fighters only, per model (each model counts once, whatever its joints): how far the pieces
+       around a joint slide (rel), sink deeper into each other than at rest (pen), and uncover what was covered (exp).
+       Not the opening above: other magnitudes. A joint's worst is over its neighbourhood's points and sampled keyframes */
+    for (const char *c : {"COIN", "OVER"}) {
+        std::map<int, std::vector<const SeamJoint *>> by;
+        std::vector<const SeamJoint *> flat;
+        for (const SeamJoint &j : all)
+            if (!j.who.empty() && !strcmp(j.cls, c) && j.hasN && !j.reg.empty()) by[j.fid].push_back(&j), flat.push_back(&j);
+        auto med = [](std::vector<float> v) {
+            std::sort(v.begin(), v.end());
+            return v.empty() ? 0.0f : v[v.size() / 2];
+        };
+        printf("\nOVERLAP, FIGHTERS, %s joints, per model: n / median over joints of rel, pen, exp (worst per joint) / the worst joint of each\n", c);
+        std::vector<float> mr, mp, me;
+        for (auto &kv : by) {
+            std::vector<float> r, pe, ex;
+            const SeamJoint *wp = kv.second[0], *we = kv.second[0];
+            for (const SeamJoint *j : kv.second) {
+                r.push_back(j->relMax), pe.push_back(j->penMax), ex.push_back(j->expMax);
+                if (j->penMax > wp->penMax) wp = j;
+                if (j->expMax > we->expMax) we = j;
+            }
+            mr.push_back(med(r)), mp.push_back(med(pe)), me.push_back(med(ex));
+            printf("  %04d %-13s %-12s n %3d  rel %5.2f%%  pen %5.2f%%  exp %5.2f%%  worst pen %5.2f%% b%d<-b%d m%d k%d  worst exp %5.2f%% b%d<-b%d m%d k%d\n", kv.first,
+                   kv.second[0]->model.c_str(), kv.second[0]->who.c_str(), (int)kv.second.size(), mr.back() * 100, mp.back() * 100, me.back() * 100, wp->penMax * 100,
+                   wp->bone, wp->parent, wp->penM, wp->penK, we->expMax * 100, we->bone, we->parent, we->expM, we->expK);
+        }
+        if (mr.empty()) continue;
+        auto q = [](std::vector<float> v, float f) {
+            std::sort(v.begin(), v.end());
+            return v[(size_t)(f * (v.size() - 1))] * 100;
+        };
+        printf("OVERLAP FIGHTERS %s: %d models, %d joints; the models' median rel %.2f%% (p90 %.2f%%), pen %.2f%% (p90 %.2f%%), exp %.2f%% (p90 %.2f%%)\n", c,
+               (int)mr.size(), (int)flat.size(), q(mr, 0.5f), q(mr, 0.9f), q(mp, 0.5f), q(mp, 0.9f), q(me, 0.5f), q(me, 0.9f));
+        for (int what = 0; what < 2; what++) {
+            std::sort(flat.begin(), flat.end(), [&](const SeamJoint *a, const SeamJoint *b) { return what ? a->expMax > b->expMax : a->penMax > b->penMax; });
+            printf("the 10 %s fighter joints with the highest %s:\n", c, what ? "exposure" : "added penetration");
+            for (size_t i = 0; i < flat.size() && i < 10; i++)
+                printf("  %04d %-13s %-12s b%d <- b%d %s %.2f%% (motion %d key %d)\n", flat[i]->fid, flat[i]->model.c_str(), flat[i]->who.c_str(), flat[i]->bone,
+                       flat[i]->parent, what ? "exp" : "pen", (what ? flat[i]->expMax : flat[i]->penMax) * 100, what ? flat[i]->expM : flat[i]->penM,
+                       what ? flat[i]->expK : flat[i]->penK);
+        }
     }
     return 0;
 }
