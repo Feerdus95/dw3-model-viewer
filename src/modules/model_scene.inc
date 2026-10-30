@@ -82,6 +82,8 @@ static void smooth_build(const Scene &s, const std::vector<GVert> &v) {
     const char *ee = SDL_getenv("DW3MV_SMOOTH_E"), *bl = SDL_getenv("DW3MV_SMOOTH_BONES"); /* the blend's width as a share of the model; the bones skinned (all if none) */
     float e2 = (ee ? (float)atof(ee) : 0.03f) * D, only[256] = {};
     e2 *= e2;
+    const char *ll = SDL_getenv("DW3MV_SMOOTH_L");
+    float lam = ll ? (float)atof(ll) : 0.6f;
     for (const char *q = bl; q && *q;) {
         char *end;
         long bn = strtol(q, &end, 10);
@@ -103,6 +105,68 @@ static void smooth_build(const Scene &s, const std::vector<GVert> &v) {
             }
         }
     }
+    /* weld: where a listed bone meets its parent, a vertex of each piece's end that has a mutual nearest in the other piece (within
+       DW3MV_WELD of the model's size) moves to their midpoint, and the two take the average normal, so the pieces share one ring */
+    std::vector<std::array<float, 3>> N(v.size());
+    for (size_t k = 0; k < v.size(); k++) N[k] = {v[k].nrm[0], v[k].nrm[1], v[k].nrm[2]};
+    {
+        const char *we = SDL_getenv("DW3MV_WELD");
+        float wr = (we ? (float)atof(we) : 0.04f) * D;
+        auto rot = [](const float *w, const float *n, float *o) {
+            for (int i = 0; i < 3; i++) o[i] = w[i] * n[0] + w[4 + i] * n[1] + w[8 + i] * n[2];
+        };
+        auto d3 = [](const std::array<float, 3> &a, const std::array<float, 3> &b) {
+            return sqrtf((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]));
+        };
+        std::vector<std::array<float, 3>> X2 = X;
+        int pairs = 0;
+        for (size_t b = 1; b < nb; b++) {
+            int p = m.bones[b].parent;
+            if (p < 1 || (bl && !only[b])) continue;
+            auto nearest = [&](int k, int first, int count) {
+                int best = -1;
+                float bd = wr;
+                for (int q = first; q < first + count; q++) {
+                    float d = d3(X[k], X[q]);
+                    if (d < bd) bd = d, best = q;
+                }
+                return best;
+            };
+            for (int k = s.first[b]; k < s.first[b] + s.count[b]; k++) {
+                int q = nearest(k, s.first[p], s.count[p]);
+                if (q < 0) continue;
+                int back = nearest(q, s.first[b], s.count[b]);
+                if (back < 0 || d3(X[back], X[k]) > 1e-3f) continue; /* mutual: q's nearest is k's position (duplicates share it) */
+                for (int i = 0; i < 3; i++) X2[k][i] = (X[k][i] + X[q][i]) * 0.5f;
+                float a[3], c[3], t[3];
+                rot(W0[b].data(), N[k].data(), a), rot(W0[p].data(), N[q].data(), c);
+                for (int i = 0; i < 3; i++) t[i] = a[i] + c[i];
+                float l = sqrtf(t[0] * t[0] + t[1] * t[1] + t[2] * t[2]);
+                if (l > 1e-6f) {
+                    for (int i = 0; i < 3; i++) t[i] /= l;
+                    rot(I0[b].data(), t, N[k].data());
+                }
+                pairs++;
+            }
+            for (int q = s.first[p]; q < s.first[p] + s.count[p]; q++) { /* the parent's side of the same ring */
+                int k = nearest(q, s.first[b], s.count[b]);
+                if (k < 0) continue;
+                int back = nearest(k, s.first[p], s.count[p]);
+                if (back < 0 || d3(X[back], X[q]) > 1e-3f) continue;
+                for (int i = 0; i < 3; i++) X2[q][i] = (X[k][i] + X[q][i]) * 0.5f;
+                float a[3], c[3], t[3];
+                rot(W0[b].data(), N[k].data(), a), rot(W0[p].data(), N[q].data(), c);
+                for (int i = 0; i < 3; i++) t[i] = a[i] + c[i];
+                float l = sqrtf(t[0] * t[0] + t[1] * t[1] + t[2] * t[2]);
+                if (l > 1e-6f) {
+                    for (int i = 0; i < 3; i++) t[i] /= l;
+                    rot(I0[p].data(), t, N[q].data());
+                }
+            }
+        }
+        X = X2;
+        if (SDL_getenv("DW3MV_SMOOTH_DBG")) printf("weld: %d child points paired%s", pairs, "\n");
+    }
     SmoothData &sd = g_sm[&s];
     sd.v.assign(v.size(), SmV{});
     sd.out = v;
@@ -115,14 +179,16 @@ static void smooth_build(const Scene &s, const std::vector<GVert> &v) {
             if (bl && !only[b]) cand.resize(1); /* a bone not listed stays rigid */
             for (int j : cand) {
                 float d = sm_seg(X[k].data(), A[j].data(), B[j].data());
-                ws.emplace_back(1.0f / (d * d + e2), j);
+                float lb = sqrtf((B[b][0] - A[b][0]) * (B[b][0] - A[b][0]) + (B[b][1] - A[b][1]) * (B[b][1] - A[b][1]) + (B[b][2] - A[b][2]) * (B[b][2] - A[b][2]));
+                if (lb < 0.02f * D) lb = 0.02f * D;
+                ws.emplace_back(j == (int)b ? 1.0f : std::max(0.0f, 1.0f - d / (lam * lb)) + 1e-6f, j); /* the bone's own: 1; a neighbour: 1 at the joint, 0 at lam of the bone's length */
             }
             std::sort(ws.begin(), ws.end(), [](auto &a, auto &c) { return a.first > c.first; });
             float sum = 0;
             int n = (int)std::min<size_t>(3, ws.size());
             for (int i = 0; i < n; i++) sum += ws[i].first;
             SmV &o = sd.v[k];
-            o.bone = (int)b, o.nrm0[0] = v[k].nrm[0], o.nrm0[1] = v[k].nrm[1], o.nrm0[2] = v[k].nrm[2];
+            o.bone = (int)b, o.nrm0[0] = N[k][0], o.nrm0[1] = N[k][1], o.nrm0[2] = N[k][2];
             for (int i = 0; i < 3; i++) {
                 o.b[i] = i < n ? ws[i].second : (int)b;
                 o.w[i] = i < n ? ws[i].first / sum : 0;
@@ -146,11 +212,13 @@ static void smooth_update(Scene &s) {
             sm_tf(m.pose[o.b[i]].world, o.l[i], p);
             for (int c = 0; c < 3; c++) acc[c] += o.w[i] * p[c];
         }
-        const float *w = m.pose[o.bone].world;
-        for (int c = 0; c < 3; c++) {
-            sd.out[k].pos[c] = acc[c];
-            sd.out[k].nrm[c] = w[c] * o.nrm0[0] + w[4 + c] * o.nrm0[1] + w[8 + c] * o.nrm0[2];
+        float n[3] = {0, 0, 0};
+        for (int i = 0; i < 3; i++) {
+            if (o.w[i] <= 0) continue;
+            const float *w = m.pose[o.b[i]].world;
+            for (int c = 0; c < 3; c++) n[c] += o.w[i] * (w[c] * o.nrm0[0] + w[4 + c] * o.nrm0[1] + w[8 + c] * o.nrm0[2]);
         }
+        for (int c = 0; c < 3; c++) sd.out[k].pos[c] = acc[c], sd.out[k].nrm[c] = n[c];
     }
     GL(glBindVertexArray)(s.vao);
     GL(glBindBuffer)(GL_ARRAY_BUFFER, s.vbo);
