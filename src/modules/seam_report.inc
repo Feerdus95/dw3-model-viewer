@@ -147,6 +147,12 @@ static void seam_surface(const float *wp, const Mesh &mp, const float *wq, const
     }
 }
 
+/* The smallest and largest of a bone matrix's column lengths: a piece whose scale collapses (or blows up) is degenerate */
+static void seam_scale(const float *w, float *lo, float *hi) {
+    float a = sqrtf(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]), b = sqrtf(w[4] * w[4] + w[5] * w[5] + w[6] * w[6]), c = sqrtf(w[8] * w[8] + w[9] * w[9] + w[10] * w[10]);
+    *lo = std::min(a, std::min(b, c)), *hi = std::max(a, std::max(b, c));
+}
+
 struct SeamJoint {
     int fid = 0, bone = 0, parent = 0;
     std::string model, who; /* who: the fighter's name, empty for a model no fighter uses (an effect) */
@@ -174,6 +180,9 @@ struct SeamJoint {
     bool surf = false;
     float tpenMax = 0, tpenAbs = 0, tgapMax = 0;
     int tpenM = 0, tpenK = 0, tgapM = 0, tgapK = 0, touching = 0, samples = 0, trusted = 0;
+    /* what the two bones were doing at the worst tgap sample, against rest: their matrices' smallest and largest column length as
+       a ratio (bone, parent: 1 untouched, near 0 collapsed), and how far each moved, as a share of the model's size */
+    float tgLo[2] = {1, 1}, tgHi[2] = {1, 1}, tgMove[2] = {0, 0}, rLo[2] = {1, 1}, rHi[2] = {1, 1}, rT[2][3] = {{0}, {0}};
 };
 
 static int check_seams() {
@@ -289,6 +298,11 @@ static int check_seams() {
             /* the surface diagnostic: 16 points a side, the 32 nearest triangles of the other piece (as they do not change, found once) */
             if (!j.who.empty() && !strcmp(j.cls, "OVER") && j.hasN) {
                 j.surf = true;
+                for (int h = 0; h < 2; h++) {
+                    const float *w = m.pose[h ? p : b].world;
+                    seam_scale(w, &j.rLo[h], &j.rHi[h]);
+                    j.rT[h][0] = w[12], j.rT[h][1] = w[13], j.rT[h][2] = w[14];
+                }
                 for (int sd = 0; sd < 2; sd++) {
                     SeamSide &S = j.side[sd];
                     int po = sd ? p : b, qo = sd ? b : p; /* the point piece's bone, the other's */
@@ -373,7 +387,17 @@ static int check_seams() {
                                 j.samples++;
                                 if (S.d0[i] <= eps) {
                                     float gp = (d[i] - S.d0[i]) / D;
-                                    if (gp > j.tgapMax) j.tgapMax = gp, j.tgapM = (int)mo, j.tgapK = k;
+                                    if (gp > j.tgapMax) {
+                                        j.tgapMax = gp, j.tgapM = (int)mo, j.tgapK = k;
+                                        for (int h = 0; h < 2; h++) {
+                                            const float *w = m.pose[h ? j.parent : j.bone].world;
+                                            float lo, hi;
+                                            seam_scale(w, &lo, &hi);
+                                            j.tgLo[h] = j.rLo[h] > 1e-6f ? lo / j.rLo[h] : 1, j.tgHi[h] = j.rHi[h] > 1e-6f ? hi / j.rHi[h] : 1;
+                                            j.tgMove[h] = sqrtf((w[12] - j.rT[h][0]) * (w[12] - j.rT[h][0]) + (w[13] - j.rT[h][1]) * (w[13] - j.rT[h][1]) +
+                                                                (w[14] - j.rT[h][2]) * (w[14] - j.rT[h][2])) / D;
+                                        }
+                                    }
                                 }
                                 if (!ok[i] || !S.ok0[i]) continue;
                                 j.trusted++;
@@ -588,13 +612,30 @@ static int check_seams() {
             printf("rank agreement (Spearman) over %d OVER fighter joints: tpen vs plane pen %.2f, tpen vs plane exp %.2f, tgap vs plane exp %.2f, tpen vs tgap %.2f\n",
                    (int)flat.size(), sp(rt, rp), sp(rt, re), sp(rg, re), sp(rt, rg));
         }
+        /* the worst tgap samples, by what the bones did: DEGEN when a matrix's scale collapsed or blew up against rest (a piece that is
+           not really there), VISIBLE when the pieces kept their size (a real separation, or a piece the pose moves away). Nothing is
+           dropped from the figures above: this only says which kind each extreme is */
+        {
+            int tot = 0, dg = 0, k0 = 0;
+            for (const SeamJoint *j : flat)
+                if (j->tgapMax > 0.10f) {
+                    tot++, k0 += j->tgapK == 0;
+                    dg += j->tgLo[0] < 0.1f || j->tgLo[1] < 0.1f || j->tgHi[0] > 10 || j->tgHi[1] > 10;
+                }
+            printf("tgap over 10%%: %d joints, %d of them with a collapsed or blown-up bone scale at the worst sample, %d with the worst sample at key 0 (the viewer starts a motion at key 1, so key 0 may not be a pose that is shown)\n", tot, dg, k0);
+        }
         for (int what = 0; what < 2; what++) {
             std::sort(flat.begin(), flat.end(), [&](const SeamJoint *a, const SeamJoint *b) { return what ? a->tgapMax > b->tgapMax : a->tpenMax > b->tpenMax; });
             printf("the 10 OVER fighter joints with the highest %s:\n", what ? "tgap" : "tpen");
             for (size_t i = 0; i < flat.size() && i < 10; i++)
-                printf("  %04d %-13s %-12s b%d <- b%d %s %.2f%% (motion %d key %d)\n", flat[i]->fid, flat[i]->model.c_str(), flat[i]->who.c_str(), flat[i]->bone,
-                       flat[i]->parent, what ? "tgap" : "tpen", (what ? flat[i]->tgapMax : flat[i]->tpenMax) * 100, what ? flat[i]->tgapM : flat[i]->tpenM,
-                       what ? flat[i]->tgapK : flat[i]->tpenK);
+            {
+                const SeamJoint *j = flat[i];
+                bool dg = j->tgLo[0] < 0.1f || j->tgLo[1] < 0.1f || j->tgHi[0] > 10 || j->tgHi[1] > 10;
+                printf("  %04d %-13s %-12s b%d <- b%d %s %.2f%% (motion %d key %d)", j->fid, j->model.c_str(), j->who.c_str(), j->bone, j->parent, what ? "tgap" : "tpen",
+                       (what ? j->tgapMax : j->tpenMax) * 100, what ? j->tgapM : j->tpenM, what ? j->tgapK : j->tpenK);
+                if (what) printf("  %s scale lo %.2f/%.2f hi %.2f/%.2f moved %.1f%%/%.1f%%", dg ? "DEGEN" : "VISIBLE", j->tgLo[0], j->tgLo[1], j->tgHi[0], j->tgHi[1], j->tgMove[0] * 100, j->tgMove[1] * 100);
+                printf("\n");
+            }
         }
     }
     return 0;
