@@ -14,7 +14,8 @@ static float seam_dist(const SeamPt &a, const SeamPt &b) {
 
 struct SeamJoint {
     int fid = 0, bone = 0, parent = 0;
-    std::string model;
+    std::string model, who; /* who: the fighter's name, empty for a model no fighter uses (an effect) */
+    bool enemy = false;
     const char *cls = "";
     int pairs = 0, verts = 0;
     float cover = 0, minGap = 0, drift = 0, normalDeg = 0, maxSep = 0;
@@ -67,7 +68,7 @@ static int check_seams() {
             int p = m.bones[b].parent;
             if (p <= 0 || rest[b].empty() || rest[p].empty()) continue;
             SeamJoint j;
-            j.fid = e.fid, j.model = e.name, j.bone = (int)b, j.parent = p, j.verts = (int)rest[b].size();
+            j.fid = e.fid, j.model = e.name, j.who = fs.empty() ? "" : fs[0]->name, j.enemy = !fs.empty() && fs[0]->enemy, j.bone = (int)b, j.parent = p, j.verts = (int)rest[b].size();
             std::vector<std::tuple<float, int, int>> near_pairs; /* distance, child vertex, its nearest parent vertex */
             for (size_t i = 0; i < rest[b].size(); i++) {
                 float best = 1e30f;
@@ -212,6 +213,36 @@ static int check_seams() {
             printf("  %04d %-13s b%d <- b%d p95 %.2f%% (motion %d) max %.2f%% (motion %d key %d, pair c%d/p%d)\n", worst[i]->fid, worst[i]->model.c_str(),
                    worst[i]->bone, worst[i]->parent, worst[i]->p95 * 100, worst[i]->p95Motion, worst[i]->worstD * 100, worst[i]->worstMotion,
                    worst[i]->worstKey, worst[i]->worstPair.first, worst[i]->worstPair.second);
+    }
+    /* the fighters alone (partners and enemies; not effects or props): a model's joints against the other models', so the
+       ones with the most joints do not decide the whole */
+    for (const char *c : {"COIN", "OVER"}) {
+        std::map<int, std::vector<const SeamJoint *>> by;
+        for (const SeamJoint &j : all)
+            if (!j.who.empty() && !strcmp(j.cls, c)) by[j.fid].push_back(&j);
+        std::vector<float> med, hi5;
+        int joints = 0, over5 = 0;
+        printf("\nFIGHTERS, %s joints, per model: n / median p95 / p90 / max / joints over 5%%\n", c);
+        for (auto &kv : by) {
+            std::vector<float> p;
+            for (const SeamJoint *j : kv.second) p.push_back(j->p95);
+            std::sort(p.begin(), p.end());
+            int o5 = 0;
+            for (float x : p) o5 += x > 0.05f;
+            const SeamJoint *w = *std::max_element(kv.second.begin(), kv.second.end(), [](const SeamJoint *a, const SeamJoint *b) { return a->p95 < b->p95; });
+            printf("  %04d %-13s %-12s %-7s n %3d  median %5.2f%%  p90 %5.2f%%  max %6.2f%%  over5%% %3d  worst b%d<-b%d motion %d key %d pair c%d/p%d\n", kv.first,
+                   w->model.c_str(), w->who.c_str(), w->enemy ? "enemy" : "partner", (int)p.size(), p[p.size() / 2] * 100,
+                   p[(size_t)(0.9f * (p.size() - 1))] * 100, p.back() * 100, o5, w->bone, w->parent, w->worstMotion, w->worstKey, w->worstPair.first,
+                   w->worstPair.second);
+            med.push_back(p[p.size() / 2]), hi5.push_back((float)o5 / p.size());
+            joints += (int)p.size(), over5 += o5;
+        }
+        if (med.empty()) continue;
+        std::sort(med.begin(), med.end());
+        std::sort(hi5.begin(), hi5.end());
+        printf("FIGHTERS %s: %d models, %d joints; the models' median p95: median %.2f%% p90 %.2f%% max %.2f%%; share of a model's joints over 5%%: median %.0f%% p90 %.0f%%; overall %d/%d joints\n",
+               c, (int)med.size(), joints, med[med.size() / 2] * 100, med[(size_t)(0.9f * (med.size() - 1))] * 100, med.back() * 100,
+               hi5[hi5.size() / 2] * 100, hi5[(size_t)(0.9f * (hi5.size() - 1))] * 100, over5, joints);
     }
     return 0;
 }
