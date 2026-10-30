@@ -49,6 +49,104 @@ static void seam_eval(const float *wp, const Vec3s &pv, const float *wq, const V
     }
 }
 
+/* The distance to the other piece's real surface (the overlap diagnostic's second version). A triangle of a mesh, as the game
+   draws a polygon (a quad is (0,1,2) and (1,3,2)); flip is the winding that makes its normal point out, judged by the vertex
+   normals at rest (0: unknown, so no side can be told) */
+struct SeamTri {
+    int a, b, c;
+    float flip;
+};
+
+static std::vector<SeamTri> seam_tris(const Mesh &m, const std::vector<SeamPt> &vn) {
+    std::vector<SeamTri> t;
+    for (const Poly &p : m.polys) {
+        static const int Q[2][3] = {{0, 1, 2}, {1, 3, 2}};
+        for (int h = 0; h < (p.quad ? 2 : 1); h++) {
+            SeamTri r = {p.idx[Q[h][0]], p.idx[Q[h][1]], p.idx[Q[h][2]], 0};
+            const Vec3s &a = m.verts[r.a], &b = m.verts[r.b], &c = m.verts[r.c];
+            float u[3] = {(float)(b.x - a.x), (float)(b.y - a.y), (float)(b.z - a.z)}, v[3] = {(float)(c.x - a.x), (float)(c.y - a.y), (float)(c.z - a.z)};
+            float n[3] = {u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]};
+            if (n[0] * n[0] + n[1] * n[1] + n[2] * n[2] < 1e-3f) continue; /* degenerate */
+            float vs[3] = {vn[r.a].x + vn[r.b].x + vn[r.c].x, vn[r.a].y + vn[r.b].y + vn[r.c].y, vn[r.a].z + vn[r.b].z + vn[r.c].z};
+            float d = n[0] * vs[0] + n[1] * vs[1] + n[2] * vs[2];
+            r.flip = d > 1e-3f ? 1.0f : d < -1e-3f ? -1.0f : 0.0f;
+            t.push_back(r);
+        }
+    }
+    return t;
+}
+
+/* The distance from P to triangle abc (Ericson's closest point); *face is 1 when the closest point is inside the face, where
+   the triangle's side of P can be trusted, and *side the sign of P along the winding normal */
+static float seam_pt_tri(const SeamPt &p, const SeamPt &a, const SeamPt &b, const SeamPt &c, int *face, float *side) {
+    auto sub = [](const SeamPt &x, const SeamPt &y) { return SeamPt{x.x - y.x, x.y - y.y, x.z - y.z}; };
+    auto dot = [](const SeamPt &x, const SeamPt &y) { return x.x * y.x + x.y * y.y + x.z * y.z; };
+    SeamPt ab = sub(b, a), ac = sub(c, a), ap = sub(p, a), q;
+    float d1 = dot(ab, ap), d2 = dot(ac, ap), d3, d4, d5, d6, vc, vb, va;
+    *face = 0;
+    SeamPt n = {ab.y * ac.z - ab.z * ac.y, ab.z * ac.x - ab.x * ac.z, ab.x * ac.y - ab.y * ac.x};
+    auto done = [&](const SeamPt &qq) {
+        SeamPt r = sub(p, qq);
+        *side = dot(r, n) >= 0 ? 1.0f : -1.0f;
+        return sqrtf(dot(r, r));
+    };
+    if (d1 <= 0 && d2 <= 0) return done(a);
+    SeamPt bp = sub(p, b);
+    d3 = dot(ab, bp), d4 = dot(ac, bp);
+    if (d3 >= 0 && d4 <= d3) return done(b);
+    vc = d1 * d4 - d3 * d2;
+    if (vc <= 0 && d1 >= 0 && d3 <= 0) {
+        float v = d1 / (d1 - d3);
+        return done({a.x + v * ab.x, a.y + v * ab.y, a.z + v * ab.z});
+    }
+    SeamPt cp = sub(p, c);
+    d5 = dot(ab, cp), d6 = dot(ac, cp);
+    if (d6 >= 0 && d5 <= d6) return done(c);
+    vb = d5 * d2 - d1 * d6;
+    if (vb <= 0 && d2 >= 0 && d6 <= 0) {
+        float w = d2 / (d2 - d6);
+        return done({a.x + w * ac.x, a.y + w * ac.y, a.z + w * ac.z});
+    }
+    va = d3 * d6 - d5 * d4;
+    if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) {
+        float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        return done({b.x + w * (c.x - b.x), b.y + w * (c.y - b.y), b.z + w * (c.z - b.z)});
+    }
+    float den = 1.0f / (va + vb + vc), v = vb * den, w = vc * den;
+    *face = 1;
+    return done({a.x + ab.x * v + ac.x * w, a.y + ab.y * v + ac.y * w, a.z + ab.z * v + ac.z * w});
+}
+
+/* One side of a joint: points of one piece against a chosen few triangles of the other, at rest and per keyframe */
+struct SeamSide {
+    std::vector<int> pts, tris; /* vertices of the point piece, triangles of the other */
+    std::vector<float> d0, s0;  /* at rest: distance, signed distance (negative: behind the surface) */
+    std::vector<char> ok0;      /* whether that side is trusted */
+};
+
+/* The points' distance to the triangles' surface now: d the distance, sd the signed one, ok whether its sign is trusted
+   (the closest point is inside a face with a known winding) */
+static void seam_surface(const float *wp, const Mesh &mp, const float *wq, const Mesh &mq, const std::vector<SeamTri> &tq, const SeamSide &sd, std::vector<float> &d,
+                         std::vector<float> &sg, std::vector<char> &ok) {
+    std::vector<SeamPt> tv(sd.tris.size() * 3);
+    float det = wq[0] * (wq[5] * wq[10] - wq[6] * wq[9]) - wq[4] * (wq[1] * wq[10] - wq[2] * wq[9]) + wq[8] * (wq[1] * wq[6] - wq[2] * wq[5]);
+    for (size_t i = 0; i < sd.tris.size(); i++) {
+        const SeamTri &t = tq[sd.tris[i]];
+        tv[i * 3] = seam_tf(wq, mq.verts[t.a]), tv[i * 3 + 1] = seam_tf(wq, mq.verts[t.b]), tv[i * 3 + 2] = seam_tf(wq, mq.verts[t.c]);
+    }
+    d.assign(sd.pts.size(), 1e30f), sg.assign(sd.pts.size(), 1e30f), ok.assign(sd.pts.size(), 0);
+    for (size_t k = 0; k < sd.pts.size(); k++) {
+        SeamPt P = seam_tf(wp, mp.verts[sd.pts[k]]);
+        for (size_t i = 0; i < sd.tris.size(); i++) {
+            int face;
+            float side, dist = seam_pt_tri(P, tv[i * 3], tv[i * 3 + 1], tv[i * 3 + 2], &face, &side);
+            if (dist >= d[k]) continue;
+            float f = tq[sd.tris[i]].flip * (det < 0 ? -1.0f : 1.0f);
+            d[k] = dist, ok[k] = face && f != 0, sg[k] = side * f * dist;
+        }
+    }
+}
+
 struct SeamJoint {
     int fid = 0, bone = 0, parent = 0;
     std::string model, who; /* who: the fighter's name, empty for a model no fighter uses (an effect) */
@@ -70,6 +168,12 @@ struct SeamJoint {
     bool hasN = false;
     float relMax = 0, penMax = 0, penAbs = 0, expMax = 0;
     int relM = 0, relK = 0, penM = 0, penK = 0, expM = 0, expK = 0, covered = 0;
+    /* the same against the real surface (OVER joints of fighters): how much deeper a point whose side is trusted sinks behind
+       the other piece's surface than at rest (tpen), how far from the surface a point that touched it at rest gets (tgap) */
+    SeamSide side[2];
+    bool surf = false;
+    float tpenMax = 0, tpenAbs = 0, tgapMax = 0;
+    int tpenM = 0, tpenK = 0, tgapM = 0, tgapK = 0, touching = 0, samples = 0, trusted = 0;
 };
 
 static int check_seams() {
@@ -88,6 +192,7 @@ static int check_seams() {
         m.setMotion(1);
         size_t nb = m.bones.size();
         std::vector<std::vector<SeamPt>> rest(nb), vn(nb);
+        std::vector<std::vector<SeamTri>> tr(nb);
         float lo[3] = {1e9f, 1e9f, 1e9f}, hi[3] = {-1e9f, -1e9f, -1e9f};
         std::vector<std::array<float, 6>> box(nb);
         for (size_t b = 1; b < nb; b++) {
@@ -104,6 +209,7 @@ static int check_seams() {
             }
             box[b] = bx;
             vn[b] = seam_vnormals(m.meshes[m.bones[b].mesh]);
+            tr[b] = seam_tris(m.meshes[m.bones[b].mesh], vn[b]);
         }
         float D = sqrtf((hi[0] - lo[0]) * (hi[0] - lo[0]) + (hi[1] - lo[1]) * (hi[1] - lo[1]) + (hi[2] - lo[2]) * (hi[2] - lo[2]));
         if (D < 1) continue;
@@ -153,9 +259,9 @@ static int check_seams() {
             }
             j.minGap /= D;
             /* the neighbourhood: child points near the parent and parent points near the child, 64 of each at most */
+            std::vector<std::tuple<float, int, int>> back; /* distance, parent vertex, its nearest child vertex */
             {
                 j.hasN = !vn[b].empty() && !vn[p].empty();
-                std::vector<std::tuple<float, int, int>> back; /* distance, parent vertex, its nearest child vertex */
                 for (size_t k = 0; k < rest[p].size(); k++) {
                     float best = 1e30f;
                     int bi = 0;
@@ -179,6 +285,36 @@ static int check_seams() {
                     if (std::get<0>(t) <= closeD && n0++ < 64) add(0, std::get<1>(t), std::get<2>(t));
                 for (auto &t : back)
                     if (std::get<0>(t) <= closeD && n1++ < 64) add(1, std::get<1>(t), std::get<2>(t));
+            }
+            /* the surface diagnostic: 16 points a side, the 32 nearest triangles of the other piece (as they do not change, found once) */
+            if (!j.who.empty() && !strcmp(j.cls, "OVER") && j.hasN) {
+                j.surf = true;
+                for (int sd = 0; sd < 2; sd++) {
+                    SeamSide &S = j.side[sd];
+                    int po = sd ? p : b, qo = sd ? b : p; /* the point piece's bone, the other's */
+                    if (sd == 0) {
+                        for (auto &t : near_pairs)
+                            if (std::get<0>(t) <= closeD && S.pts.size() < 16) S.pts.push_back(std::get<1>(t));
+                    } else {
+                        for (auto &t : back)
+                            if (std::get<0>(t) <= closeD && S.pts.size() < 16) S.pts.push_back(std::get<1>(t));
+                    }
+                    std::vector<std::pair<float, int>> td;
+                    for (size_t i = 0; i < tr[qo].size(); i++) {
+                        float best = 1e30f;
+                        for (int pt : S.pts) {
+                            int face;
+                            float side, d = seam_pt_tri(rest[po][pt], rest[qo][tr[qo][i].a], rest[qo][tr[qo][i].b], rest[qo][tr[qo][i].c], &face, &side);
+                            best = std::min(best, d);
+                        }
+                        td.emplace_back(best, (int)i);
+                    }
+                    std::sort(td.begin(), td.end());
+                    for (size_t i = 0; i < td.size() && i < 32; i++) S.tris.push_back(td[i].second);
+                    const Mesh &mp = m.meshes[m.bones[po].mesh], &mq = m.meshes[m.bones[qo].mesh];
+                    if (!S.pts.empty() && !S.tris.empty()) seam_surface(m.pose[po].world, mp, m.pose[qo].world, mq, tr[qo], S, S.d0, S.s0, S.ok0);
+                    for (size_t i = 0; i < S.d0.size(); i++) j.touching += S.d0[i] <= eps;
+                }
             }
             js.push_back(std::move(j));
         }
@@ -225,6 +361,28 @@ static int check_seams() {
                         if (d > j.worstD) j.worstD = d, j.worstPair = pr, j.worstMotion = (int)mo, j.worstKey = k;
                     }
                     j.cur.push_back(fm);
+                    if (j.surf && (k / step) % 3 == 0) { /* every third sampled keyframe: the triangles make it dear */
+                        for (int sd = 0; sd < 2; sd++) {
+                            const SeamSide &S = j.side[sd];
+                            int po = sd ? j.parent : j.bone, qo = sd ? j.bone : j.parent;
+                            if (S.pts.empty() || S.tris.empty()) continue;
+                            std::vector<float> d, sg;
+                            std::vector<char> ok;
+                            seam_surface(m.pose[po].world, m.meshes[m.bones[po].mesh], m.pose[qo].world, m.meshes[m.bones[qo].mesh], tr[qo], S, d, sg, ok);
+                            for (size_t i = 0; i < d.size(); i++) {
+                                j.samples++;
+                                if (S.d0[i] <= eps) {
+                                    float gp = (d[i] - S.d0[i]) / D;
+                                    if (gp > j.tgapMax) j.tgapMax = gp, j.tgapM = (int)mo, j.tgapK = k;
+                                }
+                                if (!ok[i] || !S.ok0[i]) continue;
+                                j.trusted++;
+                                float dep = std::max(0.0f, -sg[i]) / D, dep0 = std::max(0.0f, -S.s0[i]) / D;
+                                j.tpenAbs = std::max(j.tpenAbs, dep);
+                                if (dep - dep0 > j.tpenMax) j.tpenMax = dep - dep0, j.tpenM = (int)mo, j.tpenK = k;
+                            }
+                        }
+                    }
                     for (const SeamReg &r : j.reg) {
                         float rel[3], sv, dist;
                         if (r.role == 0) seam_eval(m.pose[j.bone].world, cm.verts[r.a], m.pose[j.parent].world, pm.verts[r.o], j.hasN ? &vn[j.parent][r.o] : nullptr, rel, &sv, &dist);
@@ -371,6 +529,72 @@ static int check_seams() {
                 printf("  %04d %-13s %-12s b%d <- b%d %s %.2f%% (motion %d key %d)\n", flat[i]->fid, flat[i]->model.c_str(), flat[i]->who.c_str(), flat[i]->bone,
                        flat[i]->parent, what ? "exp" : "pen", (what ? flat[i]->expMax : flat[i]->penMax) * 100, what ? flat[i]->expM : flat[i]->penM,
                        what ? flat[i]->expK : flat[i]->penK);
+        }
+    }
+    /* the same, against the real surface: OVER joints of fighters, per model. tpen: added depth of points whose side is trusted;
+       tgap: how far a point that touched the other surface at rest gets from it. A point's trusted side needs its closest point
+       inside a face with a known winding; the rest only has a distance. Rank agreement with the plane test above is printed too */
+    {
+        std::vector<const SeamJoint *> flat;
+        std::map<int, std::vector<const SeamJoint *>> by;
+        for (const SeamJoint &j : all)
+            if (j.surf && j.samples) flat.push_back(&j), by[j.fid].push_back(&j);
+        auto med = [](std::vector<float> v) {
+            std::sort(v.begin(), v.end());
+            return v.empty() ? 0.0f : v[v.size() / 2];
+        };
+        printf("\nSURFACE, FIGHTERS, OVER joints, per model: n / median over joints of tpen, tgap / the worst joint of each / share of samples with a trusted side\n");
+        std::vector<float> mp, mg;
+        long smp = 0, tru = 0, ok0 = 0, in0 = 0, tot0 = 0;
+        for (auto &kv : by) {
+            std::vector<float> a, g;
+            const SeamJoint *wp = kv.second[0], *wg = kv.second[0];
+            for (const SeamJoint *j : kv.second) {
+                a.push_back(j->tpenMax), g.push_back(j->tgapMax);
+                if (j->tpenMax > wp->tpenMax) wp = j;
+                if (j->tgapMax > wg->tgapMax) wg = j;
+                smp += j->samples, tru += j->trusted;
+                for (const SeamSide &S : j->side)
+                    for (size_t i = 0; i < S.d0.size(); i++) tot0++, ok0 += S.ok0[i], in0 += S.ok0[i] && S.s0[i] < 0;
+            }
+            mp.push_back(med(a)), mg.push_back(med(g));
+            printf("  %04d %-13s %-12s n %3d  tpen %5.2f%%  tgap %5.2f%%  worst tpen %5.2f%% b%d<-b%d m%d k%d  worst tgap %5.2f%% b%d<-b%d m%d k%d\n", kv.first,
+                   kv.second[0]->model.c_str(), kv.second[0]->who.c_str(), (int)kv.second.size(), mp.back() * 100, mg.back() * 100, wp->tpenMax * 100, wp->bone,
+                   wp->parent, wp->tpenM, wp->tpenK, wg->tgapMax * 100, wg->bone, wg->parent, wg->tgapM, wg->tgapK);
+        }
+        if (!mp.empty()) {
+            auto q = [](std::vector<float> v, float f) {
+                std::sort(v.begin(), v.end());
+                return v[(size_t)(f * (v.size() - 1))] * 100;
+            };
+            printf("SURFACE FIGHTERS OVER: %d models, %d joints; the models' median tpen %.2f%% (p90 %.2f%%), tgap %.2f%% (p90 %.2f%%); trusted side in %.0f%% of %ld samples; at rest %.0f%% of %ld points have a trusted side, %.0f%% of those behind the surface\n",
+                   (int)mp.size(), (int)flat.size(), q(mp, 0.5f), q(mp, 0.9f), q(mg, 0.5f), q(mg, 0.9f), smp ? tru * 100.0 / smp : 0.0, smp, tot0 ? ok0 * 100.0 / tot0 : 0.0, tot0, ok0 ? in0 * 100.0 / ok0 : 0.0);
+            /* the rank agreement (Spearman) of the new tpen with the plane test's pen and exp, over the joints */
+            auto ranks = [&](auto get) {
+                std::vector<int> o(flat.size());
+                for (size_t i = 0; i < o.size(); i++) o[i] = (int)i;
+                std::sort(o.begin(), o.end(), [&](int a, int b) { return get(flat[a]) < get(flat[b]); });
+                std::vector<double> r(flat.size());
+                for (size_t i = 0; i < o.size(); i++) r[o[i]] = (double)i;
+                return r;
+            };
+            auto sp = [&](const std::vector<double> &a, const std::vector<double> &b) {
+                double n = (double)a.size(), ma = (n - 1) / 2, sab = 0, saa = 0, sbb = 0;
+                for (size_t i = 0; i < a.size(); i++) sab += (a[i] - ma) * (b[i] - ma), saa += (a[i] - ma) * (a[i] - ma), sbb += (b[i] - ma) * (b[i] - ma);
+                return sab / sqrt(saa * sbb);
+            };
+            auto rt = ranks([](const SeamJoint *j) { return j->tpenMax; }), rp = ranks([](const SeamJoint *j) { return j->penMax; }),
+                 re = ranks([](const SeamJoint *j) { return j->expMax; }), rg = ranks([](const SeamJoint *j) { return j->tgapMax; });
+            printf("rank agreement (Spearman) over %d OVER fighter joints: tpen vs plane pen %.2f, tpen vs plane exp %.2f, tgap vs plane exp %.2f, tpen vs tgap %.2f\n",
+                   (int)flat.size(), sp(rt, rp), sp(rt, re), sp(rg, re), sp(rt, rg));
+        }
+        for (int what = 0; what < 2; what++) {
+            std::sort(flat.begin(), flat.end(), [&](const SeamJoint *a, const SeamJoint *b) { return what ? a->tgapMax > b->tgapMax : a->tpenMax > b->tpenMax; });
+            printf("the 10 OVER fighter joints with the highest %s:\n", what ? "tgap" : "tpen");
+            for (size_t i = 0; i < flat.size() && i < 10; i++)
+                printf("  %04d %-13s %-12s b%d <- b%d %s %.2f%% (motion %d key %d)\n", flat[i]->fid, flat[i]->model.c_str(), flat[i]->who.c_str(), flat[i]->bone,
+                       flat[i]->parent, what ? "tgap" : "tpen", (what ? flat[i]->tgapMax : flat[i]->tpenMax) * 100, what ? flat[i]->tgapM : flat[i]->tpenM,
+                       what ? flat[i]->tgapK : flat[i]->tpenK);
         }
     }
     return 0;
