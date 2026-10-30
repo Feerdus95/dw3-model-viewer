@@ -319,10 +319,11 @@ static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vec
         Model &m = *sc.model;
         GL(glBindTexture)(GL_TEXTURE_2D, sc.vram);
         GL(glBindVertexArray)(sc.vao);
+        if (g_smooth) smooth_update(sc);
         auto draw_bones = [&]() {
             for (size_t b = 1; b < m.bones.size(); b++) {
                 if (!m.pose[b].visible || sc.hidden[b] || !sc.count[b]) continue;
-                M4 pose = mul(pre, bone_pose(sc, (int)b)), mvp = mul(vp, mul(PSX_TO_GL, pose));
+                M4 pose = g_smooth ? pre : mul(pre, bone_pose(sc, (int)b)), mvp = mul(vp, mul(PSX_TO_GL, pose));
                 GL(glUniformMatrix4fv)(loc_mvp, 1, GL_FALSE, mvp.m);
                 GL(glUniformMatrix4fv)(loc_world, 1, GL_FALSE, pose.m);
                 int mark = b < sc.mark.size() ? sc.mark[b] : 0;
