@@ -238,6 +238,22 @@ int main(int argc, char **argv) {
         printf("scripts: %d effect model starts (%d distinct, %d unreadable), %d sprite effects at a screen position, %d own\n", emStarts,
                (int)emSeen.size(), emBad, screenFx, ownFx);
         printf("%d models, %d unread\n", (int)list.size(), bad);
+        /* the DW2 and DCB tabs' folders (dw2_dir.txt, dcb_dir.txt beside the exe): every model opens, with a mesh and a motion */
+        for (int dcbSide = 0; dcbSide < 2; dcbSide++) {
+            if ((dcbSide ? g_dcb : g_dw2).empty()) continue;
+            std::vector<Dw2Entry> l = dcbSide ? dcb_scan() : dw2_scan();
+            int unread = 0;
+            for (const Dw2Entry &e : l) {
+                std::vector<uint8_t> bytes;
+                Model m;
+                if (!read_file(e.path, bytes) || !m.load(e.label, std::move(bytes), nullptr) || m.meshes.empty() || m.motions.empty()) {
+                    printf("%s %s ERROR %s\n", dcbSide ? "DCB" : "DW2", e.label.c_str(), m.error.c_str());
+                    unread++;
+                }
+            }
+            printf("%s: %d models, %d unread\n", dcbSide ? "DCB" : "DW2", (int)l.size(), unread);
+            bad += unread;
+        }
         return bad != 0 || emBad != 0;
     }
 
