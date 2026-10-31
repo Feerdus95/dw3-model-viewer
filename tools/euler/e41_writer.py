@@ -73,7 +73,7 @@ def add_motion(raw, tracks, steps):
         new[mi] = struct.pack('<%dI' % (mn + 1), *([o + 4 if o else 0 for o in mo] + [len(ma.b) + 4])) + ma.b[4 * mn:] + step_bytes
     add_motion.slot = slot; add_motion.bridged = bridged
     # re-lay the file: entries keep their order by original position; sizes from the next greater offset
-    order = sorted(range(n), key=lambda i: (offs[i], i)); head = min(o for o in offs if o) if offs else 4 * n
+    order = sorted((i for i in range(n) if offs[i]), key=lambda i: (offs[i], i)); head = min(o for o in offs if o) if offs else 4 * n      # offset 0 = absent entry: stays 0, is not re-laid
     assert head == 4 * n or head > 4 * n
     newoffs, out, pos = [0] * n, [], head
     for i in order:
