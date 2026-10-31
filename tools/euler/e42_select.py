@@ -8,7 +8,7 @@ u16 = lambda b, o: struct.unpack_from('<H', b, o)[0]; s16 = lambda b, o: struct.
 
 def script_motions(b, o, end):
     """Walk one script like game.cpp read_script; return (motion args named by op 2 cmd 0, ok)"""
-    out = []; p = o
+    out = []; p = o; script_motions.pos = []; script_motions.waits = 0
     def nx():
         nonlocal p
         v = s16(b, p) if p + 2 <= end else 0; p += 2; return v
@@ -20,7 +20,8 @@ def script_motions(b, o, end):
         elif op == 2:
             cmd = nx(); nx(); arg = 0
             if cmd not in (1, 2, 3, 4, 7, 8, 9): arg = nx()
-            if cmd == 0 and arg >= 2: out.append(arg)
+            if cmd == 0 and arg >= 2: out.append(arg); script_motions.pos.append(p - 2)
+            if cmd == 0 and arg == 0: script_motions.waits += 1
             elif cmd == 3: [nx() for _ in range(4)]
             elif cmd == 4: [nx() for _ in range(4)]
             elif cmd == 5 and arg == 4: nx()
@@ -82,4 +83,5 @@ def main():
     open(os.path.join(HERE, '..', '..', '..', 'kb', 'e42-select-output.txt'), 'w', encoding='utf-8').write('\n'.join(lines) + '\n')
 
 
-main()
+if __name__ == '__main__':
+    main()
