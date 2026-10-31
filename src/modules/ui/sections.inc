@@ -13,6 +13,6 @@
         "Candidate cameras, Fit and choreographies for the open fighter's scripts, kept as presets and applications",
         "The battle's 2D effects, and their own images for the native port",
         "The open model's texture pages, palettes and UVs",
-        "Digimon World 2: its Digimon and effect models, from the folder dw2-extractor made",
-        "Digital Card Battle: its Digimon models and their animations, from the folder dcb-extract made"};
+        "Digimon World 2: its Digimon and effect models, from the folder tools/extract_dw2.py makes",
+        "Digital Card Battle: its Digimon models and their animations, from the folder tools/extract_dcb.py makes"};
     auto needs_model = [](int s) { return s == MODEL || s == MOTIONS || s == FIGHTER || s == CAMERAS || s == TEXTURES; };

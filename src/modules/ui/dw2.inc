@@ -21,7 +21,7 @@
         }
         if (dw2List.empty()) {
             hint("No Digimon World 2 models found%s.", g_dw2.empty() ? "" : (" in " + g_dw2).c_str());
-            hint("Run dw2-extractor (dw2model.py, then todw2m.py) on your own SLUS-01193 disc, and choose the folder it made: digimon/ and fx/ in it.");
+            hint("Run tools/extract_dw2.py on your own SLUS-01193 disc (python tools/extract_dw2.py DISC.cue OUT), and choose OUT.");
             if (button(IC_FOLDER "  Choose the folder...", 1)) pick_dw2_folder();
             return;
         }

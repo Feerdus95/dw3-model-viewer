@@ -21,7 +21,7 @@
         }
         if (dcbList.empty()) {
             hint("No Digital Card Battle models found%s.", g_dcb.empty() ? "" : (" in " + g_dcb).c_str());
-            hint("Run dcb-extract (ex.py, drv.py, then todcbm.py) on your own copy of the disc, and choose the folder it made: digimon/ in it.");
+            hint("Run tools/extract_dcb.py on your own copy of the disc (python tools/extract_dcb.py DISC.cue OUT), and choose OUT.");
             if (button(IC_FOLDER "  Choose the folder...", 1)) pick_dcb_folder();
             return;
         }

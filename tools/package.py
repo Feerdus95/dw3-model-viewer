@@ -27,6 +27,7 @@ def main():
         "dw3mv.exe": BUILD / "dw3mv.exe",
         "SDL3.dll": BUILD / "SDL3.dll",
         "tools/setup_disc.py": HERE / "tools/setup_disc.py",
+        **{f"tools/{f.relative_to(HERE / 'tools').as_posix()}": f for f in [HERE / "tools/discfs.py", HERE / "tools/extract_dw2.py", HERE / "tools/extract_dcb.py", *(HERE / "tools/dcb").glob("*.py")]},
         "README.md": HERE / "README.md",
         "LICENSE": HERE / "LICENSE",
         "CREDITS.md": HERE / "CREDITS.md",

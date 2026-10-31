@@ -1,4 +1,4 @@
-/* A Digimon World 2 model (the .dw2m dw2-extractor/todw2m.py writes from the disc's files) read into the viewer's
+/* A Digimon World 2 model (the .dw2m tools/extract_dw2.py writes from the disc's files) read into the viewer's
    Model, so its bones, textures and motions go through the same card as a DW3 one. Formats: dw2_decomp's
    src/main/{model,anim,texslot}.c. Each DW2 motion is laid end to end on the bones' key tracks (one key a frame), and
    played as a plain MotionStep run: holding on its last frame or looping to the frame the game's 0xFE names. */
