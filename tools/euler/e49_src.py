@@ -17,7 +17,7 @@ USE_ALIAS = os.environ.get('E49_SRC') == 'rambley'
 def channels(js, b, a, path):
     cs = [c for c in a['channels'] if c['target']['path'] == path]
     nf = Counter(js['accessors'][a['samplers'][c['sampler']]['input']]['count'] for c in a['channels']).most_common(1)[0][0]
-    tmax = max(js['accessors'][a['samplers'][c['sampler']]['input']]['max'][0] for c in a['channels']); T = np.linspace(0, tmax, nf)
+    tmax = max(js['accessors'][a['samplers'][c['sampler']]['input']]['max'][0] for c in a['channels']); ups = int(os.environ.get('E49_UPS', 1)); T = np.linspace(0, tmax, (nf - 1) * ups + 1); nf = len(T)   # E49_UPS = keys per source frame (the game plays one frame per 60 Hz tick)
     out = {}
     for c in cs:
         s = a['samplers'][c['sampler']]; t = accessor(js, b, s['input'])[:, 0].astype(float); v = accessor(js, b, s['output']).astype(float)
