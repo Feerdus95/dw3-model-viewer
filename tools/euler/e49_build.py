@@ -68,11 +68,24 @@ left = U(P('LeftUpLeg') - P('RightUpLeg')); up0 = P('Neck') - P('Hips'); up = U(
 hp = np.array([P('Hips', f) for f in range(n)]); d = (hp - hp.mean(0)) @ BM
 ref = {b: np.array(pose_track(tr[b - 1][0], 10), float) for b in (1, 13)}; assert (ref[1] == ref[13]).all()
 BA = np.column_stack([[1.0, 0, 0], [0, -1.0, 0], [0, 0, -1.0]])      # DW3 body frame at rest: left +x, up -y, forward -z
+refpose = [[tuple(int(x) for x in pose_track(tr[b][t], 10)) for t in range(3)] for b in range(nb)]
+Wref = World(par, nb).update(refpose)
+# FEET (v3): ExVeemon's leg is digitigrade: bone 4 = hock, 4->5 points DOWN (the claws hang from bone 5), so the E1.x ABS rule (foot direction = Rambley's horizontal ankle->toe) lifts the paws off the
+# ground. Foot (4/8) and toe (5/9) are instead the CHANGE of Rambley's own foot/toe world rotation from its clip-mean (stance) orientation, applied to ExVeemon's own reference world rotation.
+Tm = BA @ BM.T                                                  # Rambley world -> DW3 world (both body frames: left/up/forward)
+Rp_ = [key_matrix(k) for k in keys[1]]
+cmean = lambda A: (lambda u, _, vt: u @ vt)(*np.linalg.svd(A.sum(0)))
+for side, legb, fb in (('Left', (2, 3), (4, 5)), ('Right', (6, 7), (8, 9))):
+    Rs = [np.array([M.Rw(I[side + nm], f) for f in range(n)]) for nm in ('Foot', 'ToeBase')]
+    Wf = [Tm @ (Rs[i][f] @ cmean(Rs[i]).T) @ Tm.T @ nrot(Wref[fb[i]]) for i in (0, 1) for f in range(n)]; Wf = [Wf[:n], Wf[n:]]
+    L4, L5 = [], []
+    for f in range(n):
+        W3 = Rp_[f] @ key_matrix(keys[legb[0]][f]) @ key_matrix(keys[legb[1]][f]); L4.append(W3.T @ Wf[0][f]); L5.append(Wf[0][f].T @ Wf[1][f])
+    keys[fb[0]] = rotations_to_keys(L4, tuple(refpose[fb[0] - 1][1])); keys[fb[1]] = rotations_to_keys(L5, tuple(refpose[fb[1] - 1][1]))
 legA = np.linalg.norm(pose_track(tr[2][0], 10)) + np.linalg.norm(pose_track(tr[3][0], 10)); legM = np.linalg.norm(M.off(I['LeftLeg'])) + np.linalg.norm(M.off(I['LeftFoot'])); s = legA / legM
 bob0 = np.array([ref[1] + BA @ (s * d[f]) for f in range(n)])
 log(f'frames {n} ({n / 60:.2f} s at 60 ticks/s; source 30 fps x{os.environ["E49_UPS"]}); scale dest/source leg length {s:.0f}; hips displacement (source units) left {np.ptp(d[:, 0]):.3f} up {np.ptp(d[:, 1]):.3f} fwd {np.ptp(d[:, 2]):.3f} (leg {legM:.3f})')
-refpose = [[tuple(int(x) for x in pose_track(tr[b][t], 10)) for t in range(3)] for b in range(nb)]
-R13 = nrot(World(par, nb).update(refpose)[13]); a_loc = R13.T @ np.array([0, 0, -1.0])             # torso-local forward axis (the arms' parent is the torso, constant local frame)
+R13 = nrot(Wref[13]); a_loc = R13.T @ np.array([0, 0, -1.0])             # torso-local forward axis (the arms' parent is the torso, constant local frame)
 FEET, HAND, HEAD = (4, 5, 8, 9), {'L': (15, 16), 'R': (23, 24)}, (17, 18, 19)
 def rod(ax, t): K = np.array([[0, -ax[2], ax[1]], [ax[2], 0, -ax[0]], [-ax[1], ax[0], 0]]); return np.eye(3) + math.sin(t) * K + (1 - math.cos(t)) * K @ K
 
