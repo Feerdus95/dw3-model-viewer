@@ -29,6 +29,8 @@ def rebuild_keyarc(ka_bytes, new_rot, idx=1):
 
 def main(out, anim='Idle', n_frames=60, dedup=False, patch_motion=False, side='Left', limb='arm', variant='ABS'):
     bones = {('arm', 'Left'): (4, 5, 6), ('arm', 'Right'): (7, 8, 9), ('leg', 'Left'): (11, 12, 13, 14), ('leg', 'Right'): (15, 16, 17, 18), ('torso', side): (1,), ('pelvis', side): (10,), ('bob', side): (1, 10), ('still', side): (1, 10)}[(limb, side)]
+    if limb == 'leg':
+        from e17_leg import CFG; bones = tuple(CFG['L' if side == 'Left' else 'R'])      # E17_MODEL=0526 selects the 0526 bone numbers
     HI = LO + n_frames - 1; T = 0 if limb in ('bob', 'still') else 1      # track edited: 0 = position, 1 = rotation
     import contextlib, io
     with contextlib.redirect_stdout(io.StringIO()):
