@@ -5,7 +5,7 @@ integer lerp (dw3_euler.dw3_lerp), takes each bone's rotation, converts it to th
 compares it with the GLB's rotation samples as a geodesic angle.
 Run: python e7_compare.py FILE.bin FILE.glb [label]      (writes nothing)
 Scope: every motion the GLB holds, blends included; motions are replayed in order (the pose carries over)."""
-import json, math, os, struct, sys
+import os, json, math, os, struct, sys
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(HERE, ".."))
@@ -19,6 +19,9 @@ CONJ = np.diag([1.0, -1.0, -1.0])
 
 
 def read_glb(path):
+    if path.endswith('.gltf'):     # E4.2: external-buffer glTF (Rambley): JSON + sibling scene.bin; the armature node RambleyRig carries scale 100 (cm -> m of the FBX): normalised to 0.01 so that Mix positions follow the Mixamo convention (metres x 100 = cm of the node offsets)
+        js = json.load(open(path, encoding='utf-8')); n = next(x for x in js['nodes'] if x.get('name') == 'RambleyRig'); n['scale'] = [0.01, 0.01, 0.01]
+        return js, open(os.path.join(os.path.dirname(path), js['buffers'][0]['uri']), 'rb').read()
     b = open(path, 'rb').read()
     jl, _ = struct.unpack_from('<II', b, 12)
     js = json.loads(b[20:20 + jl])

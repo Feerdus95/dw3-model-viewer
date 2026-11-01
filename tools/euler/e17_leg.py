@@ -19,6 +19,8 @@ NAMES = ['UpLeg', 'Leg', 'Foot', 'ToeBase']
 CFG = dict(pv=10, L=[11, 12, 13, 14], R=[15, 16, 17, 18], up=lambda pos: pos(2) - pos(10), ground=(14, 18))
 if os.environ.get('E17_MODEL') == '0526':
     CFG = dict(pv=1, L=[5, 6, 7, 8], R=[9, 10, 11, 12], up=lambda pos: (pos(14) + pos(17)) / 2 - pos(1), ground=(8, 12))
+if os.environ.get('E49_MODEL') == '0575':
+    CFG = dict(pv=1, L=[2, 3, 4, 5], R=[6, 7, 8, 9], up=lambda pos: (pos(14) + pos(22)) / 2 - pos(1), ground=(5, 9))
 PV = CFG['pv']
 
 
@@ -36,9 +38,8 @@ def main(sg, ab, anim='Walk', dedup=True, side='Left', carrier=False):
     M = Mix(sg, anim); I = M.idx; M.tra = {}
     import e13_arm; from e7_compare import read_glb, accessor
     js, b = read_glb(sg); a = next(x for x in js['animations'] if x['name'] == anim)
-    for c in a['channels']:
-        if c['target']['path'] == 'translation': M.tra[c['target']['node']] = accessor(js, b, a['samplers'][c['sampler']]['output']).astype(float)
-    if dedup and all(geodesic(unquat(q[-1]), unquat(q[0])) * D < 0.05 for q in M.rot.values()): M.nf -= 1
+    import e49_src; M.tra = e49_src.channels(js, b, a, 'translation')
+    if dedup and (os.environ.get('E49_DEDUP') or all(geodesic(unquat(q[-1]), unquat(q[0])) * D < 0.05 for q in M.rot.values())): M.nf -= 1
     seg = CFG['L'] if side == 'Left' else CFG['R']
     ms = [side + n for n in NAMES]; pelvis = I['Hips']
     P = lambda n: mix_pos(M, n, None)
@@ -82,7 +83,7 @@ def main(sg, ab, anim='Walk', dedup=True, side='Left', carrier=False):
     rf = lambda nm: [mix_pos(M, nm, f)[1] * 100 for f in range(M.nf)]
     other = np.array(rf('RightFoot')); ph = int(np.argmin(hk)) - int(np.argmin(other))
     print(f'\n## Mixamo Walk gait check: left ankle height {hk.min() - hmin:.1f}..{hk.max() - hmin:.1f} cm, toe {ht.min() - hmin:.1f}..{ht.max() - hmin:.1f} cm (leg length hip-ankle {legM:.1f} cm); frames with the foot within 15 % of the leg length of the ground: {sum(stance)} of {M.nf}; '
-          f'forward travel of the ankle relative to the hip over the clip {np.ptp(ank[:, 2]) / legM * 100:.0f} % of leg length (body forward axis); phase offset between left and right ankle minima {ph % M.nf} of {M.nf} frames; hips translation range {np.round([np.ptp(M.tra[pelvis][:, c]) for c in range(3)], 3)}')
+          f'forward travel of the ankle relative to the hip over the clip {np.ptp(ank[:, 2]) / legM * 100:.0f} % of leg length (body forward axis); phase offset between left and right ankle minima {ph % M.nf} of {M.nf} frames; hips translation range {np.round([np.ptp(M.tra.get(pelvis, np.zeros((2, 3)))[:, c]) for c in range(3)], 3)}')
     # variants: ABS = body frame leaning like Agumon's pelvis-neck line; ABSW = gravity-aligned body frame (up = world up); HYB = ABSW for thigh/shank,
     # foot and toe as the CHANGE from the flat-foot reference (T-pose / idle both stand flat); DELTA = every segment as a change from the reference
     BW = np.column_stack([aleft, [0, -1.0, 0], np.cross(aleft, [0, -1.0, 0])])

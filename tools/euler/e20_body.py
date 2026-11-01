@@ -22,8 +22,10 @@ def quiet(fn, *a, **k):
 
 def body_keys(sg, ab, anim='Walk', dedup=True, which='torso', variant='ABS'):
     """keys [[(x,y,z)] per frame] of bone 1 (torso) or 10 (pelvis) -> returned as [keys] (one bone)"""
-    if which == 'torso': Rt = quiet(arm_main, sg, ab, anim, dedup, 'Left', True)['_Rt']; b = 1
-    else: Rt = quiet(leg_main, sg, ab, anim, dedup, 'Left', True)['_Rt']; b = 10
+    from e13_arm import TB
+    from e17_leg import PV
+    if which == 'torso': Rt = quiet(arm_main, sg, ab, anim, dedup, 'Left', True)['_Rt']; b = TB
+    else: Rt = quiet(leg_main, sg, ab, anim, dedup, 'Left', True)['_Rt']; b = PV
     tr, mo = load_raw(ab); fr = Player(tr, mo).idle
     rt = pose_track(tr[b - 1][1], fr)
     if variant == 'REL':      # E2.0: the change from the clip's own mean posture applied to Agumon's idle orientation (the carrier's Qc, mean taken in the SVD / chordal sense)
@@ -35,7 +37,7 @@ def body_keys(sg, ab, anim='Walk', dedup=True, which='torso', variant='ABS'):
 def main(sg, ab, anim='Walk', dedup=True):
     tr, mo = load_raw(ab); fr = Player(tr, mo).idle
     M = Mix(sg, anim); I = M.idx
-    if dedup and all(geodesic(unquat(q[-1]), unquat(q[0])) * D < 0.05 for q in M.rot.values()): M.nf -= 1
+    if dedup and (os.environ.get('E49_DEDUP') or all(geodesic(unquat(q[-1]), unquat(q[0])) * D < 0.05 for q in M.rot.values())): M.nf -= 1
     for which, b, car in (('pelvis', 10, 'Hips'), ('torso', 1, 'Spine2')):
         keys, Rt = body_keys(sg, ab, anim, dedup, which)
         k = keys[0]; ref = pose_track(tr[b - 1][1], fr); R0 = key_matrix(tuple(ref))

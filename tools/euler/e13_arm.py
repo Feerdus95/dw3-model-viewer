@@ -40,10 +40,10 @@ class Mix:
         js, b = read_glb(path); self.N = js['nodes']
         self.par = {c: i for i, n in enumerate(self.N) for c in n.get('children', [])}
         self.idx = {n['name'].replace('mixamorig:', ''): i for i, n in enumerate(self.N)}
-        a = next(x for x in js['animations'] if x['name'] == anim); self.rot = {}
-        for c in a['channels']:
-            if c['target']['path'] == 'rotation':
-                self.rot[c['target']['node']] = accessor(js, b, a['samplers'][c['sampler']]['output']).astype(float)
+        import e49_src
+        if e49_src.USE_ALIAS: self.idx = {k: next(i for i, nd in enumerate(self.N) if nd.get('name') == v) for k, v in e49_src.ALIAS.items()}
+        a = next(x for x in js['animations'] if x['name'] == anim)
+        self.rot = e49_src.channels(js, b, a, 'rotation')
         self.nf = len(next(iter(self.rot.values())))
         self.fps = 1 / float(np.median(np.diff(accessor(js, b, a['samplers'][0]['input'])[:, 0])))
 
@@ -65,10 +65,17 @@ class Mix:
         return p
 
 
+# per-model bone numbers (E49_MODEL=0575: ExVeemon): arms, torso (carrier of the arms), the two first leg bones (left/right of the body frame) and the 'up' vector from the reference positions
+CFG = dict(L=[4, 5, 6], R=[7, 8, 9], tb=1, lb=(11, 15), up=lambda pos: pos(2) - pos(10))
+if os.environ.get('E49_MODEL') == '0575':
+    CFG = dict(L=[14, 15, 16], R=[22, 23, 24], tb=13, lb=(2, 6), up=lambda pos: (pos(14) + pos(22)) / 2 - pos(1))
+TB = CFG['tb']
+
+
 def main(sg, ab, anim='Idle', dedup=False, side='Left', carrier=False):
-    seg = [4, 5, 6] if side == 'Left' else [7, 8, 9]
+    seg = CFG['L'] if side == 'Left' else CFG['R']
     M = Mix(sg, anim); I = M.idx
-    if dedup and all(geodesic(unquat(q[-1]), unquat(q[0])) * D < 0.05 for q in M.rot.values()): M.nf -= 1   # last key repeats the first: drop it for a clean loop
+    if dedup and (os.environ.get('E49_DEDUP') or all(geodesic(unquat(q[-1]), unquat(q[0])) * D < 0.05 for q in M.rot.values())): M.nf -= 1   # last key repeats the first: drop it for a clean loop
     chain_m = [(side + 'Arm', side + 'ForeArm'), (side + 'ForeArm', side + 'Hand'), (side + 'Hand', side + 'HandMiddle1')]
     P = lambda n: M.pos_rest(I[n])
     left = U(P('LeftUpLeg') - P('RightUpLeg')); up0 = P('Neck') - P('Hips'); up = U(up0 - np.dot(up0, left) * left); fwd = np.cross(left, up)
@@ -77,10 +84,10 @@ def main(sg, ab, anim='Idle', dedup=False, side='Left', carrier=False):
     # Agumon reference
     tr, mo = load_raw(ab); par = parents_of(ab); n = len(tr); fr = Player(tr, mo).idle
     ref = [[pose_track(tr[b][t], fr) for t in range(3)] for b in range(n)]
-    assert all(ref[b][2] == (4096, 4096, 4096) for b in [0] + [x - 1 for x in seg]), 'non-unit scale on the arm chain'
+    assert all(ref[b][2] == (4096, 4096, 4096) for b in [TB - 1] + [x - 1 for x in seg]), 'non-unit scale on the arm chain'
     W = World(par, n).update(ref); rot = lambda b: nrot(W[b]); pos = lambda b: W[b][:3, 3]
-    aleft = U(pos(11) - pos(15)); aup0 = pos(2) - pos(10); aup = U(aup0 - np.dot(aup0, aleft) * aleft); afwd = np.cross(aleft, aup)
-    BA = np.column_stack([aleft, aup, afwd]); offA = rot(1).T @ BA
+    aleft = U(pos(CFG['lb'][0]) - pos(CFG['lb'][1])); aup0 = CFG['up'](pos); aup = U(aup0 - np.dot(aup0, aleft) * aleft); afwd = np.cross(aleft, aup)
+    BA = np.column_stack([aleft, aup, afwd]); offA = rot(TB).T @ BA
     print(f'Agumon body frame (world): left={np.round(aleft, 2)} up={np.round(aup, 2)} forward={np.round(afwd, 2)} det={np.linalg.det(BA):.3f}  (expect left=+x as verified, forward ~ -z)')
     print(f'Mixamo body frame (world): left={np.round(left, 2)} up={np.round(up, 2)} forward={np.round(fwd, 2)} det={np.linalg.det(BM):.3f}; clip {M.nf} frames at {M.fps:.3f} fps')
     offs = {}
@@ -97,10 +104,10 @@ def main(sg, ab, anim='Idle', dedup=False, side='Left', carrier=False):
     QAr = [BA.T @ rot(b) @ CA[k] for k, b in enumerate(seg)]
     for k, nm in enumerate([f'{side}Arm->{seg[0]}', f'{side}ForeArm->{seg[1]}', f'{side}Hand->{seg[2]}']):
         print(f'reference frames in body coords, Mixamo T-pose vs Agumon idle, {nm}: differ by {geodesic(QMr[k], QAr[k]) * D:.1f} deg (bone direction by {ang(QMr[k][:, 1], QAr[k][:, 1]):.1f} deg)')
-    Rch = rot(1)
+    Rch = rot(TB)
     Qc = [BM.T @ M.Rw(chest, f) @ offM for f in range(M.nf)]      # carrier (chest) orientation in body coords; used only when carrier=True (E1.9)
     BAt = (lambda f: BA @ Qc[f]) if carrier else (lambda f: BA)
-    Rt = [BAt(f) @ (rot(1).T @ BA).T if carrier else Rch for f in range(M.nf)]
+    Rt = [BAt(f) @ (rot(TB).T @ BA).T if carrier else Rch for f in range(M.nf)]
     lu, lf = np.linalg.norm(M.off(I[side + 'ForeArm'])), np.linalg.norm(M.off(I[side + 'Hand'])); lm = lu + lf
     la = np.linalg.norm(offs[seg[0]]) + np.linalg.norm(offs[seg[1]])
     dirs_mix = []
@@ -155,7 +162,7 @@ def main(sg, ab, anim='Idle', dedup=False, side='Left', carrier=False):
         if pl.count <= 0: continue
         for t in range(1700):
             if not pl.blending:
-                Wt = Wd.update(pl.pose); Bt = nrot(Wt[1]) @ offA
+                Wt = Wd.update(pl.pose); Bt = nrot(Wt[TB]) @ offA
                 d1 = Bt.T @ (nrot(Wt[seg[0]]) @ offs[seg[0]]); d2 = Bt.T @ (nrot(Wt[seg[1]]) @ offs[seg[1]])
                 ud.append(ang(d1, BA.T @ dA[0])); el.append(180 - ang(-d1, d2))
             if pl.done or pl.keyframe >= pl.count - 1: break

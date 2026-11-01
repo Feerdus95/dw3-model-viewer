@@ -16,9 +16,8 @@ LO = 10
 def bob_keys(sg, ab, anim='Walk', dedup=True, still=False):
     M = Mix(sg, anim); I = M.idx; M.tra = {}
     js, b = read_glb(sg); a = next(x for x in js['animations'] if x['name'] == anim)
-    for c in a['channels']:
-        if c['target']['path'] == 'translation': M.tra[c['target']['node']] = accessor(js, b, a['samplers'][c['sampler']]['output']).astype(float)
-    if dedup and all(geodesic(unquat(q[-1]), unquat(q[0])) * D < 0.05 for q in M.rot.values()): M.nf -= 1
+    import e49_src; M.tra = e49_src.channels(js, b, a, 'translation')
+    if dedup and (os.environ.get('E49_DEDUP') or all(geodesic(unquat(q[-1]), unquat(q[0])) * D < 0.05 for q in M.rot.values())): M.nf -= 1
     P = lambda n, f=None: mix_pos(M, n, f)
     left = U(P('LeftUpLeg') - P('RightUpLeg')); up0 = P('Neck') - P('Hips'); up = U(up0 - np.dot(up0, left) * left)
     hp = np.array([P('Hips', f) for f in range(M.nf)]) * 100          # cm
