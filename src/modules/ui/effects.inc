@@ -272,28 +272,81 @@
                 hint("Click a frame to pick it: Ctrl+C, Ctrl+V, Ctrl+D and Del work on it, and Ctrl+Z undoes.");
             }
             if (!own.error.empty()) ImGui::TextColored(C_ERROR, IC_ERROR "  %s", own.error.c_str());
+            if (uiFx >= 0) ImGui::SetNextItemOpen(true, ImGuiCond_Once); /* --fx-open, for a --ui-shot */
             if (ImGui::TreeNode("Digimon levels")) {
                 hint("Which mods each partner plays. Saved at once to stages.json; the game reads it when it starts.");
-                if (ImGui::BeginTable("levels", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
-                    auto row = [&](int id, const std::string &name) {
-                        ImGui::PushID(id);
+                struct LevelRow {
+                    int id, level;
+                    std::string name;
+                };
+                std::vector<LevelRow> all;
+                int counts[5] = {};
+                auto add = [&](int id, const std::string &name) {
+                    auto l = ownLevels.find(id);
+                    int v = l == ownLevels.end() ? 0 : l->second;
+                    all.push_back({id, v, name}), counts[v]++;
+                };
+                for (const Fighter &f : g_game.fighters)
+                    if (!f.enemy && !f.converted && f.name.size() > 1) add(f.id, f.name);
+                for (const auto &it : PORT_DIGIMON) add(it.first, it.second + " (the port's)");
+                static char levelFind[64] = "";
+                static int levelShow = -1; /* -1 all of them, else that level (0 none yet) */
+                static const char *const LEVEL_NAME[5] = {"No level", "Rookie", "Champion", "Ultimate", "Mega"};
+                float comboW = ImGui::GetFontSize() * 9;
+                float findW = ImGui::GetContentRegionAvail().x - comboW - ImGui::GetStyle().ItemSpacing.x;
+                bool oneRow = findW >= comboW; /* else the two, each on its own row, as wide as the panel */
+                ImGui::SetNextItemWidth(oneRow ? findW : -FLT_MIN);
+                ImGui::InputTextWithHint("##levelfind", IC_SEARCH "  Search a Digimon", levelFind, sizeof levelFind);
+                if (oneRow) ImGui::SameLine();
+                ImGui::SetNextItemWidth(oneRow ? comboW : -FLT_MIN);
+                auto showLabel = [&](int s) {
+                    return s < 0 ? "All (" + std::to_string(all.size()) + ")" : std::string(LEVEL_NAME[s]) + " (" + std::to_string(counts[s]) + ")";
+                };
+                if (ImGui::BeginCombo("##levelshow", showLabel(levelShow).c_str())) {
+                    for (int s = -1; s < 5; s++)
+                        if (ImGui::Selectable(showLabel(s).c_str(), levelShow == s)) levelShow = s;
+                    ImGui::EndCombo();
+                }
+                tip("Only the Digimon of a level. No level: those that still play the Everyone mod");
+                auto lower = [](std::string s) {
+                    std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+                    return s;
+                };
+                std::string find = lower(levelFind);
+                std::vector<LevelRow> rows;
+                for (const LevelRow &r : all)
+                    if ((levelShow < 0 || r.level == levelShow) && lower(r.name).find(find) != std::string::npos) rows.push_back(r);
+                float lines = (float)std::min((int)rows.size() + 1, 14);
+                ImVec2 size(0, lines * ImGui::GetFrameHeightWithSpacing() + ImGui::GetStyle().CellPadding.y * 2);
+                if (rows.empty()) hint("No Digimon matches.");
+                else if (ImGui::BeginTable("levels", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Sortable | ImGuiTableFlags_ScrollY, size)) {
+                    ImGui::TableSetupScrollFreeze(0, 1);
+                    ImGui::TableSetupColumn("Digimon", ImGuiTableColumnFlags_DefaultSort);
+                    ImGui::TableSetupColumn("Level");
+                    ImGui::TableHeadersRow();
+                    const ImGuiTableColumnSortSpecs *sort = ImGui::TableGetSortSpecs()->Specs;
+                    bool byLevel = sort && sort->ColumnIndex == 1, down = sort && sort->SortDirection == ImGuiSortDirection_Descending;
+                    std::stable_sort(rows.begin(), rows.end(), [&](const LevelRow &a, const LevelRow &b) {
+                        if (byLevel && a.level != b.level) return down ? a.level > b.level : a.level < b.level;
+                        int c = a.name.compare(b.name);
+                        return !byLevel && down ? c > 0 : c < 0;
+                    });
+                    for (const LevelRow &r : rows) {
+                        ImGui::PushID(r.id);
                         ImGui::TableNextRow();
                         ImGui::TableNextColumn();
-                        ImGui::TextUnformatted(name.c_str());
+                        ImGui::AlignTextToFramePadding();
+                        ImGui::TextUnformatted(r.name.c_str());
                         ImGui::TableNextColumn();
-                        auto l = ownLevels.find(id);
-                        int v = l == ownLevels.end() ? 0 : l->second;
+                        int v = r.level;
                         ImGui::SetNextItemWidth(-FLT_MIN);
                         if (ImGui::Combo("##level", &v, "None\0Rookie\0Champion\0Ultimate\0Mega\0")) {
-                            if (v) ownLevels[id] = v;
-                            else ownLevels.erase(id);
+                            if (v) ownLevels[r.id] = v;
+                            else ownLevels.erase(r.id);
                             if (!levels_save(ownRoot, ownLevels)) note(NOTE_ERROR, "Can't write " + ownRoot + "/stages.json");
                         }
                         ImGui::PopID();
-                    };
-                    for (const Fighter &f : g_game.fighters)
-                        if (!f.enemy && !f.converted && f.name.size() > 1) row(f.id, f.name);
-                    for (const auto &it : PORT_DIGIMON) row(it.first, it.second + " (the port's)");
+                    }
                     ImGui::EndTable();
                 }
                 ImGui::TreePop();
