@@ -2,3 +2,4 @@ build/
 data/
 third_party/SDL3-*/
 test/
+__pycache__/
