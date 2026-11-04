@@ -68,6 +68,11 @@ bool json_parse(const char *&p, Json &j) {
 
 /* --- the folder --- */
 
+static uint32_t next_image_uid() {
+    static uint32_t uid = 0;
+    return ++uid;
+}
+
 const char *const EFFECT_LEVELS[5] = {"", "rookie", "champion", "ultimate", "mega"};
 
 std::string own_dir(const std::string &root, int id, int level, bool critical) {
@@ -191,7 +196,7 @@ bool CustomEffect::load(const std::string &d) {
     std::sort(sorted.begin(), sorted.end());
     for (const std::string &name : sorted) {
         CustomImage img = load_png(dir + "/" + name, error);
-        if (img.w > 0) images[name] = std::move(img);
+        if (img.w > 0) img.uid = next_image_uid(), images[name] = std::move(img);
     }
 
     std::ifstream f(dir + "/effect.json", std::ios::binary);
@@ -260,7 +265,7 @@ int CustomEffect::import(const std::vector<std::string> &paths) {
             error = to + ": " + SDL_GetError();
             continue;
         }
-        images[name] = std::move(img);
+        img.uid = next_image_uid(), images[name] = std::move(img);
         frames.push_back({name, 2});
         n++;
     }
@@ -280,14 +285,19 @@ int CustomEffect::frameAt(int tick) const {
     return frames.empty() ? -1 : (int)frames.size() - 1;
 }
 
-/* as the port draws it: the image 240 * scale screen pixels high, its middle
-   at the point moved by (x, y), blended by its alpha or added */
-void CustomEffect::draw(int tick, uint32_t *rgba, int w, int h, int ox, int oy) const {
+const CustomImage *CustomEffect::imageAt(int tick) const {
     int f = frameAt(tick);
-    if (f < 0) return;
+    if (f < 0) return nullptr;
     auto it = images.find(frames[f].file);
-    if (it == images.end()) return;
-    const CustomImage &img = it->second;
+    return it == images.end() ? nullptr : &it->second;
+}
+
+/* where it reaches on a canvas at the PSX's own 320x240 pixels, for the view's fit (the view itself draws the image on the card, mod_tex): the image
+   240 * scale screen pixels high, its middle at the point moved by (x, y), blended by its alpha or added */
+void CustomEffect::draw(int tick, uint32_t *rgba, int w, int h, int ox, int oy) const {
+    const CustomImage *found = imageAt(tick);
+    if (!found) return;
+    const CustomImage &img = *found;
     float dh = 240.0f * scale, dw = dh * img.w / img.h;
     float x0 = ox + x - dw / 2, y0 = oy + y - dh / 2;
     for (int py = std::max(0, (int)floorf(y0)); py < std::min(h, (int)ceilf(y0 + dh)); py++) {

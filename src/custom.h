@@ -38,6 +38,7 @@ struct CustomFrame {
 struct CustomImage {
     int w = 0, h = 0;
     std::vector<uint32_t> px; /* RGBA, R in the low byte */
+    uint32_t uid = 0; /* these pixels, for the view's texture of them: a copy has the same one, new pixels a new one */
 };
 
 struct CustomEffect {
@@ -59,6 +60,7 @@ struct CustomEffect {
     int import(const std::vector<std::string> &paths);
     int duration() const; /* in ticks */
     int frameAt(int tick) const; /* the frame playing at TICK, -1: none */
+    const CustomImage *imageAt(int tick) const; /* its image, or null */
     /* the frame at TICK over RGBA pixels (W x H), the effect's point at OX, OY */
     void draw(int tick, uint32_t *rgba, int w, int h, int ox, int oy) const;
 };

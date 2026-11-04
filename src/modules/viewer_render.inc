@@ -55,6 +55,9 @@ struct SpriteDraw {
     float pos[3] = {0, 0, 0};
     int screen = 0;
     bool front = false;
+    /* a mod's image at its own size, premultiplied (mod_tex): its height over the screen's (240 lines), its shape, its offset in screen pixels, added or blended by its alpha */
+    bool mod = false, add = false;
+    float scale = 1, aspect = 320.0f / 240, off[2] = {0, 0};
 };
 
 /* A model other than the scene's (an effect model), posed in the scene's
@@ -232,6 +235,7 @@ static void draw_sprites(const std::vector<SpriteDraw> &sprites, const M4 &vp, i
             q.c[1] = (m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13]) / cw;
             q.c[2] = (m[2] * p[0] + m[6] * p[1] + m[10] * p[2] + m[14]) / cw;
         }
+        q.c[0] += s.off[0] * 2.0f / 240 * h / w, q.c[1] -= s.off[1] * 2.0f / 240;
         qs.push_back(q);
     }
     /* the front layer last, the rest far to near */
@@ -243,18 +247,20 @@ static void draw_sprites(const std::vector<SpriteDraw> &sprites, const M4 &vp, i
     GL(glBindVertexArray)(g_lineVao);
     GL(glActiveTexture)(GL_TEXTURE0);
     GL(glUniform1i)(GL(glGetUniformLocation)(g_sprite, "tex"), 0);
-    GL(glUniform2f)(GL(glGetUniformLocation)(g_sprite, "h"), 320.0f / 240 * h / w, 1.0f);
     GL(glEnable)(GL_BLEND);
-    GL(glBlendFunc)(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     GL(glDepthFunc)(GL_LEQUAL);
     GL(glDepthMask)(GL_FALSE);
     for (const Q &q : qs) {
         if (q.s->front || (q.s->screen == 1)) GL(glDisable)(GL_DEPTH_TEST);
         else GL(glEnable)(GL_DEPTH_TEST);
         GL(glBindTexture)(GL_TEXTURE_2D, q.s->tex);
+        if (q.s->mod) mod_blend(q.s->add);
+        else GL(glBlendFunc)(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        GL(glUniform2f)(GL(glGetUniformLocation)(g_sprite, "h"), q.s->scale * q.s->aspect * h / w, q.s->scale);
         GL(glUniform3f)(GL(glGetUniformLocation)(g_sprite, "c"), q.c[0], q.c[1], q.c[2]);
         GL(glDrawArrays)(GL_TRIANGLE_STRIP, 0, 4);
     }
+    GL(glBlendFunc)(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     GL(glDisable)(GL_BLEND);
     GL(glDepthMask)(GL_TRUE);
 }

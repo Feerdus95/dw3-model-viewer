@@ -302,6 +302,36 @@ static void upload(Scene &s) {
     }
 }
 
+/* A mod's image at its own resolution, made as the port's image_tex makes it: premultiplied, so that filtering doesn't bleed the transparent
+   texels' colour into the edges, and mipmapped, so that a big image shrunk to the view keeps its detail. Drawn with mod_blend's blending */
+static GLuint mod_tex(const CustomImage &img) {
+    static std::map<uint32_t, GLuint> made;
+    auto it = made.find(img.uid);
+    if (it != made.end()) return it->second;
+    /* ponytail: forgets them all at the cap (about 300 MB of 1280x960); by image size if much bigger art comes */
+    if (made.size() >= 48) {
+        for (const auto &m : made) GL(glDeleteTextures)(1, &m.second);
+        made.clear();
+    }
+    std::vector<uint32_t> pm(img.px);
+    for (uint32_t &p : pm) {
+        uint32_t a = p >> 24;
+        p = (p & 0xFF000000u) | ((p & 255) * a / 255) | (((p >> 8 & 255) * a / 255) << 8) | (((p >> 16 & 255) * a / 255) << 16);
+    }
+    GLuint tex = 0;
+    GL(glGenTextures)(1, &tex);
+    GL(glBindTexture)(GL_TEXTURE_2D, tex);
+    GL(glPixelStorei)(GL_UNPACK_ALIGNMENT, 4);
+    GL(glTexImage2D)(GL_TEXTURE_2D, 0, GL_RGBA8, img.w, img.h, 0, GL_RGBA, GL_UNSIGNED_BYTE, pm.data());
+    GL(glGenerateMipmap)(GL_TEXTURE_2D);
+    GL(glTexParameteri)(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    GL(glTexParameteri)(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    GL(glTexParameteri)(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    GL(glTexParameteri)(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    return made[img.uid] = tex;
+}
+static void mod_blend(bool add) { GL(glBlendFunc)(GL_ONE, add ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA); }
+
 static GLuint rgba_texture(GLuint tex, const std::vector<uint32_t> &px, int w, int h) {
     if (!tex) GL(glGenTextures)(1, &tex);
     GL(glBindTexture)(GL_TEXTURE_2D, tex);

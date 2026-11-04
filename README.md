@@ -148,7 +148,7 @@ trademark of its owners.
     paste all the ticks at once (`2 2 3 3 4 4 4`) or set each frame's PNG and ticks
     (reorder, duplicate, copy and paste, remove, undo), the offset, scale and blend (alpha
     or add), switch the mod off or delete it; Save writes the folder's `effect.json`, which
-    the port plays as shown. Each folder has its own timing. A level with no mod plays the
+    the port plays as shown, at the images' own resolution. Each folder has its own timing. A level with no mod plays the
     nearest lower level's, then the Everyone mod, then the original; the panel says which and
     the view plays it.
     Digimon levels sets each partner's level (`stages.json`; search, filter by level and sort

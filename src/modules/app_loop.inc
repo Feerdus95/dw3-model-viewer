@@ -765,8 +765,10 @@
             if (fx.id >= 0) {
                 if (fxFitPending) fx_fit(vw, vh), fxFitPending = false;
                 int t = (int)fxTime;
+                CustomEffect *modShown = own_shown();
                 if (t != fxDrawn) {
-                    fx_render(t, FX_BG);
+                    if (modShown) std::fill(fxPx.begin(), fxPx.end(), FX_BG); /* its image goes on it below, at the image's own resolution */
+                    else fx_render(t, FX_BG);
                     fxTex = rgba_texture(fxTex, fxPx, FXC_W, FXC_H);
                     fxDrawn = t;
                 }
@@ -775,6 +777,12 @@
                 float cx = vc.x - fxPan[0] * fxZoom, cy = vc.y - fxPan[1] * fxZoom;
                 dl->AddImage((ImTextureID)(intptr_t)fxTex, ImVec2(cx - FXC_W / 2 * fxZoom, cy - FXC_H / 2 * fxZoom),
                              ImVec2(cx + FXC_W / 2 * fxZoom, cy + FXC_H / 2 * fxZoom));
+                if (const CustomImage *im = modShown ? modShown->imageAt(t) : nullptr) {
+                    float mh = 240 * modShown->scale * fxZoom, mw = mh * im->w / im->h, mx = cx + modShown->x * fxZoom, my = cy + modShown->y * fxZoom;
+                    dl->AddCallback([](const ImDrawList *, const ImDrawCmd *c) { mod_blend(c->UserCallbackData != nullptr); }, modShown->add ? (void *)1 : nullptr);
+                    dl->AddImage((ImTextureID)(intptr_t)mod_tex(*im), ImVec2(mx - mw / 2, my - mh / 2), ImVec2(mx + mw / 2, my + mh / 2));
+                    dl->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
+                }
                 dl->AddRect(ImVec2(cx - FX_W / 2 * fxZoom, cy - FX_H / 2 * fxZoom), ImVec2(cx + FX_W / 2 * fxZoom, cy + FX_H / 2 * fxZoom),
                             IM_COL32(255, 255, 255, 60));
                 dl->AddLine(ImVec2(cx - 8, cy), ImVec2(cx + 8, cy), IM_COL32(255, 220, 80, 160));
@@ -858,13 +866,17 @@
                     continue;
                 }
                 int tick = (int)shots[k].t;
-                if (CustomEffect *o = shot_own(shots[k].id))
-                    alpha_frame([&](uint32_t *p) { o->draw(tick, p, FX_W, FX_H, FX_W / 2, FX_H / 2); }, shotPx, shotWhite);
-                else
-                    fx_alpha(*e, tick, shotPx, shotWhite);
-                shotTex[k] = rgba_texture(shotTex[k], shotPx, FX_W, FX_H);
                 SpriteDraw d;
-                d.tex = shotTex[k], d.screen = shots[k].screen, d.front = fx_front(shots[k].id);
+                if (CustomEffect *o = shot_own(shots[k].id)) { /* at the image's own resolution, as the port draws it */
+                    const CustomImage *im = o->imageAt(tick);
+                    if (!im) continue;
+                    d.tex = mod_tex(*im), d.mod = true, d.add = o->add, d.scale = o->scale, d.aspect = (float)im->w / im->h;
+                    d.off[0] = o->x, d.off[1] = o->y;
+                } else {
+                    fx_alpha(*e, tick, shotPx, shotWhite);
+                    d.tex = shotTex[k] = rgba_texture(shotTex[k], shotPx, FX_W, FX_H);
+                }
+                d.screen = shots[k].screen, d.front = fx_front(shots[k].id);
                 memcpy(d.pos, gp, sizeof d.pos);
                 spriteDraws.push_back(d);
             }
