@@ -73,6 +73,7 @@ struct View {
     bool marks = false; /* a cross where each effect of a script is */
     bool guide = false; /* the aim guide: rays from the hand and the ball to what they hit (flame_adjust.inc) */
     bool dummy = false; /* a stand-in enemy at its battle home, and the ground out to it */
+    float root[3] = {0, 0, 0}; /* how far from its home a played script has moved the model, in its PSX space */
     bool playing = true, loop = true;
     float speed = 1, ticks = 0;
     int texCombo = 0;

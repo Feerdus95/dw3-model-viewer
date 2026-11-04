@@ -154,6 +154,7 @@
            for an enemy of 2 cameras, the most common */
         const Fighter *f = scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter];
         cand.orig = f && !f->enemy && f->cameras.size() > 1 ? 1 : -1;
+        if (f) sm_init(run.move, *f);
         if (f && cand.orig >= 0) {
             int w[14];
             cam_words(f->cameras[cand.orig], w), run.a.cut(w, cand.orig);
@@ -224,6 +225,7 @@
         const std::vector<ScriptLine> &sc = m.scripts[run.script];
         const Fighter *f = scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter];
         float budget = ticks;
+        sm_step(run.move, ticks);
         /* the battle camera's fades, a frame at a time */
         run.camAcc += ticks;
         int frames = (int)run.camAcc;
@@ -241,6 +243,10 @@
                 if (!m.motionDone) return;
                 run.waitMotion = false;
             }
+            if (run.waitJump) {
+                if (run.move.jump) return;
+                run.waitJump = false;
+            }
             if (run.pc >= (int)sc.size()) return void(run.on = false);
             const ScriptLine &ln = sc[run.pc++];
             if (ln.text == "end") {
@@ -249,6 +255,8 @@
                 return;
             }
             if (ln.motion > 0 && ln.motion <= (int)m.motions.size()) m.setMotion(ln.motion);
+            if (f) sm_command(run.move, ln);
+            if (f && ln.jump == 0) run.waitJump = true;
             if (f && ln.camMode) {
                 cams_command(view, scene, run, cand, choreo, *f, ln, [&] {
                     note(NOTE_INFO, "This script has a camera with a rotation or a roll: they are applied as the game's library does, unchecked, and a roll is not drawn.");

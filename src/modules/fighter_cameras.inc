@@ -5,11 +5,91 @@
 
 /* The game's camera the script has set (or the battle's default view), kept while it plays; the battle camera twice, on the same
    script: A with the cameras the script asks for, B with the candidate (or the application) in their place */
+/* The fighter's place while a script plays (move.c, FIGHTSTG_faceModel), in the game's coordinates: its jump and its move */
+struct ScriptMove {
+    bool enemy = false;
+    float pos[3] = {0, 0, 0}, home[3] = {0, 0, 0};
+    int jump = 0; /* the kind of the jump under way */
+    float jumpT = 0, jumpY = 0, jumpDist = 0;
+    float moveT = 0, moveTime = 0, from[3] = {0, 0, 0}, to[3] = {0, 0, 0};
+};
+static void sm_init(ScriptMove &m, const Fighter &f) {
+    m = ScriptMove{};
+    m.enemy = f.enemy;
+    m.home[1] = (float)-f.height, m.home[2] = (float)(f.distance + 0x1400) * (f.enemy ? 1 : -1);
+    std::copy(m.home, m.home + 3, m.pos);
+}
+/* the jumps' height and speed, by kind from 1 (FIGHTSTG_jumps): the curves' argument goes to 0x1000 at SPEED a frame */
+static const int SM_JUMPS[6][2] = {{640, 136}, {1280, 102}, {1920, 81}, {2560, 64}, {1280, 64}, {0, 42}};
+static void sm_jump_at(ScriptMove &m, float t) {
+    const float PI = 3.14159265f;
+    float e0 = sinf(PI * t / 8192), e1 = cosf(PI * t / 8192), e2 = sinf(PI * t / 4096);
+    int height = SM_JUMPS[m.jump - 1][0];
+    if (m.jump == 4 || m.jump == 5) m.pos[1] = m.home[1] - e2 * height;
+    else if (m.jump == 6) m.pos[1] = e0 * m.home[1];
+    else m.pos[1] = e1 * m.jumpY - e2 * height;
+    if (m.jump == 4) m.pos[2] = m.home[2] + e0 * m.jumpDist;
+    if (m.jump == 5) m.pos[2] = m.home[2] + m.jumpDist - e0 * m.jumpDist;
+}
+static void sm_jump(ScriptMove &m, int kind, int distance) {
+    if (kind < 1 || kind > 6) return;
+    m.jump = kind, m.jumpT = 0, m.jumpY = m.pos[1], m.jumpDist = 0;
+    if (kind == 4) m.jumpDist = (float)distance + 0x2800;
+    if (kind == 5) m.jumpDist = fabsf(m.pos[2] - m.home[2]);
+    if (m.enemy) m.jumpDist = -m.jumpDist;
+}
+static void sm_move(ScriptMove &m, const float to[3], int time) {
+    if (time <= 0) {
+        std::copy(to, to + 3, m.pos), m.moveTime = 0;
+        return;
+    }
+    std::copy(m.pos, m.pos + 3, m.from), std::copy(to, to + 3, m.to);
+    m.moveT = 0, m.moveTime = (float)time;
+}
+/* a script line's move of its own model (FIGHTSTG_runScriptModel) */
+static void sm_command(ScriptMove &m, const ScriptLine &ln) {
+    if (ln.jump > 0) sm_jump(m, ln.jump, ln.jumpDist);
+    if (ln.moveCmd == 3) {
+        float to[3] = {(float)ln.movePos[0], (float)-ln.movePos[1], (float)-ln.movePos[2]};
+        sm_move(m, to, ln.moveTime);
+    } else if (ln.moveCmd == 7) sm_move(m, m.home, ln.moveTime);
+    else if (ln.moveCmd == 8) {
+        float to[3] = {m.home[0], m.home[1], m.home[2] + (m.enemy ? -0x2800 : 0x2800)};
+        sm_move(m, to, ln.moveTime);
+    }
+}
+static void sm_step(ScriptMove &m, float ticks) {
+    if (m.jump) {
+        m.jumpT += ticks * SM_JUMPS[m.jump - 1][1];
+        if (m.jumpT < 0x1000) sm_jump_at(m, m.jumpT);
+        else {
+            if (m.jump == 4 || m.jump == 5 || m.jump == 6) m.pos[1] = m.home[1];
+            else m.pos[1] = 0;
+            if (m.jump == 4) m.pos[2] = m.home[2] + m.jumpDist;
+            if (m.jump == 5) m.pos[2] = m.home[2];
+            m.jump = 0;
+        }
+    }
+    if (m.moveTime > 0) {
+        m.moveT += ticks;
+        float k = std::min(m.moveT / m.moveTime, 1.0f);
+        for (int c = 0; c < 3; c++) m.pos[c] = m.from[c] + (m.to[c] - m.from[c]) * k;
+        if (k >= 1) m.moveTime = 0;
+    }
+}
+/* how far from its home the model is, in the viewer's space for it: a partner's is turned 0x800 about y, so x and z flip */
+static void sm_root(const ScriptMove &m, float out[3]) {
+    float a = m.enemy ? 1.0f : -1.0f;
+    out[0] = a * (m.pos[0] - m.home[0]), out[1] = m.pos[1] - m.home[1], out[2] = a * (m.pos[2] - m.home[2]);
+}
+
 struct ScriptRun {
     bool on = false;
     int script = 0, pc = 0;
     float wait = 0;
     bool waitMotion = false;
+    bool waitJump = false;
+    ScriptMove move;
     bool camSet = false;
     Camera cam;
     float fov = 0.8f;
@@ -195,6 +275,35 @@ static void cams_command(View &view, const Scene &scene, ScriptRun &run, Candida
 static int cams_selftest() {
     int bad = 0;
     auto ok = [&](bool c, const char *what) { printf("%s  %s\n", c ? "ok  " : "FAIL", what), bad += !c; };
+    { /* a Fight: 9984 forward (jump 4 forwards -256), over 64 ticks and through 2560 high half way, towards the stand-in in the view, and back */
+        Fighter g;
+        g.distance = 384;
+        ScriptMove m;
+        sm_init(m, g);
+        float r[3];
+        ok(m.home[2] == -5504, "a partner's home is 0x1400 + distance on its side");
+        ScriptLine there, back;
+        there.jump = 4, there.jumpDist = -256, back.jump = 5;
+        sm_command(m, there);
+        sm_step(m, 32);
+        ok(fabsf(m.pos[1] - (m.home[1] - 2560)) < 1, "half way through the jump it is at its height");
+        sm_root(m, r);
+        ok(r[2] < 0 && r[1] < 0, "it goes up and towards the enemy, in the model's space");
+        sm_step(m, 32);
+        sm_root(m, r);
+        ok(m.jump == 0 && fabsf(m.pos[2] - (m.home[2] + 9984)) < 1 && r[1] == 0, "after 64 ticks it has landed 9984 on");
+        sm_command(m, back);
+        sm_step(m, 64);
+        sm_root(m, r);
+        ok(m.jump == 0 && r[0] == 0 && r[1] == 0 && r[2] == 0, "jump 5 takes it home");
+        Fighter e = g;
+        e.enemy = true;
+        sm_init(m, e);
+        sm_command(m, there);
+        sm_step(m, 64);
+        sm_root(m, r);
+        ok(fabsf(m.pos[2] - (m.home[2] - 9984)) < 1 && r[2] < 0, "an enemy goes the other way, its model forward too");
+    }
     const Fighter *f = nullptr;
     for (const Fighter &x : g_game.fighters)
         if (!f && !x.enemy && x.cameras.size() >= 3) f = &x;

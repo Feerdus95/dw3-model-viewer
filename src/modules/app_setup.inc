@@ -3,6 +3,7 @@ int main(int argc, char **argv) {
     std::string shot, open_path, data;
     std::string start_obj; /* an OBJ to import once the model is open */
     std::string uiShot; /* --ui-shot FILE: the whole window, after a few frames, to a BMP (a developer's check of the panels at a size) */
+    int uiScript = -1, uiScriptTick = 0; /* --script N --script-tick T: in a --ui-shot, script N played for T ticks */
     int uiSection = -1, uiTab = -1, uiW = 0, uiH = 0, uiStage = -1, uiFx = -1, uiFxLevel = 0; /* --stage-open N, --fx-open N [--fx-level L]: that stage, that effect open (its mod for that level) */
     float uiPanels[2] = {};
     std::string uiWin; /* --window about|help|log|catalog|pcat: that window open in the --ui-shot */
@@ -35,6 +36,8 @@ int main(int argc, char **argv) {
         else if (a == "--window" && i + 1 < argc) uiWin = argv[++i];
         else if (a == "--fx-open" && i + 1 < argc) uiFx = atoi(argv[++i]);
         else if (a == "--fx-level" && i + 1 < argc) uiFxLevel = atoi(argv[++i]);
+        else if (a == "--script" && i + 1 < argc) uiScript = atoi(argv[++i]);
+        else if (a == "--script-tick" && i + 1 < argc) uiScriptTick = atoi(argv[++i]);
         else if (a == "--win" && i + 1 < argc) sscanf(argv[++i], "%dx%d", &uiW, &uiH);
         else if (a == "--panels" && i + 1 < argc) sscanf(argv[++i], "%f,%f", uiPanels, uiPanels + 1);
         else if (a == "--key" && i + 1 < argc) shot_key = atoi(argv[++i]);

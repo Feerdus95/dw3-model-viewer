@@ -101,8 +101,9 @@ trademark of its owners.
     view says so). Effect models (the 3D effects, like Thundermon's lightning ring)
     play from their first motion where the script puts them. A script's "own" sprite
     effect is its technique's: pick which technique's look it plays (the Fight
-    command's is effect 2). It leaves out the jumps and moves, the other side's
-    fighter, the sounds, the fades, the stages and the models a script adds.
+    command's is effect 2). The fighter makes the script's jumps and moves, so a Fight
+    leaps to the enemy (View > Stand-in enemy) and back. It leaves out the other side's
+    fighter, the sounds, the fades, the stages, the models a script adds and hiding a model.
     A checkbox picks what plays for an effect that has own images in the mods
     folder: those (the mod) or the original sprites.
 
@@ -448,8 +449,8 @@ The reading is a port of what the game itself does, from the dw3_decomp decompil
 
 - **Export and replacement** of models and textures, beyond saving a texture as a BMP.
 - **Reading the disc without Python**: dropping the disc image on the viewer.
-- **Playing a whole action script**: sounds, the jumps and moves, and the other side's
-  model and its shots; a script's motions, cameras, sprite effects and effect models play.
+- **Playing a whole action script**: sounds, hiding a model, and the other side's
+  model and its shots; a script's motions, cameras, jumps and moves, sprite effects and effect models play.
 - **The camera's roll**: a camera command's roll is read and kept, but the view does not draw it.
 - **A timeline for a sequence**: its shots are edited one by one, not on a strip.
 - **Names in other languages**: they are the English ones.

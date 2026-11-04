@@ -219,6 +219,7 @@ static std::vector<ScriptLine> read_script(const uint8_t *p, const uint8_t *end)
             case 3: {
                 int x = next(), y = next(), z = next(), t = next();
                 l.text = fmt("model %s: move to %d, %d, %d over %d", m, x, y, z, t);
+                if (type == 0) l.moveCmd = 3, l.movePos[0] = x, l.movePos[1] = y, l.movePos[2] = z, l.moveTime = t;
                 break;
             }
             case 4: {
@@ -229,12 +230,18 @@ static std::vector<ScriptLine> read_script(const uint8_t *p, const uint8_t *end)
             }
             case 5:
                 if (arg == 0) l.text = fmt("model %s: wait for its jump", m);
-                else if (arg == 4) l.text = fmt("model %s: jump 4 forwards %d", m, next());
+                else if (arg == 4) l.jumpDist = next(), l.text = fmt("model %s: jump 4 forwards %d", m, l.jumpDist);
                 else l.text = fmt("model %s: jump %d", m, arg);
+                if (type == 0) l.jump = arg;
                 break;
             case 6: l.text = fmt("add fighter %d as %s", arg, m); break;
-            case 7: l.text = fmt("model %s: home over %d", m, next()); break;
-            case 8: l.text = fmt("model %s: 0x2800 from home over %d", m, next()); break;
+            case 7:
+            case 8: {
+                int t = next();
+                l.text = cmd == 7 ? fmt("model %s: home over %d", m, t) : fmt("model %s: 0x2800 from home over %d", m, t);
+                if (type == 0) l.moveCmd = cmd, l.moveTime = t;
+                break;
+            }
             case 9: l.text = fmt("remove %s", m); break;
             default: l.text = fmt("model %s: command %d %d", m, cmd, arg); break;
             }

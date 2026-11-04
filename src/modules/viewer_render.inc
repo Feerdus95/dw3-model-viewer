@@ -352,8 +352,8 @@ static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vec
         GL(glDisable)(GL_BLEND);
         GL(glDepthMask)(GL_TRUE);
     };
-    const M4 same = {{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}};
-    draw_model(s, same);
+    const M4 root = {{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, v.root[0], v.root[1], v.root[2], 1}};
+    draw_model(s, root);
     for (const ExtraModel &e : extras)
         if (e.scene && e.scene->model && e.scene->vao) draw_model(*e.scene, e.pre);
     GL(glDisable)(GL_CULL_FACE);
@@ -379,7 +379,7 @@ static void render(Scene &s, View &v, int x, int y, int w, int h, const std::vec
         std::vector<float> l;
         for (size_t b = 1; b < m.bones.size(); b++) {
             const float *w = m.pose[b].world, *pw = m.pose[m.bones[b].parent].world;
-            float a[3] = {pw[12], -pw[13], -pw[14]}, c[3] = {w[12], -w[13], -w[14]};
+            float a[3] = {pw[12] + v.root[0], -pw[13] - v.root[1], -pw[14] - v.root[2]}, c[3] = {w[12] + v.root[0], -w[13] - v.root[1], -w[14] - v.root[2]};
             bool sel = b < s.mark.size() ? s.mark[b] == 2 : (int)b == s.selected;
             line(l, a, c, sel ? 1.0f : 0.2f, sel ? 0.9f : 1.0f, sel ? 0.2f : 0.4f);
         }

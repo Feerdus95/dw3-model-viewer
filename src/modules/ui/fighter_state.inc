@@ -26,10 +26,10 @@
         }
     };
 
-    /* A script played as the battle runs it: motions, waits, cameras and the
-       sprite effects it starts, which draw over the view where the game
+    /* A script played as the battle runs it: motions, waits, cameras, its model's jumps
+       and moves and the sprite effects it starts, which draw over the view where the game
        would put them. It leaves out what the viewer has no model for: the
-       jumps and moves, the other side, the sounds, fades and added models */
+       other side, the sounds, fades and added models, and a model hidden by the script */
     struct FxShot {
         int id;
         float t, pos[3];

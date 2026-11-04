@@ -8,6 +8,15 @@
     if (uiStage >= 0) open_stage(uiStage), section = STAGES;
     if (uiFx >= 0) ownLevel = uiFxLevel, pick_effect(uiFx, true), section = EFFECTS;
     if (uiSection >= 0 && uiSection < SECTIONS) section = uiSection;
+    if (uiScript >= 0 && scene.model) { /* --script: as played, then paused there */
+        view.dummy = shot_dummy;
+        run_script(uiScript);
+        for (int i = 0; i < uiScriptTick; i++) scene.model->advance(1), scene.model->evaluate(), run_step(1 / 60.0f);
+        view.playing = false;
+        float r[3];
+        sm_root(run.move, r);
+        SDL_Log("script %d tick %d: pc %d, %.0f %.0f %.0f from home", uiScript, uiScriptTick, run.pc, r[0], r[1], r[2]);
+    }
     while (running) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
@@ -1132,6 +1141,8 @@
             ghostOn = pcatArm >= 0 && section == STAGES && stage_on() && inView && !ImGui::GetIO().WantCaptureMouse &&
                       ground_hit(view, vw, vh, mp.x - vx, mp.y - vy, ghostAt);
             if (stage_on()) props_build(propQuads, propLines);
+            if (run.on) sm_root(run.move, view.root);
+            else view.root[0] = view.root[1] = view.root[2] = 0;
             std::vector<ExtraModel> drawModels = extraModels;
             if (view.dummy && !scene.fighters.empty()) dummy_extras(scene.fighters[scene.fighter], drawModels);
             if (view.guide && scene.model) guide_lines(*scene.model, drawModels, propLines);
