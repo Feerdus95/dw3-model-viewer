@@ -931,7 +931,7 @@
             char t[160];
             if (section == EFFECTS)
                 snprintf(t, sizeof t, IC_EFFECT "  2D effect%s   zoom %.1fx%s", fx.id >= 0 ? (" " + std::to_string(fx.id)).c_str() : "", fxZoom,
-                         ownShow && fx.id >= 0 ? "   own images" : "");
+                         fx.id >= 0 && own_shown() ? "   own images" : "");
             else if (section == TEXTURES) snprintf(t, sizeof t, IC_TEXTURE "  2D texture page   zoom %.1fx", view.texZoom);
             else if (stage_on()) snprintf(t, sizeof t, IC_STAGE "  3D stage %d", stageId);
             else if (scene.model && view.gameCamera >= 0 && !scene.fighters.empty())

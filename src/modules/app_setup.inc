@@ -359,6 +359,7 @@ int main(int argc, char **argv) {
     /* its own images for the native port (custom.h), in <root>/<id>/ (the
        port's data/mods/effects, kept in effects_dir.txt by the exe) */
     CustomEffect own;
+    CustomEffect ownFb; /* what the game plays while the open folder has nothing to play, when that's a mod */
     bool ownShow = false, ownCritical = false, ownDirty = false;
     int ownLevel = 0; /* the Digimon level whose images are open (EFFECT_LEVELS), 0: the base ones */
     std::string ownFallback; /* what plays while the open folder has nothing to play */
@@ -515,15 +516,24 @@ int main(int argc, char **argv) {
     };
     auto own_load = [&]() {
         own.load(own_dir(ownRoot, fx.id, ownLevel, ownCritical));
-        ownShow = !own.frames.empty(), ownDirty = false, fxDrawn = -1;
+        ownDirty = false, fxDrawn = -1;
         ownIds = own_effects(ownRoot);
         ownFallback = "the original effect";
+        ownFb = CustomEffect{};
         for (const OwnFolder &o : own_order(ownRoot, fx.id, ownLevel, ownCritical))
             if (o.dir != own.dir && own_plays(o.dir)) {
-                static const char *const NAMES[5] = {"the base mod", "the Rookie mod", "the Champion mod", "the Ultimate mod", "the Mega mod"};
+                static const char *const NAMES[5] = {"the Everyone mod", "the Rookie mod", "the Champion mod", "the Ultimate mod", "the Mega mod"};
                 ownFallback = std::string(NAMES[o.level]) + (o.critical ? "'s critical hit" : "");
+                ownFb.load(o.dir);
                 break;
             }
+        ownShow = !own.frames.empty() || !ownFb.frames.empty();
+    };
+    /* what the view plays instead of the original: the open folder, or what the game plays while it has nothing to play */
+    auto own_shown = [&]() -> CustomEffect * {
+        if (!ownShow) return nullptr;
+        if (!own.frames.empty()) return &own;
+        return ownFb.frames.empty() ? nullptr : &ownFb;
     };
     /* the list's groups: the effects no script starts, several Digimon's do
        or a technique's does, and each Digimon's own (its Black King, MP and
@@ -548,7 +558,7 @@ int main(int argc, char **argv) {
         }
         fxGrouped = true;
     };
-    auto fx_length = [&]() { return ownShow ? own.duration() : fx.duration; };
+    auto fx_length = [&]() { CustomEffect *o = own_shown(); return o ? o->duration() : fx.duration; };
     auto open_effect = [&](int id, bool select) {
         if (!fx.load(id, g_data)) status = fx.error;
         fxTime = 0, fxDrawn = -1, fxPlaying = true, fxSelect = select;
@@ -575,7 +585,8 @@ int main(int argc, char **argv) {
     };
     auto fx_render = [&](int t, uint32_t bg) {
         std::fill(fxPx.begin(), fxPx.end(), bg);
-        if (fx.id >= 0 && ownShow) own.draw(t, fxPx.data(), FXC_W, FXC_H, FXC_W / 2, FXC_H / 2);
+        CustomEffect *o = own_shown();
+        if (fx.id >= 0 && o) o->draw(t, fxPx.data(), FXC_W, FXC_H, FXC_W / 2, FXC_H / 2);
         else if (fx.id >= 0) fx.draw(t, fxPx.data(), FXC_W, FXC_H, FXC_W / 2, FXC_H / 2);
     };
     /* the view on all the effect draws over its length, in the view's W x H */

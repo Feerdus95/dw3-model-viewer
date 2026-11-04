@@ -106,7 +106,7 @@
             int level = ownLevel, crit = ownCritical;
             if (segmented("level", &level, {"Everyone", "Rookie", "Champion", "Ultimate", "Mega"})) reload_own(ownCritical, level);
             if (ownLevel == 0) {
-                hint("Plays for any Digimon with no mod for its level.");
+                hint("Plays for every enemy, and for any partner with no mod for its level.");
             } else {
                 std::set<std::string> who;
                 for (const Fighter &f : g_game.fighters) {
@@ -126,9 +126,9 @@
             else if (own.frames.empty()) chip("None yet", C_DIM);
             else if (!own.active) chip("Off", C_DIM);
             else chip(own.hasJson ? "Saved" : "PNGs only", C_ACCENT);
-            if (own.frames.empty()) hint("Nothing here yet: these Digimon show %s.", ownFallback.c_str());
-            if (check_box("Show them in the view", &ownShow)) fxTime = 0, fxDrawn = -1;
-            tip("Instead of the original effect");
+            if (own.frames.empty()) hint("Nothing here yet: these Digimon play %s, which the view shows.", ownFallback.c_str());
+            if (check_box("Show the mod in the view", &ownShow)) fxTime = 0, fxDrawn = -1;
+            tip("Off, the view shows the original effect");
             if (ImGui::Button(IC_IMPORT "  Import PNGs...")) {
                 static const SDL_DialogFileFilter PNG = {"PNG images", "png"};
                 SDL_ShowOpenFileDialog(

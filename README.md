@@ -149,8 +149,10 @@ trademark of its owners.
     (reorder, duplicate, copy and paste, remove, undo), the offset, scale and blend (alpha
     or add), switch the mod off or delete it; Save writes the folder's `effect.json`, which
     the port plays as shown. Each folder has its own timing. A level with no mod plays the
-    nearest lower level's, then the base mod, then the original; the panel says which.
-    Digimon levels sets each partner's level (`stages.json`), and an action script plays
+    nearest lower level's, then the Everyone mod, then the original; the panel says which and
+    the view plays it.
+    Digimon levels sets each partner's level (`stages.json`; search, filter by level and sort
+    by clicking a column), and an action script plays
     the mod of its Digimon's level.
 
   <img src="docs/img/effects.png" alt="The fight hit effect playing, with the own-images panel open" width="720">
