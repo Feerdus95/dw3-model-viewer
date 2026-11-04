@@ -29,9 +29,9 @@
         stage_rebuild();
         select_part(stagePart);
     };
-    auto own_snap = [&]() { return OwnSnap{own.frames, own.x, own.y, own.scale, own.add}; };
+    auto own_snap = [&]() { return OwnSnap{own.frames, own.x, own.y, own.scale, own.add, own.active}; };
     auto own_restore = [&](const OwnSnap &s) {
-        own.frames = s.frames, own.x = s.x, own.y = s.y, own.scale = s.scale, own.add = s.add;
+        own.frames = s.frames, own.x = s.x, own.y = s.y, own.scale = s.scale, own.add = s.add, own.active = s.active;
         ownDirty = true, fxDrawn = -1;
         if (ownFrame >= (int)own.frames.size()) ownFrame = -1;
     };

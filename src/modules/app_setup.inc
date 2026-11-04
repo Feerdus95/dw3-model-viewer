@@ -3,7 +3,7 @@ int main(int argc, char **argv) {
     std::string shot, open_path, data;
     std::string start_obj; /* an OBJ to import once the model is open */
     std::string uiShot; /* --ui-shot FILE: the whole window, after a few frames, to a BMP (a developer's check of the panels at a size) */
-    int uiSection = -1, uiTab = -1, uiW = 0, uiH = 0, uiStage = -1, uiFx = -1; /* --stage-open N, --fx-open N: that stage, that effect open */
+    int uiSection = -1, uiTab = -1, uiW = 0, uiH = 0, uiStage = -1, uiFx = -1, uiFxLevel = 0; /* --stage-open N, --fx-open N [--fx-level L]: that stage, that effect open (its mod for that level) */
     float uiPanels[2] = {};
     std::string uiWin; /* --window about|help|log|catalog|pcat: that window open in the --ui-shot */
     std::string uses; /* --uses: a DW3 fighter's name, whose action scripts' motions are printed */
@@ -34,6 +34,7 @@ int main(int argc, char **argv) {
         else if (a == "--stage-open" && i + 1 < argc) uiStage = atoi(argv[++i]);
         else if (a == "--window" && i + 1 < argc) uiWin = argv[++i];
         else if (a == "--fx-open" && i + 1 < argc) uiFx = atoi(argv[++i]);
+        else if (a == "--fx-level" && i + 1 < argc) uiFxLevel = atoi(argv[++i]);
         else if (a == "--win" && i + 1 < argc) sscanf(argv[++i], "%dx%d", &uiW, &uiH);
         else if (a == "--panels" && i + 1 < argc) sscanf(argv[++i], "%f,%f", uiPanels, uiPanels + 1);
         else if (a == "--key" && i + 1 < argc) shot_key = atoi(argv[++i]);
@@ -356,6 +357,8 @@ int main(int argc, char **argv) {
        port's data/mods/effects, kept in effects_dir.txt by the exe) */
     CustomEffect own;
     bool ownShow = false, ownCritical = false, ownDirty = false;
+    int ownLevel = 0; /* the Digimon level whose images are open (EFFECT_LEVELS), 0: the base ones */
+    std::string ownFallback; /* what plays while the open folder has nothing to play */
     std::string ownRoot = g_data + "/../mods/effects";
     {
         std::ifstream f(g_exe_dir + "effects_dir.txt");
@@ -374,7 +377,8 @@ int main(int argc, char **argv) {
     }
     Picked picked; /* what the file dialogs gave (library_ui.inc) */
     picked.obj = start_obj;
-    std::set<int> ownIds = own_effects(ownRoot); /* the effects with own images in ownRoot */
+    std::set<int> ownIds = own_effects(ownRoot); /* the effects with a mod in ownRoot */
+    std::map<int, int> ownLevels = levels_load(ownRoot); /* each Digimon's level, by fighter id */
     startup_mark("own effects listed");
     read_techs({g_data + "/../SLES_039.36", ownRoot + "/../../SLES_039.36"});
 
@@ -507,9 +511,16 @@ int main(int argc, char **argv) {
         return true;
     };
     auto own_load = [&]() {
-        own.load(ownRoot + "/" + std::to_string(fx.id) + (ownCritical ? "/critical" : ""));
+        own.load(own_dir(ownRoot, fx.id, ownLevel, ownCritical));
         ownShow = !own.frames.empty(), ownDirty = false, fxDrawn = -1;
         ownIds = own_effects(ownRoot);
+        ownFallback = "the original effect";
+        for (const OwnFolder &o : own_order(ownRoot, fx.id, ownLevel, ownCritical))
+            if (o.dir != own.dir && own_plays(o.dir)) {
+                static const char *const NAMES[5] = {"the base mod", "the Rookie mod", "the Champion mod", "the Ultimate mod", "the Mega mod"};
+                ownFallback = std::string(NAMES[o.level]) + (o.critical ? "'s critical hit" : "");
+                break;
+            }
     };
     /* the list's groups: the effects no script starts, several Digimon's do
        or a technique's does, and each Digimon's own (its Black King, MP and

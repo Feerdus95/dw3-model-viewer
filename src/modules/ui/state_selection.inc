@@ -86,7 +86,7 @@
                   std::move(then));
     };
     auto leave_own = [&](std::function<void()> then) {
-        ask_first(ownDirty, "Effect " + std::to_string(fx.id) + "'s own images have changes you haven't saved. Leave them and lose them?",
+        ask_first(ownDirty, "Effect " + std::to_string(fx.id) + "'s mod has changes you haven't saved. Leave them and lose them?",
                   std::move(then));
     };
 

@@ -1,4 +1,6 @@
     /* ===== Effects ===== */
+    /* the port's own partners (its native.h): no fighter of the disc's has their ids */
+    static const std::pair<int, std::string> PORT_DIGIMON[] = {{471, "BladeGarurumon"}, {472, "Flamedramon"}};
     auto effect_row = [&](int id) {
         const std::set<std::string> &u = fxUsers[id], &t = fxTechs[id];
         std::string l = "effect " + std::to_string(id);
@@ -6,7 +8,7 @@
         else if (u.size() > 1) l += "  (" + std::to_string(u.size()) + " Digimon)";
         else if (u.empty()) l += "  (the battle's own)";
         ImGui::PushID(id);
-        float ownW = ownIds.count(id) ? ImGui::CalcTextSize("own").x + ImGui::GetStyle().ItemSpacing.x : 0; /* its "own" mark has the row's end to itself */
+        float ownW = ownIds.count(id) ? ImGui::CalcTextSize("mod").x + ImGui::GetStyle().ItemSpacing.x : 0; /* its "mod" mark has the row's end to itself */
         if (ImGui::Selectable(l.c_str(), fx.id == id, ImGuiSelectableFlags_AllowOverlap, ImVec2(ImGui::GetContentRegionAvail().x - ownW, 0)) && fx.id != id) pick_effect(id, false);
         if (u.size() > 1 || (!t.empty() && !u.empty())) tip("%s", joined(u).c_str());
         if (ImGui::BeginPopupContextItem("##menu")) {
@@ -16,8 +18,8 @@
             ImGui::EndPopup();
         }
         if (ownIds.count(id)) {
-            ImGui::SameLine(ImGui::GetContentRegionMax().x - ImGui::CalcTextSize("own").x);
-            ImGui::TextColored(C_ACCENT, "own");
+            ImGui::SameLine(ImGui::GetContentRegionMax().x - ImGui::CalcTextSize("mod").x);
+            ImGui::TextColored(C_ACCENT, "mod");
         }
         ImGui::PopID();
     };
@@ -51,10 +53,10 @@
                 ImGui::EndTabItem();
             }
             char modTab[32];
-            snprintf(modTab, sizeof modTab, "With own images (%d)###mod", (int)ownIds.size());
+            snprintf(modTab, sizeof modTab, "Mods (%d)###mod", (int)ownIds.size());
             if (ImGui::BeginTabItem(modTab)) {
                 ImGui::BeginChild("fxmods");
-                if (ownIds.empty()) hint("No effect has own images in %s yet.", ownRoot.c_str());
+                if (ownIds.empty()) hint("No effect has a mod in %s yet. Open an effect and drop its PNGs on the window to make one.", ownRoot.c_str());
                 for (int id : std::set<int>(ownIds)) /* a copy: opening one rescans ownIds */
                     if (effect_found(id)) effect_row(id);
                 ImGui::EndChild();
@@ -99,14 +101,32 @@
         OwnSnap before = own_snap();
         bool changed = false;
         ImGui::Spacing();
-        if (ImGui::CollapsingHeader("Own images (native port)", ImGuiTreeNodeFlags_DefaultOpen)) {
-            hint("PNGs the native port draws instead of this effect.");
-            int crit = ownCritical;
-            if (segmented("kind", &crit, {"Hit", "Critical hit"})) reload_own(crit != 0);
+        if (ImGui::CollapsingHeader("Mod (native port)", ImGuiTreeNodeFlags_DefaultOpen)) {
+            hint("PNGs the native port draws instead of this effect. Pick who it's for, then drop the PNGs (or a folder) on the window.");
+            int level = ownLevel, crit = ownCritical;
+            if (segmented("level", &level, {"Everyone", "Rookie", "Champion", "Ultimate", "Mega"})) reload_own(ownCritical, level);
+            if (ownLevel == 0) {
+                hint("Plays for any Digimon with no mod for its level.");
+            } else {
+                std::set<std::string> who;
+                for (const Fighter &f : g_game.fighters) {
+                    auto l = ownLevels.find(f.id);
+                    if (!f.enemy && !f.converted && l != ownLevels.end() && l->second == ownLevel) who.insert(f.name);
+                }
+                for (const auto &it : PORT_DIGIMON) {
+                    auto l = ownLevels.find(it.first);
+                    if (l != ownLevels.end() && l->second == ownLevel) who.insert(it.second);
+                }
+                if (who.empty()) ImGui::TextColored(C_WARN, IC_WARN "  No Digimon has this level yet: set them in Digimon levels, below.");
+                else hint("Plays for %s, and for the levels above with no mod of their own.", some(who).c_str()), tip("%s", joined(who).c_str());
+            }
+            if (segmented("kind", &crit, {"Hit", "Critical hit"})) reload_own(crit != 0, ownLevel);
             same_line_if_width(ImGui::CalcTextSize(IC_WARN " Unsaved").x + 16 * dpi);
             if (ownDirty) chip(IC_WARN " Unsaved", C_WARN);
             else if (own.frames.empty()) chip("None yet", C_DIM);
+            else if (!own.active) chip("Off", C_DIM);
             else chip(own.hasJson ? "Saved" : "PNGs only", C_ACCENT);
+            if (own.frames.empty()) hint("Nothing here yet: these Digimon show %s.", ownFallback.c_str());
             if (check_box("Show them in the view", &ownShow)) fxTime = 0, fxDrawn = -1;
             tip("Instead of the original effect");
             if (ImGui::Button(IC_IMPORT "  Import PNGs...")) {
@@ -120,24 +140,64 @@
                     },
                     &picked, win, &PNG, 1, nullptr, true);
             }
-            tip("Copies them into the folder below and adds them as frames, in their names' order. "
+            tip("Copies them into the folder below and adds them as frames, in their names' order (2 before 10), and saves. "
                 "An image is the 320x240 screen around the effect's point, at any size of that shape.");
+            same_line_if_fits(IC_FOLDER "  Import a folder...");
+            if (ImGui::Button(IC_FOLDER "  Import a folder...")) {
+                SDL_ShowOpenFolderDialog(
+                    [](void *u, const char *const *list, int) {
+                        if (!list || !*list) return;
+                        Picked *p = (Picked *)u;
+                        std::vector<std::string> pngs = pngs_at(*list);
+                        std::lock_guard<std::mutex> lock(p->m);
+                        p->files.insert(p->files.end(), pngs.begin(), pngs.end());
+                    },
+                    &picked, win, nullptr, false);
+            }
+            tip("All the PNGs in a folder, as Import PNGs does. Dropping the folder on the window does the same");
             same_line_if_fits(IC_SAVE "  Save");
             ImGui::BeginDisabled(own.frames.empty());
             if (button(IC_SAVE "  Save", ownDirty ? 1 : 0)) own_save();
             ImGui::EndDisabled();
             tip("Writes effect.json: the frames, their ticks and the placement (Ctrl+S)");
             same_line_if_fits(IC_RESTART "  Reload");
-            if (ImGui::Button(IC_RESTART "  Reload")) reload_own(ownCritical);
+            if (ImGui::Button(IC_RESTART "  Reload")) reload_own(ownCritical, ownLevel);
             tip("Reads the folder again");
             hint("Folder: %s", nice_path(own.dir).c_str());
             if (ImGui::SmallButton(IC_FOLDER " Open it")) SDL_CreateDirectory(own.dir.c_str()), open_folder(own.dir);
             same_line_if_fits("Change the mods folder...");
             if (ImGui::SmallButton("Change the mods folder...")) pick_mods_folder();
             tip("The native port's data/mods/effects folder");
+            if (!own.images.empty()) {
+                same_line_if_fits(IC_DELETE " Delete this mod");
+                if (ImGui::SmallButton(IC_DELETE " Delete this mod")) own_delete();
+                tip("Deletes this folder's PNGs and effect.json");
+            }
             if (!own.frames.empty()) {
+                if (check_box("Active", &own.active)) changed = true;
+                tip("Off, the game leaves this mod out, as if it weren't there, and keeps its files. Save to apply");
                 hint("%d frames, %d ticks = %.2f s (the original: %.2f s)", (int)own.frames.size(), own.duration(), own.duration() / 60.0f,
                      fx.duration / 60.0f);
+                static char ticksText[256];
+                bool applyTicks = ImGui::InputTextWithHint("##ticksall", "All the ticks, e.g. 2 2 3 3 4 4 4", ticksText, sizeof ticksText, ImGuiInputTextFlags_EnterReturnsTrue);
+                tip("The ticks of every frame in order, as the artist gives them. Enter applies them");
+                same_line_if_fits("Apply");
+                applyTicks |= ImGui::Button("Apply");
+                if (applyTicks && *ticksText) {
+                    std::vector<int> ticks;
+                    char *p = ticksText, *end;
+                    for (p += strspn(p, " ,;"); *p; p = end + strspn(end, " ,;")) {
+                        long v = strtol(p, &end, 10);
+                        if (end == p) break;
+                        ticks.push_back(std::clamp((int)v, 1, 600));
+                    }
+                    if (*p) note(NOTE_ERROR, "Only numbers, please: 2 2 3 3 4 4 4");
+                    else if (ticks.size() != own.frames.size()) note(NOTE_ERROR, "That's " + std::to_string(ticks.size()) + " ticks for " + std::to_string(own.frames.size()) + " frames");
+                    else {
+                        for (size_t i = 0; i < ticks.size(); i++) own.frames[i].ticks = ticks[i];
+                        changed = true, *ticksText = 0;
+                    }
+                }
                 float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2 - ImGui::CalcTextSize("scale").x -
                              ImGui::GetStyle().ItemInnerSpacing.x;
                 ImGui::PushItemWidth(half);
@@ -212,6 +272,32 @@
                 hint("Click a frame to pick it: Ctrl+C, Ctrl+V, Ctrl+D and Del work on it, and Ctrl+Z undoes.");
             }
             if (!own.error.empty()) ImGui::TextColored(C_ERROR, IC_ERROR "  %s", own.error.c_str());
+            if (ImGui::TreeNode("Digimon levels")) {
+                hint("Which mods each partner plays. Saved at once to stages.json; the game reads it when it starts.");
+                if (ImGui::BeginTable("levels", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+                    auto row = [&](int id, const std::string &name) {
+                        ImGui::PushID(id);
+                        ImGui::TableNextRow();
+                        ImGui::TableNextColumn();
+                        ImGui::TextUnformatted(name.c_str());
+                        ImGui::TableNextColumn();
+                        auto l = ownLevels.find(id);
+                        int v = l == ownLevels.end() ? 0 : l->second;
+                        ImGui::SetNextItemWidth(-FLT_MIN);
+                        if (ImGui::Combo("##level", &v, "None\0Rookie\0Champion\0Ultimate\0Mega\0")) {
+                            if (v) ownLevels[id] = v;
+                            else ownLevels.erase(id);
+                            if (!levels_save(ownRoot, ownLevels)) note(NOTE_ERROR, "Can't write " + ownRoot + "/stages.json");
+                        }
+                        ImGui::PopID();
+                    };
+                    for (const Fighter &f : g_game.fighters)
+                        if (!f.enemy && !f.converted && f.name.size() > 1) row(f.id, f.name);
+                    for (const auto &it : PORT_DIGIMON) row(it.first, it.second + " (the port's)");
+                    ImGui::EndTable();
+                }
+                ImGui::TreePop();
+            }
         }
         if (changed) {
             if (ImGui::GetTime() - ownPushTime > 0.6) ownHist.push(before);

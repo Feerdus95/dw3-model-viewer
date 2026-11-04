@@ -27,6 +27,7 @@ struct Fighter {
     int id;    /* the fighter, as the battle names it */
     int kind;  /* a partner's Digimon (1 on), or 0x3A on for an enemy */
     bool enemy;
+    bool converted; /* addLike's: a DW2 or DCB model's, with its donor's id */
     int modelFid, modelEntry, motionsFid, motionsEntry, effectsFid, effectsEntry;
     std::string name;
     int distance, height; /* where it stands in battle (FighterInfo) */

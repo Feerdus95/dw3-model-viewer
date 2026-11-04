@@ -201,7 +201,7 @@ static void open_folder(const std::string &dir) {
 #endif
 }
 
-/* The effects with own images in ROOT (<root>/<id>/, or its critical/) */
+/* The effects with a mod in ROOT (<root>/<id>/, a level's folder in it, or their critical/) */
 static std::set<int> own_effects(const std::string &root) {
     std::set<int> out;
     int n = 0;
@@ -210,12 +210,12 @@ static std::set<int> own_effects(const std::string &root) {
         char *end;
         long id = strtol(dirs[i], &end, 10);
         if (*end || end == dirs[i]) continue;
-        for (const char *sub : {"", "/critical"}) {
-            int k = 0;
-            char **pngs = SDL_GlobDirectory((root + "/" + dirs[i] + sub).c_str(), "*.png", SDL_GLOB_CASEINSENSITIVE, &k);
-            SDL_free(pngs);
-            if (k > 0) out.insert((int)id);
-        }
+        for (int level = 0; level < 5; level++)
+            for (bool critical : {false, true}) {
+                int k = 0;
+                SDL_free(SDL_GlobDirectory(own_dir(root, (int)id, level, critical).c_str(), "*.png", SDL_GLOB_CASEINSENSITIVE, &k));
+                if (k > 0) out.insert((int)id);
+            }
     }
     SDL_free(dirs);
     return out;

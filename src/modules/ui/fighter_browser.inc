@@ -10,10 +10,10 @@
         const Fighter &f = *scene.fighters[scene.fighter];
         hint("Play a script to see it as the battle runs it. Click a line to play its motion, look through its camera or see its effect.");
         if (!ownIds.empty()) {
-            check_box("Show the own images (mod)", &shotMods);
-            tip("A script's sprite effects play the effect's own images (%d effects have them in the mods folder) instead of the original's; off, the original's", (int)ownIds.size());
+            check_box("Show the mods", &shotMods);
+            tip("A script's sprite effects play the effect's mod for this Digimon's level (%d effects have one in the mods folder) instead of the original's; off, the original's", (int)ownIds.size());
         } else {
-            hint("No effect has own images in the mods folder, so a script plays the original sprites.");
+            hint("No effect has a mod in the mods folder, so a script plays the original sprites.");
         }
         check_box("Keep the game's camera", &lockCam);
         tip("While a script plays the view stays where the battle puts the camera (its default view, then the script's cameras). Off, you can move around it: a sprite effect then shows from where you look, not as the game shows it");

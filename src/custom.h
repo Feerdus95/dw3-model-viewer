@@ -1,10 +1,12 @@
 /* An effect's own images for the native port (its platform/effects.c): the
    PNGs of a folder, data/mods/effects/<id>/ (critical/ in it for a critical
-   hit), and its effect.json, which says how they play:
+   hit; rookie/, champion/, ultimate/ or mega/ for a Digimon level's, each with
+   a critical/ of its own), and its effect.json, which says how they play:
      {"frames": [["00.png", 2], ...], "x": 0, "y": 0, "scale": 1, "blend": "alpha"}
    each frame a PNG and its ticks (1/60 s, as the battle counts time), the
    images moved by (x, y) screen pixels and scaled, blended by their alpha or
-   added ("add"). Without it, every PNG in their names' order, 2 ticks each.
+   added ("add"); "active": 0 leaves the folder out. Without it, every PNG in
+   their names' order, 2 ticks each.
    An image is the 320x240 screen around the effect's point, at any size of
    that shape. No OpenGL here. */
 #pragma once
@@ -44,6 +46,7 @@ struct CustomEffect {
     float x = 0, y = 0, scale = 1;
     bool add = false;
     bool hasJson = false;
+    bool active = true;
     std::map<std::string, CustomImage> images; /* the folder's PNGs, by name */
     std::string error;
 
@@ -52,13 +55,33 @@ struct CustomEffect {
     /* writes effect.json */
     bool save();
     /* copies PATHS (PNGs) into the folder, made if missing, and adds them
-       as frames, in their names' order */
+       as frames, in their names' order, 2 before 10 */
     int import(const std::vector<std::string> &paths);
     int duration() const; /* in ticks */
     int frameAt(int tick) const; /* the frame playing at TICK, -1: none */
     /* the frame at TICK over RGBA pixels (W x H), the effect's point at OX, OY */
     void draw(int tick, uint32_t *rgba, int w, int h, int ox, int oy) const;
 };
+
+/* The Digimon levels an effect's images can be for, as their folders are named
+   (0: the base images, the effect's own folder) */
+extern const char *const EFFECT_LEVELS[5];
+struct OwnFolder {
+    std::string dir;
+    int level;
+    bool critical;
+};
+std::string own_dir(const std::string &root, int id, int level, bool critical);
+/* the folders the port looks in, in its order (platform/effects.c): the level's, else the
+   nearest lower level's and at last the base ones; in each, a critical hit's, else the plain ones */
+std::vector<OwnFolder> own_order(const std::string &root, int id, int level, bool critical);
+/* DIR has PNGs and isn't left out, cheaply: no image is read */
+bool own_plays(const std::string &dir);
+/* PATH's PNGs, in a folder or itself: a drop or a dialog's answer */
+std::vector<std::string> pngs_at(const std::string &path);
+/* <root>/stages.json: each Digimon's level, by fighter id; ids the viewer doesn't know are kept */
+std::map<int, int> levels_load(const std::string &root);
+bool levels_save(const std::string &root, const std::map<int, int> &levels);
 
 /* A fight stage's props for the native port (its platform/stagefx.c): the
    billboards (an upright PNG at a point), emitters (a PNG falling through an

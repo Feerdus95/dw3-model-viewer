@@ -2,6 +2,7 @@
 #include "custom.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -67,6 +68,101 @@ bool json_parse(const char *&p, Json &j) {
 
 /* --- the folder --- */
 
+const char *const EFFECT_LEVELS[5] = {"", "rookie", "champion", "ultimate", "mega"};
+
+std::string own_dir(const std::string &root, int id, int level, bool critical) {
+    std::string d = root + "/" + std::to_string(id);
+    if (level > 0) d += std::string("/") + EFFECT_LEVELS[level];
+    return critical ? d + "/critical" : d;
+}
+
+std::vector<OwnFolder> own_order(const std::string &root, int id, int level, bool critical) {
+    std::vector<OwnFolder> out;
+    for (int l = std::clamp(level, 0, 4); l >= 0; l--) {
+        if (critical) out.push_back({own_dir(root, id, l, true), l, true});
+        out.push_back({own_dir(root, id, l, false), l, false});
+    }
+    return out;
+}
+
+bool own_plays(const std::string &dir) {
+    int n = 0;
+    SDL_free(SDL_GlobDirectory(dir.c_str(), "*.png", SDL_GLOB_CASEINSENSITIVE, &n));
+    if (n == 0) return false;
+    std::ifstream f(dir + "/effect.json", std::ios::binary);
+    if (!f) return true;
+    std::string text((std::istreambuf_iterator<char>(f)), {});
+    const char *p = text.c_str();
+    Json root;
+    if (!json_parse(p, root)) return true;
+    const Json *a = root.get("active");
+    return !(a && a->type == 'n' && a->num == 0);
+}
+
+std::vector<std::string> pngs_at(const std::string &path) {
+    std::vector<std::string> out;
+    SDL_PathInfo info;
+    if (!SDL_GetPathInfo(path.c_str(), &info)) return out;
+    if (info.type == SDL_PATHTYPE_DIRECTORY) {
+        int n = 0;
+        char **names = SDL_GlobDirectory(path.c_str(), "*.png", SDL_GLOB_CASEINSENSITIVE, &n);
+        for (int i = 0; i < n; i++) out.push_back(path + "/" + names[i]);
+        SDL_free(names);
+    } else if (path.size() > 4 && SDL_strcasecmp(path.c_str() + path.size() - 4, ".png") == 0) {
+        out.push_back(path);
+    }
+    return out;
+}
+
+std::map<int, int> levels_load(const std::string &root) {
+    std::map<int, int> out;
+    std::ifstream f(root + "/stages.json", std::ios::binary);
+    if (!f) return out;
+    std::string text((std::istreambuf_iterator<char>(f)), {});
+    const char *p = text.c_str();
+    Json j;
+    if (!json_parse(p, j)) return out;
+    for (int l = 1; l < 5; l++)
+        if (const Json *ids = j.get(EFFECT_LEVELS[l]))
+            for (const auto &it : ids->items) out[(int)it.second.num] = l;
+    return out;
+}
+
+bool levels_save(const std::string &root, const std::map<int, int> &levels) {
+    SDL_CreateDirectory(root.c_str());
+    std::ofstream f(root + "/stages.json", std::ios::binary);
+    if (!f) return false;
+    f << "{";
+    for (int l = 1; l < 5; l++) {
+        f << (l > 1 ? ",\n" : "\n") << "  \"" << EFFECT_LEVELS[l] << "\": [";
+        bool first = true;
+        for (const auto &it : levels)
+            if (it.second == l) f << (first ? "" : ", ") << it.first, first = false;
+        f << "]";
+    }
+    f << "\n}\n";
+    return true;
+}
+
+/* names in the order a person numbers them: 2.png before 10.png */
+static bool natural_less(const std::string &a, const std::string &b) {
+    size_t i = 0, k = 0;
+    while (i < a.size() && k < b.size()) {
+        if (isdigit((unsigned char)a[i]) && isdigit((unsigned char)b[k])) {
+            size_t i2 = i, k2 = k;
+            while (i2 < a.size() && isdigit((unsigned char)a[i2])) i2++;
+            while (k2 < b.size() && isdigit((unsigned char)b[k2])) k2++;
+            unsigned long x = strtoul(a.c_str() + i, nullptr, 10), y = strtoul(b.c_str() + k, nullptr, 10);
+            if (x != y) return x < y;
+            i = i2, k = k2;
+        } else {
+            if (a[i] != b[k]) return a[i] < b[k];
+            i++, k++;
+        }
+    }
+    return a.size() - i < b.size() - k;
+}
+
 static CustomImage load_png(const std::string &path, std::string &error) {
     CustomImage img;
     SDL_Surface *png = SDL_LoadPNG(path.c_str());
@@ -86,7 +182,7 @@ static CustomImage load_png(const std::string &path, std::string &error) {
 bool CustomEffect::load(const std::string &d) {
     dir = d;
     frames.clear(), images.clear(), error.clear();
-    x = y = 0, scale = 1, add = false, hasJson = false;
+    x = y = 0, scale = 1, add = false, hasJson = false, active = true;
 
     int n = 0;
     char **names = SDL_GlobDirectory(dir.c_str(), "*.png", SDL_GLOB_CASEINSENSITIVE, &n);
@@ -117,6 +213,7 @@ bool CustomEffect::load(const std::string &d) {
             if (const Json *v = root.get("y")) y = (float)v->num;
             if (const Json *v = root.get("scale"); v && v->num > 0) scale = (float)v->num;
             if (const Json *v = root.get("blend")) add = v->str == "add";
+            if (const Json *v = root.get("active"); v && v->type == 'n') active = v->num != 0;
         }
     }
     if (!hasJson)
@@ -143,14 +240,14 @@ bool CustomEffect::save() {
     snprintf(b, sizeof b, "%g", y);
     f << ",\n  \"y\": " << b;
     snprintf(b, sizeof b, "%g", scale);
-    f << ",\n  \"scale\": " << b << ",\n  \"blend\": \"" << (add ? "add" : "alpha") << "\"\n}\n";
+    f << ",\n  \"scale\": " << b << ",\n  \"blend\": \"" << (add ? "add" : "alpha") << "\"" << (active ? "" : ",\n  \"active\": 0") << "\n}\n";
     hasJson = true;
     return true;
 }
 
 int CustomEffect::import(const std::vector<std::string> &paths) {
     std::vector<std::string> sorted = paths;
-    std::sort(sorted.begin(), sorted.end());
+    std::sort(sorted.begin(), sorted.end(), natural_less);
     SDL_CreateDirectory(dir.c_str());
     int n = 0;
     for (const std::string &path : sorted) {

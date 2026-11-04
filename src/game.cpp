@@ -132,6 +132,7 @@ bool GameData::addLike(const std::string &like, int fid, const std::string &name
     f.modelFid = f.motionsFid = f.effectsFid = fid;
     f.modelEntry = modelEntry, f.motionsEntry = motionsEntry, f.effectsEntry = effectsEntry;
     f.name = name;
+    f.converted = true;
     for (const auto &d : deltas)
         if (d[0] >= 0 && d[0] < (int)f.cameras.size())
             for (int k = 0; k < 3; k++) f.cameras[d[0]].pos[k] += d[1 + k], f.cameras[d[0]].ref[k] += d[4 + k];

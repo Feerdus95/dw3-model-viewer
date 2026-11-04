@@ -6,7 +6,7 @@
     int vpUses = 0;        /* clicks and drags in the view: after a few, the controls hint gets small */
 
     if (uiStage >= 0) open_stage(uiStage), section = STAGES;
-    if (uiFx >= 0) pick_effect(uiFx, true), section = EFFECTS;
+    if (uiFx >= 0) ownLevel = uiFxLevel, pick_effect(uiFx, true), section = EFFECTS;
     if (uiSection >= 0 && uiSection < SECTIONS) section = uiSection;
     while (running) {
         SDL_Event e;
@@ -15,14 +15,23 @@
             if (e.type == SDL_EVENT_QUIT) quitAsked = true;
             if (e.type == SDL_EVENT_DROP_BEGIN || e.type == SDL_EVENT_DROP_POSITION) dropping = true, dropSeen = SDL_GetTicks();
             if (e.type == SDL_EVENT_DROP_COMPLETE) dropping = false;
-            if (e.type == SDL_EVENT_DROP_FILE) dropping = false, open_dropped(e.drop.data);
+            if (e.type == SDL_EVENT_DROP_FILE) {
+                dropping = false;
+                /* PNGs or a folder of them on an open effect are its mod's frames (all a drop's files come in one go) */
+                std::vector<std::string> pngs = section == EFFECTS && fx.id >= 0 ? pngs_at(e.drop.data) : std::vector<std::string>();
+                if (pngs.empty()) open_dropped(e.drop.data);
+                else {
+                    std::lock_guard<std::mutex> lock(picked.m);
+                    picked.files.insert(picked.files.end(), pngs.begin(), pngs.end());
+                }
+            }
         }
         if (quitAsked) {
             quitAsked = false;
             std::string what;
             if (stageDirty && stageId >= 0) what = "stage " + std::to_string(stageId);
             if (charDirty && !stage_on()) what += (what.empty() ? "" : " and ") + std::string("the model's pieces");
-            if (ownDirty) what += (what.empty() ? "" : " and ") + std::string("effect ") + std::to_string(fx.id) + "'s own images";
+            if (ownDirty) what += (what.empty() ? "" : " and ") + std::string("effect ") + std::to_string(fx.id) + "'s mod";
             ask_first(!what.empty(), "Your changes to " + what + " aren't saved. Quit anyway?", [&]() { running = false; });
             if (!what.empty()) ask.ok = "Quit without saving";
         }
@@ -60,7 +69,9 @@
                 ownIds = own_effects(ownRoot);
                 if (own.error.empty()) note(NOTE_OK, "Imported " + std::to_string(n) + " PNGs to " + own.dir);
                 else note(NOTE_ERROR, own.error);
-                ownShow = ownShow || n > 0, ownDirty = ownDirty || n > 0, fxDrawn = -1;
+                /* the PNGs are in the folder already: their order is saved with them, unless other changes wait for the user's Save */
+                ownShow = ownShow || n > 0, fxDrawn = -1;
+                if (n > 0 && (ownDirty || !own.save())) ownDirty = true;
                 picked.files.clear();
             }
             if (!picked.folder.empty()) {
@@ -68,6 +79,7 @@
                 g_mods = ownRoot.substr(0, std::max<size_t>(ownRoot.find_last_of("/\\"), 0));
                 std::ofstream(g_exe_dir + "effects_dir.txt") << ownRoot << "\n";
                 ownHist.clear();
+                ownLevels = levels_load(ownRoot);
                 own_load();
                 stage_tables();
                 note(NOTE_INFO, "The mods folder is now " + mods_root());
@@ -257,7 +269,7 @@
             ImGui::AlignTextToFramePadding();
             if (dirty) {
                 ImGui::TextColored(C_WARN, "%s", unsaved.c_str());
-                tip("%s%s%s%s%s", stageDirty && stageId >= 0 ? "The stage's changes aren't saved to the game. " : "", ownDirty ? "The own images' changes aren't saved. " : "",
+                tip("%s%s%s%s%s", stageDirty && stageId >= 0 ? "The stage's changes aren't saved to the game. " : "", ownDirty ? "The mod's changes aren't saved. " : "",
                     wbd & WB_CAND ? "The candidate camera isn't saved as a preset. " : "", wbd & WB_SEQ ? "The sequence isn't saved as an application. " : "",
                     "Ctrl+S saves the section's (in Cameras: what B shows).");
                 ImGui::SameLine();
@@ -948,7 +960,7 @@
         if (dropping && SDL_GetTicks() - dropSeen < 500) {
             dl->AddRectFilled(ImVec2(vx, vy), ImVec2(vx + vw, vy + vh), IM_COL32(76, 141, 255, 40));
             dl->AddRect(ImVec2(vx + 8, vy + 8), ImVec2(vx + vw - 8, vy + vh - 8), IM_COL32(76, 141, 255, 200), 8 * dpi, 0, 3 * dpi);
-            const char *t = IC_OPEN "  Drop a .BIN model of the game to open it";
+            const char *t = section == EFFECTS && fx.id >= 0 ? IC_IMPORT "  Drop PNGs or a folder for this mod" : IC_OPEN "  Drop a .BIN model of the game to open it";
             ImGui::PushFont(g_fontTitle);
             ImVec2 ts = ImGui::CalcTextSize(t);
             dl->AddText(vc - ts / 2, IM_COL32(255, 255, 255, 255), t);

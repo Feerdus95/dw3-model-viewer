@@ -17,7 +17,7 @@
     struct OwnSnap {
         std::vector<CustomFrame> frames;
         float x, y, scale;
-        bool add;
+        bool add, active;
     };
     History<OwnSnap> ownHist;
     auto open_file = [&](std::string name, std::string path, int fid) {
@@ -87,9 +87,9 @@
             open_effect(id, select);
         });
     };
-    auto reload_own = [&](bool critical) {
-        leave_own([&, critical]() {
-            ownCritical = critical, ownHist.clear(), ownFrame = -1;
+    auto reload_own = [&](bool critical, int level) {
+        leave_own([&, critical, level]() {
+            ownCritical = critical, ownLevel = level, ownHist.clear(), ownFrame = -1;
             own_load();
         });
     };

@@ -100,6 +100,21 @@
         if (own.save()) ownDirty = false, ownIds = own_effects(ownRoot), note(NOTE_OK, "Saved " + own.dir + "/effect.json");
         else note(NOTE_ERROR, own.error);
     };
+    /* the open folder's PNGs and effect.json; another level's or a critical hit's in it stay */
+    auto own_delete = [&]() {
+        ask.title = "Delete this mod";
+        ask.text = "This deletes the PNGs and effect.json of " + nice_path(own.dir) + ". The Digimon it was for go back to " + ownFallback +
+                   ". It can't be undone.";
+        ask.ok = "Delete", ask.danger = true, ask.open = true;
+        ask.then = [&]() {
+            for (const auto &it : own.images) SDL_RemovePath((own.dir + "/" + it.first).c_str());
+            SDL_RemovePath((own.dir + "/effect.json").c_str());
+            SDL_RemovePath(own.dir.c_str()); /* only if it is empty now */
+            ownHist.clear(), ownFrame = -1;
+            own_load();
+            note(NOTE_OK, "Deleted the mod");
+        };
+    };
     auto can_save = [&]() { return section == CAMERAS ? wb_undo_on() : section == EFFECTS ? fx.id >= 0 && !own.frames.empty() : stage_on() || (char_on() && charDirty); };
     auto do_save = [&]() {
         if (!can_save()) return;

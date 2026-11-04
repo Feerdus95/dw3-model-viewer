@@ -137,14 +137,20 @@ trademark of its owners.
     their folder;
   - the list in two tabs: Original, grouped into Common (the battle's own, and those
     several Digimon start) and By Digimon (each one's own, from the action scripts),
-    and With own images;
+    and Mods;
   - click an action script's "sprite effect" line to see it;
-  - **own images for the native port**: import PNGs into the port's
-    `data/mods/effects/<id>/` (or its `critical/`, for a critical hit; pick the
-    folder with "Change the mods folder..."), see them play in the effect's place, and
-    set each frame's PNG and ticks (reorder, duplicate, copy and paste, remove, undo),
-    the offset, scale and blend (alpha or add); Save writes the folder's `effect.json`,
-    which the port plays as shown.
+  - **mods for the native port**: open an effect, pick who the mod is for (Everyone or a
+    Digimon level, a hit or a critical hit) and drop its PNGs, or a folder of them, on the
+    window. They go into the port's `data/mods/effects/<id>/` (a level's in `rookie/`,
+    `champion/`, `ultimate/` or `mega/` there, a critical hit's in `critical/`; pick the
+    root with "Change the mods folder..."), numbered names in order, ready to play. Then
+    paste all the ticks at once (`2 2 3 3 4 4 4`) or set each frame's PNG and ticks
+    (reorder, duplicate, copy and paste, remove, undo), the offset, scale and blend (alpha
+    or add), switch the mod off or delete it; Save writes the folder's `effect.json`, which
+    the port plays as shown. Each folder has its own timing. A level with no mod plays the
+    nearest lower level's, then the base mod, then the original; the panel says which.
+    Digimon levels sets each partner's level (`stages.json`), and an action script plays
+    the mod of its Digimon's level.
 
   <img src="docs/img/effects.png" alt="The fight hit effect playing, with the own-images panel open" width="720">
 - **Stages** (the 57 fight stages, in a section of their own):

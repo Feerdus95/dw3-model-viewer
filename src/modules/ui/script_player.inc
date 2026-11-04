@@ -117,8 +117,16 @@
         if (!shotMods) return nullptr;
         auto it = shotOwnFx.find(id);
         if (it == shotOwnFx.end()) {
-            auto e = std::make_unique<CustomEffect>();
-            if (!e->load(ownRoot + "/" + std::to_string(id))) e.reset();
+            /* as the port picks them: by the fighter's level, a partner's only */
+            const Fighter *f = scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter];
+            auto level = f && !f->enemy && !f->converted ? ownLevels.find(f->id) : ownLevels.end();
+            std::unique_ptr<CustomEffect> e;
+            for (const OwnFolder &o : own_order(ownRoot, id, level == ownLevels.end() ? 0 : level->second, false))
+                if (own_plays(o.dir)) {
+                    e = std::make_unique<CustomEffect>();
+                    if (!e->load(o.dir)) e.reset();
+                    break;
+                }
             it = shotOwnFx.emplace(id, std::move(e)).first;
         }
         return it->second.get();
