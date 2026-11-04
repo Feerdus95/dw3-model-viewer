@@ -50,7 +50,7 @@ def icon(cxx):
                    shutil.which("windres"))
     if not (HERE / "res/dw3mv.ico").exists() or not windres:
         return []
-    if not obj.exists() or obj.stat().st_mtime < max(rc.stat().st_mtime, (HERE / "res/dw3mv.ico").stat().st_mtime):
+    if not obj.exists() or obj.stat().st_mtime < max(p.stat().st_mtime for p in (rc, HERE / "res/dw3mv.ico", HERE / "res/dw3mv.manifest")):
         print("compile", rc.name)
         if subprocess.run([windres, "-O", "coff", "-i", rc, "-o", obj]).returncode:
             sys.exit(1)
