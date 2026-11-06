@@ -79,6 +79,8 @@ std::string own_dir(const std::string &root, int id, int level, bool critical);
 std::vector<OwnFolder> own_order(const std::string &root, int id, int level, bool critical);
 /* DIR has PNGs and isn't left out, cheaply: no image is read */
 bool own_plays(const std::string &dir);
+/* changes when DIR's files do: their names, sizes and times */
+std::string own_stamp(const std::string &dir);
 /* PATH's PNGs, in a folder or itself: a drop or a dialog's answer */
 std::vector<std::string> pngs_at(const std::string &path);
 /* <root>/stages.json: each Digimon's level, by fighter id; ids the viewer doesn't know are kept */

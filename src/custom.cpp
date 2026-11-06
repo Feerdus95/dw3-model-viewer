@@ -104,6 +104,19 @@ bool own_plays(const std::string &dir) {
     return !(a && a->type == 'n' && a->num == 0);
 }
 
+std::string own_stamp(const std::string &dir) {
+    std::string out;
+    int n = 0;
+    char **names = SDL_GlobDirectory(dir.c_str(), "*", 0, &n);
+    for (int i = 0; i < n; i++) {
+        SDL_PathInfo info;
+        if (SDL_GetPathInfo((dir + "/" + names[i]).c_str(), &info))
+            out += std::string(names[i]) + ":" + std::to_string(info.size) + ":" + std::to_string(info.modify_time) + ";";
+    }
+    SDL_free(names);
+    return out;
+}
+
 std::vector<std::string> pngs_at(const std::string &path) {
     std::vector<std::string> out;
     SDL_PathInfo info;

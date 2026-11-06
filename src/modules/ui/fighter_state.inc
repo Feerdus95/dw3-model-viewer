@@ -78,4 +78,10 @@
     std::map<int, std::unique_ptr<Effect>> shotFx;
     /* the effect's own images (the mod), when it has them and they are on: they play in the original's place */
     bool shotMods = true;
-    std::map<int, std::unique_ptr<CustomEffect>> shotOwnFx;
+    std::map<int, CustomEffect *> shotOwnFx; /* what this run plays for each effect, from ownCache */
+    /* the folders read so far: a big mod takes long to read, so only when its files change */
+    struct OwnCached {
+        std::string stamp;
+        std::unique_ptr<CustomEffect> fx;
+    };
+    std::map<std::string, OwnCached> ownCache;

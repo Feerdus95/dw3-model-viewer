@@ -120,16 +120,21 @@
             /* as the port picks them: by the fighter's level, a partner's only */
             const Fighter *f = scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter];
             auto level = f && !f->enemy && !f->converted ? ownLevels.find(f->id) : ownLevels.end();
-            std::unique_ptr<CustomEffect> e;
+            CustomEffect *e = nullptr;
             for (const OwnFolder &o : own_order(ownRoot, id, level == ownLevels.end() ? 0 : level->second, false))
                 if (own_plays(o.dir)) {
-                    e = std::make_unique<CustomEffect>();
-                    if (!e->load(o.dir)) e.reset();
+                    OwnCached &c = ownCache[o.dir];
+                    std::string stamp = own_stamp(o.dir);
+                    if (!c.fx || c.stamp != stamp) {
+                        c.stamp = stamp, c.fx = std::make_unique<CustomEffect>();
+                        c.fx->load(o.dir);
+                    }
+                    if (!c.fx->images.empty()) e = c.fx.get();
                     break;
                 }
-            it = shotOwnFx.emplace(id, std::move(e)).first;
+            it = shotOwnFx.emplace(id, e).first;
         }
-        return it->second.get();
+        return it->second;
     };
     /* the length, in ticks, of what plays for effect ID: its own images' or the original's */
     auto shot_len = [&](int id) {
@@ -147,6 +152,13 @@
         cand.script = i, cand.of = scene.fighters.empty() ? nullptr : scene.fighters[scene.fighter];
         shots.clear();
         shotOwnFx.clear(), ownIds = own_effects(ownRoot); /* the mod's files may have changed since */
+        /* read and on the card before the action starts: done when the effect starts, big images stall the model and skip the effect's first frames */
+        for (const ScriptLine &ln : scene.model->scripts[i]) {
+            int id = !ln.fxStart ? -1 : ln.fxOwn ? own_effect_id(i) : ln.effect;
+            if (CustomEffect *o = id >= 0 ? shot_own(id) : nullptr)
+                for (const auto &im : o->images) mod_tex(im.second);
+        }
+        last = SDL_GetTicksNS(); /* the wait isn't time played */
         free_fx_models(), fxLog.clear();
         scene.model->setMotion(1);
         view.playing = true;
