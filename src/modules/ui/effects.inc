@@ -183,28 +183,53 @@
                 else ImGui::TextUnformatted(own.sound.c_str());
                 {
                     /* the game's own hit sounds of the techniques that start this effect, to hear against the mod's */
-                    std::map<int, std::string> orig;
+                    std::map<int, std::vector<std::string>> orig;
                     for (const TechRow &t : g_techs)
                         if (t.effect == fx.id && t.sound > 0 && t.sound < 0x5A) {
-                            std::string &who = orig[t.sound];
-                            if (who.size() < 120) who += (who.empty() ? "" : ", ") + t.name;
+                            /* the plain attacks are named "a" in the game's table; a name once per sound */
+                            std::string name = t.name == "a" ? "a (basic attack)" : t.name;
+                            std::vector<std::string> &v = orig[t.sound];
+                            if (std::find(v.begin(), v.end(), name) == v.end()) v.push_back(name);
                         }
+                    /* the most used first: for a common effect that is the plain hit */
+                    std::vector<std::pair<int, std::vector<std::string>>> rows(orig.begin(), orig.end());
+                    std::stable_sort(rows.begin(), rows.end(), [](const auto &a, const auto &b) { return a.second.size() > b.second.size(); });
                     /* the port's launcher renders them into data/sounds when it reads the disc (dw2003 --render-sounds) */
                     std::string sounds = ownRoot + "/../../sounds";
-                    if (orig.empty()) hint("No technique starts this effect with a hit sound, so there is no original to play.");
-                    for (const auto &o : orig) {
-                        char label[96];
-                        std::string wav = sounds + "/" + std::to_string(o.first) + ".wav";
-                        snprintf(label, sizeof label, IC_PLAY "  Original %d##orig%d", o.first, o.first);
-                        bool have = SDL_GetPathInfo(wav.c_str(), nullptr);
-                        ImGui::BeginDisabled(!have);
-                        if (ImGui::Button(label)) sound_preview(wav, 1);
-                        ImGui::EndDisabled();
-                        if (have) tip("The game's own hit sound %d, from %s", o.first, o.second.c_str());
-                        else tip("Not rendered yet: open the port's launcher, which renders the game's sounds into %s", nice_path(sounds).c_str());
-                        same_line_if_fits(label);
+                    if (rows.empty()) hint("No technique starts this effect with a hit sound, so there is no original to play.");
+                    else {
+                        static char soundFind[48] = "";
+                        hint("The game's own hit sounds of the techniques that start this effect, the most used first.");
+                        if (rows.size() > 4) {
+                            ImGui::SetNextItemWidth(-FLT_MIN);
+                            ImGui::InputTextWithHint("##sndfind", IC_SEARCH "  Technique", soundFind, sizeof soundFind);
+                        }
+                        ImGui::BeginChild("origsounds", ImVec2(0, std::min<float>(rows.size(), 6) * ImGui::GetFrameHeightWithSpacing() + 4), ImGuiChildFlags_Borders);
+                        for (const auto &r : rows) {
+                            std::string all, shown;
+                            bool match = !*soundFind;
+                            for (size_t i = 0; i < r.second.size(); i++) {
+                                all += (i ? ", " : "") + r.second[i];
+                                if (i < 3) shown += (i ? ", " : "") + r.second[i];
+                                if (!match && SDL_strcasestr(r.second[i].c_str(), soundFind)) match = true;
+                            }
+                            if (!match) continue;
+                            if (r.second.size() > 3) shown += " +" + std::to_string(r.second.size() - 3);
+                            std::string wav = sounds + "/" + std::to_string(r.first) + ".wav";
+                            char label[48];
+                            snprintf(label, sizeof label, IC_PLAY "  %d##orig%d", r.first, r.first);
+                            bool have = SDL_GetPathInfo(wav.c_str(), nullptr);
+                            ImGui::BeginDisabled(!have);
+                            if (ImGui::Button(label)) sound_preview(wav, 1);
+                            ImGui::EndDisabled();
+                            if (have) tip("The game's hit sound %d (%s.wav in data/sounds)", r.first, std::to_string(r.first).c_str());
+                            else tip("Not rendered yet: open the port's launcher, which renders the game's sounds into %s", nice_path(sounds).c_str());
+                            ImGui::SameLine();
+                            ImGui::TextUnformatted(shown.c_str());
+                            tip("%s", all.c_str());
+                        }
+                        ImGui::EndChild();
                     }
-                    ImGui::NewLine();
                 }
                 if (ImGui::Button(IC_IMPORT "  Import WAV...")) {
                     static const SDL_DialogFileFilter WAV = {"WAV sounds", "wav"};
