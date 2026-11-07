@@ -181,6 +181,36 @@
                 ImGui::SeparatorText("Hit sound");
                 if (own.sound.empty()) hint("No sound: the game's hit sound plays. A WAV here plays in its place.");
                 else ImGui::TextUnformatted(own.sound.c_str());
+                {
+                    /* the game's own hit sounds of the techniques that start this effect, to hear against the mod's */
+                    std::map<int, std::string> orig;
+                    for (const TechRow &t : g_techs)
+                        if (t.effect == fx.id && t.sound > 0 && t.sound < 0x5A) {
+                            std::string &who = orig[t.sound];
+                            if (who.size() < 120) who += (who.empty() ? "" : ", ") + t.name;
+                        }
+                    static std::future<std::string> job;
+                    static int jobIndex = -1;
+                    std::string exe = ownRoot + "/../../../dw2003.exe", cache = g_exe_dir + "original_sounds";
+                    if (job.valid() && job.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+                        std::string wav = job.get();
+                        if (wav.empty()) note(NOTE_ERROR, "Couldn't render the game's sound " + std::to_string(jobIndex) + " (is dw2003.exe at " + nice_path(exe) + "?)");
+                        else sound_preview(wav, 1);
+                        jobIndex = -1;
+                    }
+                    if (orig.empty()) hint("No technique starts this effect with a hit sound, so there is no original to play.");
+                    for (const auto &o : orig) {
+                        char label[96];
+                        snprintf(label, sizeof label, IC_PLAY "  Original %d##orig%d", o.first, o.first);
+                        ImGui::BeginDisabled(job.valid());
+                        if (ImGui::Button(label)) job = std::async(std::launch::async, original_sound, exe, cache, jobIndex = o.first);
+                        ImGui::EndDisabled();
+                        tip("The game's own hit sound %d, from %s. The first time it is rendered by the port (a couple of seconds)", o.first, o.second.c_str());
+                        same_line_if_fits(label);
+                    }
+                    ImGui::NewLine();
+                    if (job.valid()) hint("Rendering the original...");
+                }
                 if (ImGui::Button(IC_IMPORT "  Import WAV...")) {
                     static const SDL_DialogFileFilter WAV = {"WAV sounds", "wav"};
                     SDL_ShowOpenFileDialog(picked_cb<&Picked::wav>, &picked, win, &WAV, 1, nullptr, false);
