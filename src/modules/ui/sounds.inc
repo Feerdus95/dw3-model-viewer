@@ -17,19 +17,32 @@
     };
     /* what a sound is for, from the game's scripts (the compendium: which slots play it) and its code: the techniques' own hit
        sounds are named by the techniques instead */
+    #include "sounds_data.inc"
+    auto sound_use = [&](int index) -> const SoundUse * {
+        for (const SoundUse &u : SOUND_USES)
+            if (u.index == index) return &u;
+        return nullptr;
+    };
+    /* what a sound is for: 1-17 are the game's sequences, named in its sound test (soundtst.c), and 1, 2, 8 and 9 are what the
+       game's players say they are for; from 18 up the scripts only say what surrounds the sound, never what it is (sounds_data.inc) */
     auto sound_role = [&](int index) -> std::string {
-        static const int IN_SCRIPTS[] = {10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 38, 39, 40, 41, 43, 44,
-                                         45, 46, 47, 48, 49, 50, 51, 53, 54, 55, 57, 58, 59, 60, 62, 63, 64, 65, 66, 89};
-        /* 1-17 are the game's sequences (FIGHTSTG_battleSounds, named in the sound test: soundtst.c); 1, 2, 8 and 9 are what the
-           game's players say they are for (the code only plays them from battle scripts) */
         static const char *SEQ[] = {"", "Confirm (SYSTEM07)", "Digimental activation (DIGIMENT)", "Jingle (JINGLE01)", "Jingle (JINGLE02)",
                                     "Jingle (JINGLE03)", "Jingle (JINGLE04)", "Recovery (RECOVERY)", "Text bubble (SYSTEM04)",
                                     "Text bubble (SYSTEM03)", "Footstep (SHT_STEP)", "Footstep (MID_STEP)", "Footstep (LRG_STEP)",
                                     "Footstep (WNG_STEP)", "Fall (SHT_DOWN)", "Fall (MID_DOWN)", "Fall (LRG_DOWN)", "Fall (MTL_DOWN)"};
         if (index >= 1 && index <= 17) return SEQ[index];
         if (index == 56) return "Result 3 hit (the game's own)";
-        if (std::find(std::begin(IN_SCRIPTS), std::end(IN_SCRIPTS), index) != std::end(IN_SCRIPTS)) return "In technique scripts";
-        return "Not in any technique script";
+        if (const SoundUse *u = sound_use(index)) return u->kind;
+        return "Not played by any fighter script";
+    };
+    /* the fighters whose scripts play it */
+    auto sound_fighters = [&](int index) -> std::string {
+        const SoundUse *u = sound_use(index);
+        if (!u) return "";
+        std::string out;
+        if (*u->basic) out += std::string("Basic attack of: ") + u->basic + ". ";
+        if (*u->tech) out += std::string("Techniques of: ") + u->tech + ".";
+        return out;
     };
     /* the code's own uses (items, counterattacks) */
     auto sound_extra = [&](int index) -> std::string {
@@ -38,7 +51,7 @@
     auto sound_found = [&](int index) {
         if (!*sndFind) return true;
         if (atoi(sndFind) == index) return true;
-        if (SDL_strcasestr(sound_role(index).c_str(), sndFind)) return true;
+        if (SDL_strcasestr(sound_role(index).c_str(), sndFind) || SDL_strcasestr(sound_fighters(index).c_str(), sndFind)) return true;
         auto it = sound_users().find(index);
         if (it != sound_users().end())
             for (const std::string &n : it->second)
@@ -61,7 +74,7 @@
         if (!fxGrouped) group_effects(), ownIds = own_effects(ownRoot); /* reads the techniques too */
         if (!sndLoaded) sounds_load();
         ImGui::SetNextItemWidth(-FLT_MIN);
-        ImGui::InputTextWithHint("##sndfind", IC_SEARCH "  Search: number or technique", sndFind, sizeof sndFind);
+        ImGui::InputTextWithHint("##sndfind", IC_SEARCH "  Search: number, technique or Digimon", sndFind, sizeof sndFind);
         if (ImGui::BeginTabBar("sndlists")) {
             if (ImGui::BeginTabItem("Original")) {
                 ImGui::BeginChild("sndorig");
@@ -114,6 +127,7 @@
             title("Game sound %d", sndSel);
             ImGui::TextWrapped("%s", sound_role(sndSel).c_str());
             if (sound_users().count(sndSel)) hint("The hit sound of: %s", sound_techs(sndSel, 8).c_str()), tip("%s", sound_techs(sndSel, 60).c_str());
+            if (!sound_fighters(sndSel).empty()) hint("%s", sound_fighters(sndSel).c_str());
             if (!sound_extra(sndSel).empty()) hint("%s", sound_extra(sndSel).c_str());
             std::string orig = originals_dir() + "/" + std::to_string(sndSel) + ".wav";
             bool have = SDL_GetPathInfo(orig.c_str(), nullptr);
