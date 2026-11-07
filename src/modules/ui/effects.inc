@@ -189,28 +189,22 @@
                             std::string &who = orig[t.sound];
                             if (who.size() < 120) who += (who.empty() ? "" : ", ") + t.name;
                         }
-                    static std::future<std::string> job;
-                    static int jobIndex = -1;
-                    std::string exe = ownRoot + "/../../../dw2003.exe", cache = g_exe_dir + "original_sounds";
-                    if (!SDL_GetPathInfo(exe.c_str(), nullptr)) exe = ownRoot + "/../../../build/dw2003.exe"; /* the port built from its sources */
-                    if (job.valid() && job.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
-                        std::string wav = job.get();
-                        if (wav.empty()) note(NOTE_ERROR, "Couldn't render the game's sound " + std::to_string(jobIndex) + " (is dw2003.exe at " + nice_path(exe) + "?)");
-                        else sound_preview(wav, 1);
-                        jobIndex = -1;
-                    }
+                    /* the port's launcher renders them into data/sounds when it reads the disc (dw2003 --render-sounds) */
+                    std::string sounds = ownRoot + "/../../sounds";
                     if (orig.empty()) hint("No technique starts this effect with a hit sound, so there is no original to play.");
                     for (const auto &o : orig) {
                         char label[96];
+                        std::string wav = sounds + "/" + std::to_string(o.first) + ".wav";
                         snprintf(label, sizeof label, IC_PLAY "  Original %d##orig%d", o.first, o.first);
-                        ImGui::BeginDisabled(job.valid());
-                        if (ImGui::Button(label)) job = std::async(std::launch::async, original_sound, exe, cache, jobIndex = o.first);
+                        bool have = SDL_GetPathInfo(wav.c_str(), nullptr);
+                        ImGui::BeginDisabled(!have);
+                        if (ImGui::Button(label)) sound_preview(wav, 1);
                         ImGui::EndDisabled();
-                        tip("The game's own hit sound %d, from %s. The first time it is rendered by the port (a couple of seconds)", o.first, o.second.c_str());
+                        if (have) tip("The game's own hit sound %d, from %s", o.first, o.second.c_str());
+                        else tip("Not rendered yet: open the port's launcher, which renders the game's sounds into %s", nice_path(sounds).c_str());
                         same_line_if_fits(label);
                     }
                     ImGui::NewLine();
-                    if (job.valid()) hint("Rendering the original...");
                 }
                 if (ImGui::Button(IC_IMPORT "  Import WAV...")) {
                     static const SDL_DialogFileFilter WAV = {"WAV sounds", "wav"};

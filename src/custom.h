@@ -71,9 +71,6 @@ struct CustomEffect {
 
 /* plays the WAV at PATH once, at VOLUME (0-4), over any earlier preview: the Sound row's Play */
 void sound_preview(const std::string &path, float volume);
-/* the game's own battle hit sound INDEX (a technique's scriptSound) as a WAV in CACHE, rendered once by the port's EXE
-   (dw2003 --render-sounds, a couple of seconds); "" when it can't. Blocks: run it off the UI thread */
-std::string original_sound(const std::string &exe, const std::string &cache, int index);
 
 /* The Digimon levels an effect's images can be for, as their folders are named
    (0: the base images, the effect's own folder) */

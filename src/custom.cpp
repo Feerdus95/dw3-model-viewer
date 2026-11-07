@@ -305,21 +305,6 @@ void sound_preview(const std::string &path, float volume) {
     SDL_free(data);
 }
 
-std::string original_sound(const std::string &exe, const std::string &cache, int index) {
-    std::string wav = cache + "/" + std::to_string(index) + ".wav";
-    SDL_PathInfo info;
-    if (SDL_GetPathInfo(wav.c_str(), &info)) return wav;
-    SDL_CreateDirectory(cache.c_str());
-    std::string n = std::to_string(index);
-    const char *args[] = {exe.c_str(), "--render-sounds", cache.c_str(), n.c_str(), nullptr};
-    SDL_Process *p = SDL_CreateProcess(args, false);
-    if (!p) return "";
-    int code = 0;
-    SDL_WaitProcess(p, true, &code);
-    SDL_DestroyProcess(p);
-    return SDL_GetPathInfo(wav.c_str(), &info) ? wav : "";
-}
-
 int CustomEffect::import(const std::vector<std::string> &paths) {
     std::vector<std::string> sorted = paths;
     std::sort(sorted.begin(), sorted.end(), natural_less);
