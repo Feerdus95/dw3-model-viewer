@@ -197,7 +197,7 @@
                     /* the port's launcher renders them into data/sounds when it reads the disc (dw2003 --render-sounds) */
                     std::string sounds = ownRoot + "/../../sounds";
                     if (rows.empty()) hint("No technique starts this effect with a hit sound, so there is no original to play.");
-                    else {
+                    else if (ImGui::CollapsingHeader("Compare with the game's own hit sounds")) {
                         static char soundFind[48] = "";
                         hint("The game's own hit sounds of the techniques that start this effect, the most used first.");
                         if (rows.size() > 4) {

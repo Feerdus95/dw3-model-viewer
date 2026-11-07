@@ -177,3 +177,15 @@
         }
     };
 
+    /* Sounds' library, read and saved here for the save command (ui/sounds.inc) */
+    auto sounds_dir = [&]() { return ownRoot + "/../sounds"; };
+    auto originals_dir = [&]() { return ownRoot + "/../../sounds"; };
+    auto sounds_load = [&]() {
+        sndLib.load(sounds_dir());
+        sndLoaded = true, sndDirty = false;
+        if (!sndLib.error.empty()) note(NOTE_ERROR, sndLib.error);
+    };
+    auto sounds_save = [&]() {
+        if (sndLib.save()) sndDirty = false, note(NOTE_OK, "Saved the sound library");
+        else note(NOTE_ERROR, sndLib.error);
+    };

@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 
@@ -594,4 +595,114 @@ std::string obj_texture(const std::string &path) {
     std::string tex = mt.substr(k + 7, le == std::string::npos ? std::string::npos : le - k - 7);
     size_t sp = tex.find_last_of(" /\\");
     return sp == std::string::npos ? tex : tex.substr(sp + 1);
+}
+
+/* --- the sound library --- */
+
+std::string sound_name(const std::string &file) {
+    size_t slash = file.find_last_of("/\\");
+    std::string stem = slash == std::string::npos ? file : file.substr(slash + 1);
+    size_t dot = stem.find_last_of('.');
+    if (dot != std::string::npos) stem = stem.substr(0, dot);
+    std::string out;
+    for (char c : stem) {
+        c = (char)tolower((unsigned char)c);
+        out += (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' ? c : '_';
+    }
+    if (out.size() > 32) out.resize(32);
+    return out.empty() ? "sound" : out;
+}
+
+int SoundLibrary::find(const std::string &name) const {
+    for (size_t i = 0; i < sounds.size(); i++)
+        if (sounds[i].name == name) return (int)i;
+    return -1;
+}
+
+bool SoundLibrary::load(const std::string &d) {
+    dir = d;
+    sounds.clear();
+    replace.clear();
+    error.clear();
+    std::ifstream f(dir + "/sounds.json", std::ios::binary);
+    if (!f) return true;
+    std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    const char *p = text.c_str();
+    Json root;
+    if (!json_parse(p, root) || root.type != '{') {
+        error = dir + "/sounds.json isn't JSON";
+        return false;
+    }
+    if (const Json *s = root.get("sounds"))
+        for (const auto &it : s->items) {
+            SoundEntry e;
+            e.name = it.first;
+            if (const Json *v = it.second.get("file"); v && v->type == 's') e.file = v->str;
+            if (const Json *v = it.second.get("volume"); v && v->type == 'n' && v->num >= 0 && v->num <= 4) e.volume = (float)v->num;
+            if (!e.file.empty()) sounds.push_back(e);
+        }
+    if (const Json *r = root.get("replace"))
+        for (const auto &it : r->items)
+            if (it.second.type == 's') replace[atoi(it.first.c_str())] = it.second.str;
+    return true;
+}
+
+static std::string json_text(const std::string &s) {
+    std::string out;
+    for (char c : s) out += c == '"' || c == '\\' ? std::string("\\") + c : std::string(1, c);
+    return out;
+}
+
+bool SoundLibrary::save() {
+    SDL_CreateDirectory(dir.c_str());
+    std::ofstream f(dir + "/sounds.json", std::ios::binary);
+    if (!f) {
+        error = "can't write " + dir + "/sounds.json";
+        return false;
+    }
+    char b[64];
+    f << "{\n  \"schema_version\": 1,\n  \"sounds\": {";
+    for (size_t i = 0; i < sounds.size(); i++) {
+        snprintf(b, sizeof b, "%g", sounds[i].volume);
+        f << (i ? ",\n" : "\n") << "    \"" << json_text(sounds[i].name) << "\": {\"file\": \"" << json_text(sounds[i].file) << "\", \"volume\": " << b << "}";
+    }
+    f << (sounds.empty() ? "" : "\n  ") << "},\n  \"replace\": {";
+    bool first = true;
+    for (const auto &r : replace) {
+        f << (first ? "\n" : ",\n") << "    \"" << r.first << "\": \"" << json_text(r.second) << "\"";
+        first = false;
+    }
+    f << (first ? "" : "\n  ") << "}\n}\n";
+    return true;
+}
+
+std::string SoundLibrary::import(const std::string &path) {
+    size_t slash = path.find_last_of("/\\");
+    std::string file = slash == std::string::npos ? path : path.substr(slash + 1);
+    SDL_CreateDirectory(dir.c_str());
+    std::error_code ec;
+    /* the same file picked from the library's own folder is already there (copying it onto itself would empty it) */
+    if (!std::filesystem::equivalent(std::filesystem::u8path(path), std::filesystem::u8path(dir + "/" + file), ec) &&
+        !SDL_CopyFile(path.c_str(), (dir + "/" + file).c_str())) {
+        error = "can't copy " + path + ": " + SDL_GetError();
+        return "";
+    }
+    std::string base = sound_name(file), name = base;
+    for (int n = 2; find(name) >= 0; n++) {
+        std::string tail = "_" + std::to_string(n);
+        name = base.substr(0, 32 - tail.size()) + tail;
+    }
+    sounds.push_back({name, file, 1});
+    return name;
+}
+
+void SoundLibrary::remove(const std::string &name) {
+    int i = find(name);
+    if (i < 0) return;
+    std::string file = sounds[i].file;
+    sounds.erase(sounds.begin() + i);
+    bool shared = false; /* another name may use the same file */
+    for (const SoundEntry &e : sounds) shared |= e.file == file;
+    if (!shared) SDL_RemovePath((dir + "/" + file).c_str());
+    for (auto it = replace.begin(); it != replace.end();) it = it->second == name ? replace.erase(it) : std::next(it);
 }

@@ -1,9 +1,9 @@
     /* ===== the UI: sections, selection, editing, and each section's two
        panels (the browser on the left, the inspector on the right) ===== */
 
-    enum { FILES, STAGES, MODEL, MOTIONS, FIGHTER, CAMERAS, EFFECTS, TEXTURES, DW2, DCB, SECTIONS };
-    static const char *SECTION_NAME[SECTIONS] = {"Files", "Stages", "Model", "Motions", "Fighter", "Cameras", "Effects", "Textures", "DW2", "DCB"};
-    static const char *SECTION_ICON[SECTIONS] = {IC_FILES, IC_STAGE, IC_MODEL, IC_MOTION, IC_FIGHTER, IC_CAMERA, IC_EFFECT, IC_TEXTURE, IC_FILES, IC_FILES};
+    enum { FILES, STAGES, MODEL, MOTIONS, FIGHTER, CAMERAS, EFFECTS, SOUNDS, TEXTURES, DW2, DCB, SECTIONS };
+    static const char *SECTION_NAME[SECTIONS] = {"Files", "Stages", "Model", "Motions", "Fighter", "Cameras", "Effects", "Sounds", "Textures", "DW2", "DCB"};
+    static const char *SECTION_ICON[SECTIONS] = {IC_FILES, IC_STAGE, IC_MODEL, IC_MOTION, IC_FIGHTER, IC_CAMERA, IC_EFFECT, IC_PLAY, IC_TEXTURE, IC_FILES, IC_FILES};
     static const char *SECTION_TIP[SECTIONS] = {
         "The game's models: Digimon, enemies and technique models",
         "The 57 fight stages: move, add and remove their parts, save them for the native port",
@@ -12,6 +12,7 @@
         "Who uses the open model: cameras and action scripts",
         "Candidate cameras, Fit and choreographies for the open fighter's scripts, kept as presets and applications",
         "The battle's 2D effects, and their own images for the native port",
+        "The game's battle sounds, and your own WAVs to replace them with in the native port",
         "The open model's texture pages, palettes and UVs",
         "Digimon World 2: its Digimon and effect models, from the folder tools/extract_dw2.py makes",
         "Digital Card Battle: its Digimon models and their animations, from the folder tools/extract_dcb.py makes"};

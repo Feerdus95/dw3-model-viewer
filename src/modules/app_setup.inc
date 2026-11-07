@@ -543,6 +543,11 @@ int main(int argc, char **argv) {
     std::vector<int> fxCommon;
     std::map<std::string, std::vector<int>> fxByDigimon;
     char fxFind[64] = "";
+    SoundLibrary sndLib; /* Sounds: data/mods/sounds, and what is picked in it or among the game's sounds */
+    bool sndLoaded = false, sndDirty = false;
+    int sndSel = -1;
+    std::string sndLibSel;
+    char sndFind[64] = "";
     auto group_effects = [&]() {
         fxUsers = effect_users();
         fxTechs = effect_techs();

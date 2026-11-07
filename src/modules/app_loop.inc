@@ -240,7 +240,7 @@
         {
             float need = 0;
             for (int s = 0; s < SECTIONS; s++) need += ImGui::CalcTextSize((std::string(SECTION_ICON[s]) + "  " + SECTION_NAME[s]).c_str()).x + st.FramePadding.x * 2 + 3 * dpi;
-            compact = need > ds.x - st.WindowPadding.x * 2 - undoW - 40 * dpi;
+            compact = need > ds.x - st.WindowPadding.x * 2 - undoW - 90 * dpi;
         }
         for (int s = 0; s < SECTIONS; s++) {
             if (s) ImGui::SameLine(0, 3 * dpi);
@@ -265,7 +265,7 @@
             bool wbOnly = wbd && !(stageDirty && stageId >= 0) && !ownDirty;
             std::string unsaved = IC_WARN " unsaved";
             if (wbOnly) unsaved += ": " + wb_unsaved_what(wbd);
-            bool dirty = (stageDirty && stageId >= 0) || ownDirty || wbd;
+            bool dirty = (stageDirty && stageId >= 0) || ownDirty || wbd || sndDirty;
             float ub = ImGui::GetFrameHeight() * 1.3f;
             float right = ds.x - st.WindowPadding.x - ub * 2 - st.ItemSpacing.x;
             float room = right - ImGui::GetCursorPosX() - 20 * dpi - st.ItemSpacing.x * 2; /* what the buttons leave for the open thing and the unsaved mark */
@@ -945,6 +945,7 @@
                 snprintf(t, sizeof t, IC_EFFECT "  2D effect%s   zoom %.1fx%s", fx.id >= 0 ? (" " + std::to_string(fx.id)).c_str() : "", fxZoom,
                          fx.id >= 0 && own_shown() ? "   own images" : "");
             else if (section == TEXTURES) snprintf(t, sizeof t, IC_TEXTURE "  2D texture page   zoom %.1fx", view.texZoom);
+            else if (section == SOUNDS) snprintf(t, sizeof t, IC_PLAY "  Sounds");
             else if (stage_on()) snprintf(t, sizeof t, IC_STAGE "  3D stage %d", stageId);
             else if (scene.model && view.gameCamera >= 0 && !scene.fighters.empty())
                 snprintf(t, sizeof t, IC_MODEL "  3D model   " IC_CAMERA " %s", camera_role(scene.fighters[scene.fighter]->enemy, view.gameCamera).name);
@@ -996,7 +997,7 @@
         ImGui::End();
 
         /* --- the first steps, while nothing is open --- */
-        if (!mode2d && !scene.model) {
+        if (!mode2d && !scene.model && section != SOUNDS) {
             ImGui::SetNextWindowPos(vc, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
             ImGui::SetNextWindowSize(ImVec2(std::max(std::min(vw - 40 * dpi, 500 * dpi), std::min(ds.x - 40 * dpi, 340 * dpi)), 0)); /* wider than a narrow view, over the panels' edges */
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(22 * dpi, 18 * dpi));

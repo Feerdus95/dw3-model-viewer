@@ -136,3 +136,29 @@ struct ObjMesh {
 bool obj_load(const std::string &path, ObjMesh &mesh);
 /* the PNG its MTL gives as the diffuse map, as a name beside the OBJ; "" none */
 std::string obj_texture(const std::string &path);
+
+/* The native port's sound library (its platform/soundlib.c): data/mods/sounds/sounds.json names WAVs of the folder and says which of
+   the game's battle sounds each replaces:
+     {"sounds": {"punch": {"file": "punch.wav", "volume": 1}}, "replace": {"57": "punch"}}
+   A name is 1 to 32 of a-z 0-9 _ -. */
+struct SoundEntry {
+    std::string name, file;
+    float volume = 1; /* 0-4 */
+};
+struct SoundLibrary {
+    std::string dir;
+    std::vector<SoundEntry> sounds;
+    std::map<int, std::string> replace; /* a game sound's number (1-89) -> a name */
+    std::string error;
+
+    /* reads DIR's sounds.json; a folder without one is an empty library */
+    bool load(const std::string &dir);
+    bool save();
+    int find(const std::string &name) const; /* its index, -1: none */
+    /* copies the WAV PATH into the folder, made if missing, under a name taken from the file's; the name, or "" on an error */
+    std::string import(const std::string &path);
+    /* takes NAME out, with its WAV and what it replaced */
+    void remove(const std::string &name);
+};
+/* a library name from a file's name: lower case, other characters _, at most 32 */
+std::string sound_name(const std::string &file);
