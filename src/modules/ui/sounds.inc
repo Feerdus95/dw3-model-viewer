@@ -20,11 +20,16 @@
     auto sound_role = [&](int index) -> std::string {
         static const int IN_SCRIPTS[] = {10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 38, 39, 40, 41, 43, 44,
                                          45, 46, 47, 48, 49, 50, 51, 53, 54, 55, 57, 58, 59, 60, 62, 63, 64, 65, 66, 89};
-        if (index >= 10 && index <= 13) return "Attack swing";
-        if (index >= 14 && index <= 17) return "Reaction cry (hurt / KO)";
+        /* 1-17 are the game's sequences (FIGHTSTG_battleSounds, named in the sound test: soundtst.c); 1, 2, 8 and 9 are what the
+           game's players say they are for (the code only plays them from battle scripts) */
+        static const char *SEQ[] = {"", "Confirm (SYSTEM07)", "Digimental activation (DIGIMENT)", "Jingle (JINGLE01)", "Jingle (JINGLE02)",
+                                    "Jingle (JINGLE03)", "Jingle (JINGLE04)", "Recovery (RECOVERY)", "Text bubble (SYSTEM04)",
+                                    "Text bubble (SYSTEM03)", "Footstep (SHT_STEP)", "Footstep (MID_STEP)", "Footstep (LRG_STEP)",
+                                    "Footstep (WNG_STEP)", "Fall (SHT_DOWN)", "Fall (MID_DOWN)", "Fall (LRG_DOWN)", "Fall (MTL_DOWN)"};
+        if (index >= 1 && index <= 17) return SEQ[index];
         if (index == 56) return "Result 3 hit (the game's own)";
         if (std::find(std::begin(IN_SCRIPTS), std::end(IN_SCRIPTS), index) != std::end(IN_SCRIPTS)) return "In technique scripts";
-        return "Unused by the base game";
+        return "Not in any technique script";
     };
     /* the code's own uses (items, counterattacks) */
     auto sound_extra = [&](int index) -> std::string {
