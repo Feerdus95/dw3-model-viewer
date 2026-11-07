@@ -204,31 +204,42 @@
                             ImGui::SetNextItemWidth(-FLT_MIN);
                             ImGui::InputTextWithHint("##sndfind", IC_SEARCH "  Technique", soundFind, sizeof soundFind);
                         }
-                        ImGui::BeginChild("origsounds", ImVec2(0, std::min<float>(rows.size(), 6) * ImGui::GetFrameHeightWithSpacing() + 4), ImGuiChildFlags_Borders);
+                        /* the rows that match the filter, then a box exactly as tall as they are, up to six */
+                        std::vector<const std::pair<int, std::vector<std::string>> *> shownRows;
                         for (const auto &r : rows) {
-                            std::string all, shown;
                             bool match = !*soundFind;
-                            for (size_t i = 0; i < r.second.size(); i++) {
-                                all += (i ? ", " : "") + r.second[i];
-                                if (i < 3) shown += (i ? ", " : "") + r.second[i];
-                                if (!match && SDL_strcasestr(r.second[i].c_str(), soundFind)) match = true;
-                            }
-                            if (!match) continue;
-                            if (r.second.size() > 3) shown += " +" + std::to_string(r.second.size() - 3);
-                            std::string wav = sounds + "/" + std::to_string(r.first) + ".wav";
-                            char label[48];
-                            snprintf(label, sizeof label, IC_PLAY "  %d##orig%d", r.first, r.first);
-                            bool have = SDL_GetPathInfo(wav.c_str(), nullptr);
-                            ImGui::BeginDisabled(!have);
-                            if (ImGui::Button(label)) sound_preview(wav, 1);
-                            ImGui::EndDisabled();
-                            if (have) tip("The game's hit sound %d (%s.wav in data/sounds)", r.first, std::to_string(r.first).c_str());
-                            else tip("Not rendered yet: open the port's launcher, which renders the game's sounds into %s", nice_path(sounds).c_str());
-                            ImGui::SameLine();
-                            ImGui::TextUnformatted(shown.c_str());
-                            tip("%s", all.c_str());
+                            for (size_t i = 0; i < r.second.size() && !match; i++) match = SDL_strcasestr(r.second[i].c_str(), soundFind) != nullptr;
+                            if (match) shownRows.push_back(&r);
                         }
-                        ImGui::EndChild();
+                        if (shownRows.empty()) hint("No technique matches.");
+                        else {
+                            const ImGuiStyle &st = ImGui::GetStyle();
+                            float n = (float)std::min<size_t>(shownRows.size(), 6);
+                            float h = n * ImGui::GetFrameHeight() + (n - 1) * st.ItemSpacing.y + 2 * st.WindowPadding.y;
+                            ImGui::BeginChild("origsounds", ImVec2(0, h), ImGuiChildFlags_Borders);
+                            for (const auto *rp : shownRows) {
+                                const auto &r = *rp;
+                                std::string all, shown;
+                                for (size_t i = 0; i < r.second.size(); i++) {
+                                    all += (i ? ", " : "") + r.second[i];
+                                    if (i < 3) shown += (i ? ", " : "") + r.second[i];
+                                }
+                                if (r.second.size() > 3) shown += " +" + std::to_string(r.second.size() - 3);
+                                std::string wav = sounds + "/" + std::to_string(r.first) + ".wav";
+                                char label[48];
+                                snprintf(label, sizeof label, IC_PLAY "  %d##orig%d", r.first, r.first);
+                                bool have = SDL_GetPathInfo(wav.c_str(), nullptr);
+                                ImGui::BeginDisabled(!have);
+                                if (ImGui::Button(label)) sound_preview(wav, 1);
+                                ImGui::EndDisabled();
+                                if (have) tip("The game's hit sound %d (%d.wav in data/sounds)", r.first, r.first);
+                                else tip("Not rendered yet: open the port's launcher, which renders the game's sounds into %s", nice_path(sounds).c_str());
+                                ImGui::SameLine();
+                                ImGui::TextUnformatted(shown.c_str());
+                                tip("%s", all.c_str());
+                            }
+                            ImGui::EndChild();
+                        }
                     }
                 }
                 if (ImGui::Button(IC_IMPORT "  Import WAV...")) {
