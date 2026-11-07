@@ -192,6 +192,7 @@
                     static std::future<std::string> job;
                     static int jobIndex = -1;
                     std::string exe = ownRoot + "/../../../dw2003.exe", cache = g_exe_dir + "original_sounds";
+                    if (!SDL_GetPathInfo(exe.c_str(), nullptr)) exe = ownRoot + "/../../../build/dw2003.exe"; /* the port built from its sources */
                     if (job.valid() && job.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
                         std::string wav = job.get();
                         if (wav.empty()) note(NOTE_ERROR, "Couldn't render the game's sound " + std::to_string(jobIndex) + " (is dw2003.exe at " + nice_path(exe) + "?)");
