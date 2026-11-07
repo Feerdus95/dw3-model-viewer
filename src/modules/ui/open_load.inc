@@ -18,6 +18,8 @@
         std::vector<CustomFrame> frames;
         float x, y, scale;
         bool add, active;
+        std::string sound;
+        float soundVolume;
     };
     History<OwnSnap> ownHist;
     auto open_file = [&](std::string name, std::string path, int fid) {

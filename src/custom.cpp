@@ -232,11 +232,15 @@ bool CustomEffect::load(const std::string &d) {
             if (const Json *v = root.get("scale"); v && v->num > 0) scale = (float)v->num;
             if (const Json *v = root.get("blend")) add = v->str == "add";
             if (const Json *v = root.get("active"); v && v->type == 'n') active = v->num != 0;
+            if (const Json *snd = root.get("sound")) {
+                if (const Json *v = snd->get("file"); v && v->type == 's') sound = v->str;
+                if (const Json *v = snd->get("volume"); v && v->type == 'n' && v->num >= 0 && v->num <= 4) soundVolume = (float)v->num;
+            }
         }
     }
     if (!hasJson)
         for (const auto &it : images) frames.push_back({it.first, 2});
-    return !images.empty();
+    return !images.empty() || !sound.empty();
 }
 
 bool CustomEffect::save() {
@@ -258,9 +262,47 @@ bool CustomEffect::save() {
     snprintf(b, sizeof b, "%g", y);
     f << ",\n  \"y\": " << b;
     snprintf(b, sizeof b, "%g", scale);
-    f << ",\n  \"scale\": " << b << ",\n  \"blend\": \"" << (add ? "add" : "alpha") << "\"" << (active ? "" : ",\n  \"active\": 0") << "\n}\n";
+    f << ",\n  \"scale\": " << b << ",\n  \"blend\": \"" << (add ? "add" : "alpha") << "\"" << (active ? "" : ",\n  \"active\": 0");
+    if (!sound.empty()) {
+        std::string name;
+        for (char c : sound) name += c == '"' || c == '\\' ? std::string("\\") + c : std::string(1, c);
+        snprintf(b, sizeof b, "%g", soundVolume);
+        f << ",\n  \"sound\": {\"file\": \"" << name << "\", \"volume\": " << b << "}";
+    }
+    f << "\n}\n";
     hasJson = true;
     return true;
+}
+
+bool CustomEffect::import_sound(const std::string &path) {
+    size_t slash = path.find_last_of("/\\");
+    std::string name = slash == std::string::npos ? path : path.substr(slash + 1);
+    SDL_CreateDirectory(dir.c_str());
+    std::string from = path;
+    std::replace(from.begin(), from.end(), '\\', '/');
+    if (from != dir + "/" + name && !SDL_CopyFile(path.c_str(), (dir + "/" + name).c_str())) { /* not onto itself */
+        error = "can't copy " + path + ": " + SDL_GetError();
+        return false;
+    }
+    sound = name;
+    return true;
+}
+
+void sound_preview(const std::string &path, float volume) {
+    static SDL_AudioStream *stream;
+    SDL_AudioSpec spec;
+    Uint8 *data = nullptr;
+    Uint32 len = 0;
+    if (!SDL_LoadWAV(path.c_str(), &spec, &data, &len)) return;
+    SDL_DestroyAudioStream(stream); /* null the first time */
+    stream = nullptr;
+    if (SDL_InitSubSystem(SDL_INIT_AUDIO) && (stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr))) {
+        SDL_SetAudioStreamGain(stream, volume);
+        SDL_PutAudioStreamData(stream, data, (int)len);
+        SDL_FlushAudioStream(stream);
+        SDL_ResumeAudioStreamDevice(stream);
+    }
+    SDL_free(data);
 }
 
 int CustomEffect::import(const std::vector<std::string> &paths) {

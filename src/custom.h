@@ -48,6 +48,8 @@ struct CustomEffect {
     bool add = false;
     bool hasJson = false;
     bool active = true;
+    std::string sound; /* a WAV of the folder, played in place of the game's hit sound */
+    float soundVolume = 1; /* 0-4 */
     std::map<std::string, CustomImage> images; /* the folder's PNGs, by name */
     std::string error;
 
@@ -58,12 +60,17 @@ struct CustomEffect {
     /* copies PATHS (PNGs) into the folder, made if missing, and adds them
        as frames, in their names' order, 2 before 10 */
     int import(const std::vector<std::string> &paths);
+    /* copies the WAV PATH into the folder, made if missing, as its sound */
+    bool import_sound(const std::string &path);
     int duration() const; /* in ticks */
     int frameAt(int tick) const; /* the frame playing at TICK, -1: none */
     const CustomImage *imageAt(int tick) const; /* its image, or null */
     /* the frame at TICK over RGBA pixels (W x H), the effect's point at OX, OY */
     void draw(int tick, uint32_t *rgba, int w, int h, int ox, int oy) const;
 };
+
+/* plays the WAV at PATH once, at VOLUME (0-4), over any earlier preview: the Sound row's Play */
+void sound_preview(const std::string &path, float volume);
 
 /* The Digimon levels an effect's images can be for, as their folders are named
    (0: the base images, the effect's own folder) */

@@ -123,7 +123,7 @@
             if (segmented("kind", &crit, {"Hit", "Critical hit"})) reload_own(crit != 0, ownLevel);
             same_line_if_width(ImGui::CalcTextSize(IC_WARN " Unsaved").x + 16 * dpi);
             if (ownDirty) chip(IC_WARN " Unsaved", C_WARN);
-            else if (own.frames.empty()) chip("None yet", C_DIM);
+            else if (own.frames.empty() && own.sound.empty()) chip("None yet", C_DIM);
             else if (!own.active) chip("Off", C_DIM);
             else chip(own.hasJson ? "Saved" : "PNGs only", C_ACCENT);
             if (own.frames.empty()) hint("Nothing here yet: these Digimon play %s, which the view shows.", ownFallback.c_str());
@@ -156,10 +156,10 @@
             }
             tip("All the PNGs in a folder, as Import PNGs does. Dropping the folder on the window does the same");
             same_line_if_fits(IC_SAVE "  Save");
-            ImGui::BeginDisabled(own.frames.empty());
+            ImGui::BeginDisabled(own.frames.empty() && own.sound.empty());
             if (button(IC_SAVE "  Save", ownDirty ? 1 : 0)) own_save();
             ImGui::EndDisabled();
-            tip("Writes effect.json: the frames, their ticks and the placement (Ctrl+S)");
+            tip("Writes effect.json: the frames, their ticks, the placement and the sound (Ctrl+S)");
             same_line_if_fits(IC_RESTART "  Reload");
             if (ImGui::Button(IC_RESTART "  Reload")) reload_own(ownCritical, ownLevel);
             tip("Reads the folder again");
@@ -168,10 +168,35 @@
             same_line_if_fits("Change the mods folder...");
             if (ImGui::SmallButton("Change the mods folder...")) pick_mods_folder();
             tip("The native port's data/mods/effects folder");
-            if (!own.images.empty()) {
+            if (!own.images.empty() || !own.sound.empty()) {
                 same_line_if_fits(IC_DELETE " Delete this mod");
                 if (ImGui::SmallButton(IC_DELETE " Delete this mod")) own_delete();
-                tip("Deletes this folder's PNGs and effect.json");
+                tip("Deletes this folder's PNGs, sound and effect.json");
+            }
+            {
+                std::string wav = take_picked(picked, &Picked::wav);
+                if (!wav.empty()) {
+                    if (own.import_sound(wav)) changed = true;
+                }
+                ImGui::SeparatorText("Hit sound");
+                if (own.sound.empty()) hint("No sound: the game's hit sound plays. A WAV here plays in its place.");
+                else ImGui::TextUnformatted(own.sound.c_str());
+                if (ImGui::Button(IC_IMPORT "  Import WAV...")) {
+                    static const SDL_DialogFileFilter WAV = {"WAV sounds", "wav"};
+                    SDL_ShowOpenFileDialog(picked_cb<&Picked::wav>, &picked, win, &WAV, 1, nullptr, false);
+                }
+                tip("Copies the WAV into the folder below as this mod's hit sound. The game plays it when the effect starts, "
+                    "and leaves its own hit sound out (switch it off in game from Options > Mods > Custom sounds). Save to apply");
+                if (!own.sound.empty()) {
+                    same_line_if_fits(IC_PLAY "  Play");
+                    if (ImGui::Button(IC_PLAY "  Play")) sound_preview(own.dir + "/" + own.sound, own.soundVolume);
+                    same_line_if_fits(IC_DELETE "  Remove");
+                    if (ImGui::Button(IC_DELETE "  Remove")) own.sound.clear(), changed = true;
+                    tip("Takes the sound out of effect.json; the WAV stays in the folder");
+                    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.5f);
+                    changed |= ImGui::DragFloat("volume", &own.soundVolume, 0.01f, 0, 4, "%.2f");
+                    tip("1 is the file as it is, up to 4");
+                }
             }
             if (!own.frames.empty()) {
                 if (check_box("Active", &own.active)) changed = true;
