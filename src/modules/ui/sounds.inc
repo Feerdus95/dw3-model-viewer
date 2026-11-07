@@ -15,9 +15,25 @@
         }
         return users;
     };
+    /* what a sound is for, from the game's scripts (the compendium: which slots play it) and its code: the techniques' own hit
+       sounds are named by the techniques instead */
+    auto sound_role = [&](int index) -> std::string {
+        static const int IN_SCRIPTS[] = {10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 38, 39, 40, 41, 43, 44,
+                                         45, 46, 47, 48, 49, 50, 51, 53, 54, 55, 57, 58, 59, 60, 62, 63, 64, 65, 66, 89};
+        if (index >= 10 && index <= 13) return "Attack swing";
+        if (index >= 14 && index <= 17) return "Reaction cry (hurt / KO)";
+        if (index == 56) return "Result 3 hit (the game's own)";
+        if (std::find(std::begin(IN_SCRIPTS), std::end(IN_SCRIPTS), index) != std::end(IN_SCRIPTS)) return "In technique scripts";
+        return "Unused by the base game";
+    };
+    /* the code's own uses (items, counterattacks) */
+    auto sound_extra = [&](int index) -> std::string {
+        return index == 27 || index == 30 || index == 31 || index == 39 || index == 49 ? "Items and counterattacks also play it." : "";
+    };
     auto sound_found = [&](int index) {
         if (!*sndFind) return true;
         if (atoi(sndFind) == index) return true;
+        if (SDL_strcasestr(sound_role(index).c_str(), sndFind)) return true;
         auto it = sound_users().find(index);
         if (it != sound_users().end())
             for (const std::string &n : it->second)
@@ -27,7 +43,7 @@
     auto sound_techs = [&](int index, size_t most) {
         std::string out;
         auto it = sound_users().find(index);
-        if (it == sound_users().end()) return std::string("(not a technique's hit sound)");
+        if (it == sound_users().end()) return sound_role(index);
         for (size_t i = 0; i < it->second.size() && i < most; i++) out += (i ? ", " : "") + it->second[i];
         if (it->second.size() > most) out += " +" + std::to_string(it->second.size() - most);
         return out;
@@ -91,8 +107,9 @@
         auto play_lib = [&](const SoundEntry &e) { sound_preview(sounds_dir() + "/" + e.file, e.volume); };
         if (sndSel > 0) {
             title("Game sound %d", sndSel);
-            hint("The game plays it for: %s", sound_techs(sndSel, 8).c_str());
-            tip("%s", sound_techs(sndSel, 60).c_str());
+            ImGui::TextWrapped("%s", sound_role(sndSel).c_str());
+            if (sound_users().count(sndSel)) hint("The hit sound of: %s", sound_techs(sndSel, 8).c_str()), tip("%s", sound_techs(sndSel, 60).c_str());
+            if (!sound_extra(sndSel).empty()) hint("%s", sound_extra(sndSel).c_str());
             std::string orig = originals_dir() + "/" + std::to_string(sndSel) + ".wav";
             bool have = SDL_GetPathInfo(orig.c_str(), nullptr);
             ImGui::BeginDisabled(!have);
