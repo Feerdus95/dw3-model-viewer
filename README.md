@@ -77,6 +77,11 @@ trademark of its owners.
   - the blends between motions play as the game plays them.
 - **Fighter** (from the battle's fighters' file, SMDLDATA.PRO):
   - each fighter that uses the model, partner or enemy;
+  - **script mods**: Customize on a script copies the game's into a mod you can edit (a command's sound, which can be
+    a sound of the Sounds library, a game sound or the hit's sound, and its other values), insert, delete and move
+    commands, and Save writes `data/mods/scripts/<fighter>/<script>.json`, which the native port (v0.18.8 or later)
+    plays instead of the game's script. Back to the game's deletes it. The script player and the lines show what you
+    edited;
   - its cameras, seen as the game frames them and named by what the game uses each
     for: a partner's six battle views (the default view the battle returns to between
     actions; the game picks one by the enemy's number of cameras), its two portraits

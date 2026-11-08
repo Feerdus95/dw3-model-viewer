@@ -59,6 +59,8 @@ bool json_parse(const char *&p, Json &j) {
         }
     }
     if (*p == '"') return j.type = 's', parse_string(p, j.str);
+    if (strncmp(p, "true", 4) == 0) return j.type = 'b', j.num = 1, p += 4, true;
+    if (strncmp(p, "false", 5) == 0) return j.type = 'b', j.num = 0, p += 5, true;
     if (strncmp(p, "null", 4) == 0) return p += 4, true;
     char *end;
     j.num = strtod(p, &end);

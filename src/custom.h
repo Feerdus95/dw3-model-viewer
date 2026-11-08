@@ -17,7 +17,7 @@
 
 /* A small JSON reader: numbers, strings, arrays and objects (the presets' too) */
 struct Json {
-    char type = 0; /* 'n', 's', '[', '{', 0 null */
+    char type = 0; /* 'n', 's', 'b' (true, false: num 1, 0), '[', '{', 0 null */
     double num = 0;
     std::string str;
     std::vector<std::pair<std::string, Json>> items; /* an array's keys are empty */

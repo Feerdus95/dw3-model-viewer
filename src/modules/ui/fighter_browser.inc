@@ -8,6 +8,7 @@
         }
         if (scene.fighters.empty()) return hint("No fighter uses this file: it has no action scripts.");
         const Fighter &f = *scene.fighters[scene.fighter];
+        scripts_sync(mm, f);
         hint("Play a script to see it as the battle runs it. Click a line to play its motion, look through its camera or see its effect.");
         if (!ownIds.empty()) {
             check_box("Show the mods", &shotMods);
@@ -29,6 +30,7 @@
                 char h[96];
                 if (*role.name) snprintf(h, sizeof h, "%s  #%d###script%d", role.name, i, i);
                 else snprintf(h, sizeof h, "Script %d###script%d", i, i);
+                auto edited = scrEd.find({f.id, i});
                 bool open = ImGui::CollapsingHeader(h);
                 tip("%s%s%d commands", role.examples, *role.examples ? ".  " : "", (int)sc.size());
                 if (ImGui::BeginPopupContextItem()) {
@@ -39,6 +41,28 @@
                 ImGui::PushID(i);
                 if (button(run.on && run.script == i ? IC_RESTART "  Play again" : IC_PLAY "  Play the script")) run_script(i);
                 tip("Runs its commands in order: motions, waits, cameras and sprite effects");
+                if (edited == scrEd.end()) {
+                    ImGui::SameLine();
+                    if (button(IC_ADD "  Customize")) script_customize(mm, f, i);
+                    tip("Copies the game's script into a mod you can edit: change its sounds and commands, then Save writes it for the port (data/mods/scripts)");
+                } else {
+                    ImGui::SameLine();
+                    chip(edited->second.dirty ? "edited" : "mod", edited->second.dirty ? C_ACCENT : C_OK);
+                    ImGui::SameLine();
+                    if (button(IC_SAVE "  Save", edited->second.dirty ? 1 : 0)) scriptsSave();
+                    tip("Writes %s (Ctrl+S)", nice_path(script_file(f.id, i)).c_str());
+                    ImGui::SameLine();
+                    if (button(IC_RESTART "  Back to the game's")) {
+                        ask.title = "Back to the game's script";
+                        ask.text = "This deletes this fighter's mod of the script (" + nice_path(script_file(f.id, i)) + ") and the game's own plays again. It can't be undone.";
+                        ask.ok = "Delete the mod", ask.danger = true, ask.open = true;
+                        int fid = f.id, idx = i;
+                        ask.then = [&, fid, idx]() {
+                            if (scene.model && !scene.fighters.empty() && scene.fighters[scene.fighter]->id == fid) script_revert(*scene.model, *scene.fighters[scene.fighter], idx);
+                        };
+                    }
+                    tip("Deletes the mod's file; the game's script plays again");
+                }
                 if (std::any_of(sc.begin(), sc.end(), [](const ScriptLine &l) { return l.fxOwn; })) {
                     /* its "own" sprite effect is the technique's: TechData.scriptEffect */
                     const TechRow *cur = own_tech(i);
@@ -62,8 +86,11 @@
                     ImGui::PushID(k);
                     bool active = ln.motion > 0 || ln.camera >= 0 || ln.effect >= 0 || ln.camMode == 2;
                     bool now = run.on && run.script == i && k == run.pc - 1;
+                    bool picked = edited != scrEd.end() && scrFi == f.id && scrSc == i && scrCmd == k;
                     if (!active) ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-                    if (ImGui::Selectable(ln.text.c_str(), now) && active) {
+                    bool hit = ImGui::Selectable(ln.text.c_str(), now || picked);
+                    if (hit && edited != scrEd.end()) scrFi = f.id, scrSc = i, scrCmd = k;
+                    if (hit && active) {
                         if (ln.motion > 0 && ln.motion <= (int)mm.motions.size()) mm.setMotion(ln.motion), view.playing = true;
                         if (ln.effect >= 0) pick_effect(ln.effect, true);
                         int c = ln.camera >= 100 ? ln.camera - 100 : ln.camera;

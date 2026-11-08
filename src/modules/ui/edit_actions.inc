@@ -116,11 +116,12 @@
             note(NOTE_OK, "Deleted the mod");
         };
     };
-    auto can_save = [&]() { return section == CAMERAS ? wb_undo_on() : section == EFFECTS ? fx.id >= 0 && (!own.frames.empty() || !own.sound.empty()) : section == SOUNDS ? sndDirty : stage_on() || (char_on() && charDirty); };
+    auto can_save = [&]() { return section == CAMERAS ? wb_undo_on() : section == EFFECTS ? fx.id >= 0 && (!own.frames.empty() || !own.sound.empty()) : section == SOUNDS ? sndDirty : section == FIGHTER ? scrAnyDirty : stage_on() || (char_on() && charDirty); };
     auto do_save = [&]() {
         if (!can_save()) return;
         if (section == CAMERAS) return wb_save_do();
         if (section == SOUNDS) return sounds_save();
+        if (section == FIGHTER) return scriptsSave();
         if (char_on() && section != EFFECTS) return char_save();
         section == EFFECTS ? own_save() : stage_save();
     };

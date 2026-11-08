@@ -337,6 +337,12 @@ std::vector<std::vector<ScriptLine>> read_scripts(const uint8_t *a, size_t size)
     return out;
 }
 
+std::vector<ScriptLine> read_script_words(const std::vector<int> &words) {
+    std::vector<uint8_t> b;
+    for (int w : words) b.push_back(w & 0xFF), b.push_back((w >> 8) & 0xFF);
+    return read_script(b.data(), b.data() + b.size());
+}
+
 /* --- the face (FIGHTSTG_updateFace, getEyesFrame, moveFacePart) --- */
 
 bool step_face(const Fighter &f, FaceState &s, int motion, int texX, int texY, std::vector<uint16_t> &vram) {

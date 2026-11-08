@@ -9,6 +9,10 @@
         }
         Model &m = *scene.model;
         const Fighter &f = *scene.fighters[scene.fighter];
+        if (script_command_editor(m, f)) {
+            ImGui::Spacing();
+            ImGui::Separator();
+        }
         title("%s", f.name.c_str());
         chip(f.enemy ? "enemy" : "partner", f.enemy ? C_ERROR : C_OK);
         if (scene.fighters.size() > 1) {

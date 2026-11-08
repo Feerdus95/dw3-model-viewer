@@ -242,6 +242,15 @@ static int dump_compendium(const std::string &outArg, const std::string &exe, co
                 s.fid = f->effectsFid, s.entry = f->effectsEntry, s.idx = (int)i;
                 s.present = off != 0;
                 if (s.present) s.lines = sc[i];
+                if (s.present && off < a.entry_size(f->effectsEntry)) { /* what the script editor writes reads back as the same words, and the port would take it */
+                    const uint8_t *at = a.entry(f->effectsEntry) + off;
+                    ScriptWords w = script_split(at, a.entry(f->effectsEntry) + a.entry_size(f->effectsEntry)), back;
+                    std::string err;
+                    if (w.empty() || !script_from_json(script_to_json(w), back, err) || back.size() != w.size() ||
+                        !std::equal(w.begin(), w.end(), back.begin(), [](const ScriptCmd &x, const ScriptCmd &y) { return x.w == y.w; }))
+                        problem(who + ": script " + std::to_string(i) + " does not write and read back: " + err);
+                    else if (script_lines(w).size() != w.size()) problem(who + ": script " + std::to_string(i) + " has a different number of lines when edited");
+                }
             }
             s.users.insert(f->id);
         }

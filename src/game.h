@@ -84,6 +84,8 @@ struct GameData {
 /* A model's action scripts (FighterInfo.effects): its archive's entries,
    each command decoded as FIGHTSTG_updateBattleScript reads it */
 std::vector<std::vector<ScriptLine>> read_scripts(const uint8_t *archive, size_t size);
+/* One command, given as its words, decoded the same way (an edited script) */
+std::vector<ScriptLine> read_script_words(const std::vector<int> &words);
 
 /* The face's step (FIGHTSTG_updateFace) by one battle frame: the eyes blink
    or follow the motion, the other parts cycle; the parts that change are

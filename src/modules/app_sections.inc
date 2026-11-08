@@ -22,6 +22,7 @@
 #include "ui/textures_hooks.inc" /* what Textures calls back to main for */
 #include "ui/app.inc" /* the App the separate sections take (Motions: motions.cpp) */
 #include "ui/fighter_state.inc" /* Fighter: script roles and the state of the player, the workbench and the choreography */
+#include "ui/script_edit.inc" /* Fighter: editing a script */
 #include "ui/script_player.inc" /* Fighter: the script player */
 #include "ui/ab_controls.inc" /* A/B under the view */
 #include "ui/workbench_ops.inc" /* the workbench's history */

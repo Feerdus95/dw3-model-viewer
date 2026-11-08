@@ -8,6 +8,12 @@
     if (uiStage >= 0) open_stage(uiStage), section = STAGES;
     if (uiFx >= 0) ownLevel = uiFxLevel, pick_effect(uiFx, true), section = EFFECTS;
     if (uiSection >= 0 && uiSection < SECTIONS) section = uiSection;
+    if (uiCustom >= 0 && scene.model && !scene.fighters.empty()) {
+        scripts_sync(*scene.model, *scene.fighters[scene.fighter]);
+        script_customize(*scene.model, *scene.fighters[scene.fighter], uiCustom);
+        for (int k = 0; k < (int)scrEd[{scrFi, scrSc}].w.size(); k++)
+            if (scrEd[{scrFi, scrSc}].w[k].w[0] == 10) { scrCmd = k; break; }
+    }
     if (uiScript >= 0 && scene.model) { /* --script: as played, then paused there */
         view.dummy = shot_dummy;
         run_script(uiScript);
@@ -265,7 +271,7 @@
             bool wbOnly = wbd && !(stageDirty && stageId >= 0) && !ownDirty;
             std::string unsaved = IC_WARN " unsaved";
             if (wbOnly) unsaved += ": " + wb_unsaved_what(wbd);
-            bool dirty = (stageDirty && stageId >= 0) || ownDirty || wbd || sndDirty;
+            bool dirty = (stageDirty && stageId >= 0) || ownDirty || wbd || sndDirty || scrAnyDirty;
             float ub = ImGui::GetFrameHeight() * 1.3f;
             float right = ds.x - st.WindowPadding.x - ub * 2 - st.ItemSpacing.x;
             float room = right - ImGui::GetCursorPosX() - 20 * dpi - st.ItemSpacing.x * 2; /* what the buttons leave for the open thing and the unsaved mark */
