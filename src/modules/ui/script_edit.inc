@@ -107,6 +107,28 @@
         if (scrFi != f.id || it == scrEd.end() || scrCmd < 0 || scrCmd >= (int)it->second.w.size()) return false;
         ScriptWords &sw = it->second.w;
         ScriptCmd &c = sw[scrCmd];
+        /* a number: typed, stepped with the arrows (Ctrl for 10) and, for a short range, dragged on a bar that shows where it is */
+        auto int_field = [&](const char *name, int &v, int lo, int hi) {
+            bool ch = false;
+            float w = ImGui::GetContentRegionAvail().x, sp = ImGui::GetStyle().ItemSpacing.x;
+            bool bar = hi - lo <= 1000;
+            ImGui::PushID(name);
+            ImGui::SetNextItemWidth(bar ? w * 0.36f : w * 0.55f);
+            int n = v;
+            if (ImGui::InputInt("##n", &n, 1, 10)) v = std::clamp(n, lo, hi), ch = true;
+            if (bar) {
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(w * 0.30f);
+                n = v;
+                if (ImGui::SliderInt("##s", &n, lo, hi, "")) v = n, ch = true;
+            }
+            ImGui::SameLine();
+            ImGui::TextUnformatted(name);
+            tip(("From " + std::to_string(lo) + " to " + std::to_string(hi) + ". Type a value, or use the arrows").c_str());
+            ImGui::PopID();
+            (void)sp;
+            return ch;
+        };
         bool changed = false;
         title("Script %d, command %d", scrSc, scrCmd + 1);
         if (scrCmd < (int)mm.scripts[scrSc].size()) hint("%s", mm.scripts[scrSc][scrCmd].text.c_str());
@@ -138,7 +160,7 @@
                 if (sndLib.sounds.empty()) hint("Import a WAV in the Sounds section first.");
                 tip("The port plays this sound of data/mods/sounds");
             } else if (kind == 1) {
-                if (ImGui::DragInt("game sound", &snd, 0.2f, 1, 89)) c.w[1] = snd | aware, changed = true;
+                if (int_field("game sound", snd, 1, 89)) c.w[1] = snd | aware, changed = true;
             }
             if (kind <= 1) {
                 bool a = aware != 0;
@@ -148,8 +170,7 @@
         }
         for (const ScriptField &fl : script_fields(c)) {
             int v = c.w[fl.index];
-            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.5f);
-            if (ImGui::DragInt(fl.name.c_str(), &v, 1, fl.lo, fl.hi)) c.w[fl.index] = std::clamp(v, fl.lo, fl.hi), changed = true;
+            if (int_field(fl.name.c_str(), v, fl.lo, fl.hi)) c.w[fl.index] = v, changed = true;
         }
         if (script_fields(c).empty() && c.w[0] != 10) hint("This command has nothing to change; insert or delete commands around it.");
         ImGui::SeparatorText("The script");
