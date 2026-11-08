@@ -109,24 +109,22 @@
         ScriptCmd &c = sw[scrCmd];
         /* a number: typed, stepped with the arrows (Ctrl for 10) and, for a short range, dragged on a bar that shows where it is */
         auto int_field = [&](const char *name, int &v, int lo, int hi) {
-            bool ch = false;
-            float w = ImGui::GetContentRegionAvail().x, sp = ImGui::GetStyle().ItemSpacing.x;
-            bool bar = hi - lo <= 1000;
+            bool ch = false, bar = hi - lo <= 1000;
             ImGui::PushID(name);
-            ImGui::SetNextItemWidth(bar ? w * 0.36f : w * 0.55f);
+            ImGui::PushTextWrapPos(0); /* the name goes above, wrapped: it never runs past the panel */
+            ImGui::TextUnformatted(name);
+            ImGui::PopTextWrapPos();
+            ImGui::SetNextItemWidth(bar ? ImGui::GetContentRegionAvail().x * 0.5f : -FLT_MIN);
             int n = v;
             if (ImGui::InputInt("##n", &n, 1, 10)) v = std::clamp(n, lo, hi), ch = true;
+            tip(("From " + std::to_string(lo) + " to " + std::to_string(hi) + ". Type a value, or use the arrows").c_str());
             if (bar) {
                 ImGui::SameLine();
-                ImGui::SetNextItemWidth(w * 0.30f);
+                ImGui::SetNextItemWidth(-FLT_MIN);
                 n = v;
                 if (ImGui::SliderInt("##s", &n, lo, hi, "")) v = n, ch = true;
             }
-            ImGui::SameLine();
-            ImGui::TextUnformatted(name);
-            tip(("From " + std::to_string(lo) + " to " + std::to_string(hi) + ". Type a value, or use the arrows").c_str());
             ImGui::PopID();
-            (void)sp;
             return ch;
         };
         bool changed = false;
@@ -164,7 +162,11 @@
             }
             if (kind <= 1) {
                 bool a = aware != 0;
-                if (ImGui::Checkbox("The game's own sound on a result 3 hit", &a)) c.w[1] = snd | (a ? 0x4000 : 0), changed = true;
+                if (ImGui::Checkbox("##aware", &a)) c.w[1] = snd | (a ? 0x4000 : 0), changed = true;
+                ImGui::SameLine();
+                ImGui::PushTextWrapPos(0);
+                ImGui::TextUnformatted("The game's own sound on a result 3 hit");
+                ImGui::PopTextWrapPos();
                 tip("A hit of result 3 (a hit that lands for 0) plays the game's own sound 56 instead of this one, as the hit's sound does");
             }
         }
