@@ -1,15 +1,19 @@
 """Release test: a user with the zip and the three discs gets every model of the three games, with nothing of ours.
 
-    python tools/test_release.py DW3.cue DW2.cue DCB.cue [build/dw3-model-viewer-vX-win64.zip]
+    python tools/test_release.py DW3.cue DW2.cue DCB.cue [build/dw3-model-viewer-vX-win64.zip] [--dir CLEAN_FOLDER]
+
+--dir unpacks there (emptied first) instead of a temporary folder, and leaves it for a look afterwards.
 
 Unpacks the zip (the newest in build/ if none is given) into a temporary folder and, from the zip's own tools only:
   1. checks the zip holds no model data (no data/, no .bin/.dw2m/.dcbm, no saved edits or mods);
-  2. runs setup_disc.py (Digimon World 2003, Europe), extract_dw2.py and extract_dcb.py on the discs;
-  3. points the DW2 and DCB tabs at the results (dw2_dir.txt, dcb_dir.txt) and runs `dw3mv --check`: every model of
+  2. runs setup_disc.py (Digimon World 2003, Europe), then the exe's own --extract-dw2 and --extract-dcb (no Python)
+     into the folders the DW2 and DCB tabs read by default, data/dw2 and data/dcb, and checks the zip ships no Python extractor;
+  3. runs `dw3mv --check`: every model of
      the three games must load with a mesh and a motion, and none may be unread;
   4. renders one model of each game with --shot and checks the picture is not blank.
 """
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -36,14 +40,24 @@ def blank(bmp):
 
 
 def main():
-    if len(sys.argv) not in (4, 5):
+    args, keep = sys.argv[1:], None
+    if "--dir" in args:
+        i = args.index("--dir")
+        keep = Path(args[i + 1]).resolve()
+        del args[i:i + 2]
+    if len(args) not in (3, 4):
         sys.exit(__doc__)
-    dw3, dw2, dcb = (str(Path(a).resolve()) for a in sys.argv[1:4])
+    dw3, dw2, dcb = (str(Path(a).resolve()) for a in args[:3])
     zips = sorted((HERE / "build").glob("dw3-model-viewer-*-win64.zip"), key=lambda p: p.stat().st_mtime)
-    zp = Path(sys.argv[4]) if len(sys.argv) == 5 else zips[-1]
-    with tempfile.TemporaryDirectory() as tmp:
+    zp = Path(args[3]) if len(args) == 4 else zips[-1]
+    if keep:
+        if keep.exists():
+            shutil.rmtree(keep)
+        keep.mkdir(parents=True)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = str(keep or tmpdir)
         zf = zipfile.ZipFile(zp)
-        leaks = [n for n in zf.namelist() if BAD_NAME.search(n)]
+        leaks = [n for n in zf.namelist() if BAD_NAME.search(n) or re.search(r"(extract_d|discfs|tools/dcb/)", n)]
         if leaks:
             sys.exit("the zip holds model data or edits: %s" % leaks)
         zf.extractall(tmp)
@@ -51,12 +65,11 @@ def main():
         print("zip:", zp.name, "->", root)
         py = [sys.executable, "-I"]
         run(*py, root / "tools/setup_disc.py", dw3)
-        run(*py, root / "tools/extract_dw2.py", dw2, root / "dw2_models")
-        run(*py, root / "tools/extract_dcb.py", dcb, root / "dcb_models")
-        (root / "dw2_dir.txt").write_text(str(root / "dw2_models") + "\n")
-        (root / "dcb_dir.txt").write_text(str(root / "dcb_models") + "\n")
-
         exe = root / "dw3mv.exe"
+        print(run(exe, "--extract-dw2", dw2, root / "data/dw2").strip().splitlines()[-1:])
+        print(run(exe, "--extract-dcb", dcb, root / "data/dcb").strip().splitlines()[-1:])
+        for tag, sub in (("dw2", "dw2"), ("dcb", "dcb")):  # what the tabs write after their first read
+            (root / (tag + "_dir.txt")).write_text(str(root / "data" / sub) + "\n")
         r = subprocess.run([str(exe), "--check"], capture_output=True, text=True)
         if r.returncode:
             print("\n".join(l for l in r.stdout.splitlines() if "ERROR" in l or "unreadable" in l)[-2000:])
@@ -73,8 +86,8 @@ def main():
                 sys.exit("%s: expected at least %d models and none unread" % (game, least))
 
         shots = [("DW3", root / "data/files" / "0575.bin"),
-                 ("DW2", next((root / "dw2_models/digimon").glob("003_*/*.dw2m"))),
-                 ("DCB", next((root / "dcb_models/digimon").glob("*_Imperialdramon/*.dcbm")))]
+                 ("DW2", next((root / "data/dw2/digimon").glob("003_*/*.dw2m"))),
+                 ("DCB", next((root / "data/dcb/digimon").glob("*_Imperialdramon/*.dcbm")))]
         for game, f in shots:
             bmp = root / (game + ".bmp")
             run(exe, "--shot", bmp, f)

@@ -234,7 +234,7 @@ trademark of its owners.
 4. Optional, for the **DW2** and **DCB** tabs (your own discs, no Python needed): open the tab, press **Choose the disc...** and pick the
    `.cue` (Digimon World 2, USA, SLUS-01193; or Digital Card Battle). It checks the disc first and takes a few seconds; **Cancel** leaves
    the folder as it was. The same buttons read another disc later. `dw3mv --extract-dw2 DISC OUT` and `--extract-dcb DISC OUT` do it without
-   the window (`tools/extract_dw2.py` and `tools/extract_dcb.py` are the reference the byte-for-byte checks were made against).
+   the window (the Python tools in the repository, `tools/extract_dw2.py` and `tools/extract_dcb.py`, are the reference the byte-for-byte checks were made against; the release zip doesn't ship them).
    **Export all models...** writes every model of the tab as a `.glb` and an `.obj` (with PNGs) under `models/dw2` or `models/dcb`; an open
    model has its own Export OBJ / Export glTF in the inspector (`--export-obj NAME OUT` and `--export-gltf NAME OUT` from the command line).
 
