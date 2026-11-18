@@ -34,7 +34,13 @@
                 dropping = false;
                 /* PNGs or a folder of them on an open effect are its mod's frames (all a drop's files come in one go) */
                 std::vector<std::string> pngs = section == EFFECTS && fx.id >= 0 ? pngs_at(e.drop.data) : std::vector<std::string>();
-                if (pngs.empty()) open_dropped(e.drop.data);
+                std::string dropped = e.drop.data, ext = lower(std::filesystem::u8path(dropped).extension().u8string());
+                std::error_code fec;
+                bool disc = (section == DW2 || section == DCB) && (ext == ".cue" || ext == ".iso" || (ext == ".bin" && std::filesystem::file_size(std::filesystem::u8path(dropped), fec) > (50u << 20))); /* a disc image on a tab that reads one */
+                if (disc) {
+                    std::lock_guard<std::mutex> lock(picked.m);
+                    (section == DCB ? picked.dcbDisc : picked.dw2Disc) = dropped;
+                } else if (pngs.empty()) open_dropped(e.drop.data);
                 else {
                     std::lock_guard<std::mutex> lock(picked.m);
                     picked.files.insert(picked.files.end(), pngs.begin(), pngs.end());

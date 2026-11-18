@@ -25,6 +25,8 @@ int main(int argc, char **argv) {
     bool shot_guide = false; /* --guide: the aim guide in the shot */
     bool shot_dummy = false; /* --dummy: a stand-in enemy at its battle home in the shot */
     std::string gwhat, gdir; /* --export-gltf NAME OUT */
+    bool gobj = false;       /* --export-obj: the same, as an OBJ */
+    std::string xgame, ximage, xout; /* --extract-dw2 / --extract-dcb DISC OUT */
     std::string xdir, xmods, iobj; /* --export-stage ID MODS OUT: the stage's OBJ as the game has it (the mod, if any) */
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -82,13 +84,21 @@ int main(int argc, char **argv) {
         else if (a == "--bounds" && i + 1 < argc) bounds.push_back(argv[++i]);
         else if (a == "--uses" && i + 1 < argc) uses = argv[++i];
         else if (a == "--import-stage" && i + 3 < argc) istage = atoi(argv[++i]), xmods = argv[++i], iobj = argv[++i];
-        else if (a == "--export-gltf" && i + 2 < argc) gwhat = argv[++i], gdir = argv[++i];
+        else if ((a == "--export-gltf" || a == "--export-obj") && i + 2 < argc) gobj = a == "--export-obj", gwhat = argv[++i], gdir = argv[++i];
         else if (a == "--export-stage" && i + 3 < argc) xstage = atoi(argv[++i]), xmods = argv[++i], xdir = argv[++i];
+        else if ((a == "--extract-dw2" || a == "--extract-dcb") && i + 2 < argc) xgame = a.substr(10), ximage = argv[i + 1], xout = argv[i + 2], i += 2;
         else if (a == "--stages") stages = true;
         else if (a == "--seams") seams = true;
         else if (a == "--effect" && i + 1 < argc) effect = atoi(argv[++i]);
         else if (a == "--effect-users") users = true;
         else open_path = a;
+    }
+    if (!xgame.empty()) { /* the DW2 / DCB tabs' extraction, without the window */
+        attach_console();
+        ExtractProgress prog;
+        std::string err = xgame == "dw2" ? extract_dw2(ximage, xout, prog) : extract_dcb(ximage, xout, prog);
+        printf("%s\n", err.empty() ? prog.get_note().c_str() : err.c_str());
+        return err.empty() ? 0 : 1;
     }
     const char *base = SDL_GetBasePath();
     g_exe_dir = base ? base : "";
@@ -176,7 +186,7 @@ int main(int argc, char **argv) {
     if (tplArgs.size() == 5) return check_framing_cli(tplArgs[0], atoi(tplArgs[1].c_str()), tplArgs[2], atoi(tplArgs[3].c_str()));
     if (!tplArgs.empty()) return apply_template_cli(tplArgs[0], atoi(tplArgs[1].c_str()), tplArgs[2], tplArgs[3]);
     if (!fitArgs.empty()) return fit_cli(fitArgs[0], fitArgs[1], atoi(fitArgs[2].c_str()));
-    if (!gwhat.empty()) return export_gltf_cli(gwhat, gdir);
+    if (!gwhat.empty()) return export_gltf_cli(gwhat, gdir, gobj);
     if (istage >= 0) return import_stage_cli(istage, xmods, iobj);
     if (xstage >= 0) return export_stage_cli(xstage, xmods, xdir);
     if (stages) return check_stages();

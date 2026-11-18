@@ -34,11 +34,11 @@ trademark of its owners.
   - a palette color changes (Textures: click one);
   - **Save to game** writes the model's file, same size, to the port's `data/mods/<file>.bin`;
     **Revert to the disc's** deletes it. A saved model is the one opened. Ctrl+Z undoes.
-  - **DW2 tab** (Digimon World 2): lists the Digimon and effect models of the folder `python tools/extract_dw2.py DISC.cue OUT` makes from your own SLUS-01193 disc
-    (`digimon/` and `fx/` in it, picked once and kept in `dw2_dir.txt`), and plays their motions. A `.dw2m` also opens by drop or
+  - **DW2 tab** (Digimon World 2): choose your own SLUS-01193 disc (a `.cue`, `.bin` or `.iso`, or drop it on the window) and the viewer reads its Digimon and effect models
+    into `data/dw2` (`digimon/` and `fx/` in it; the folder is kept in `dw2_dir.txt`), lists them and plays their motions. It only views and exports them. A `.dw2m` also opens by drop or
     Ctrl+O. Scripts, faces and edits are Digimon World 2003's and don't apply to them. The DW3 tabs are as they were.
-  - **DCB tab** (Digital Card Battle): lists the Digimon models of the folder `python tools/extract_dcb.py DISC.cue OUT` makes from your own copy of the disc
-    (`digimon/` in it, picked once and kept in `dcb_dir.txt`), and plays their motions with the game's own key easing, and hides
+  - **DCB tab** (Digital Card Battle): choose your own copy of the disc (a `.cue`, `.bin` or `.iso`, or drop it on the window) and the viewer reads its Digimon models
+    into `data/dcb` (`digimon/` in it; the folder is kept in `dcb_dir.txt`), lists them and plays their motions with the game's own key easing, and hides
     a bone's mesh when the animation does (the bone still moves its children). They are `.dcbm` files, so the Model section's
     bones and size work as for DW2; the size controls also set a bone's own place (its joint from its parent's, apart from the parent's reach) and its shape
     (the mesh stretched per axis, kept in `shape.txt`). No scripts or cameras: those are Digimon World 3's.
@@ -231,12 +231,12 @@ trademark of its owners.
    itself. It checks the disc first: if it says "this isn't Digimon World 2003
    (Europe), SLES-03936", the image is another version or is damaged.
 3. Run `dw3mv.exe`.
-4. Optional, for the **DW2** and **DCB** tabs (your own discs; Python 3 only):
-
-       python tools/extract_dw2.py "Digimon World 2 (USA).cue" dw2_models     (SLUS-01193, about 25 s)
-       python tools/extract_dcb.py "Digimon Digital Card Battle.cue" dcb_models   (about 30 s)
-
-   then choose `dw2_models` / `dcb_models` in the tab. Each checks the disc first.
+4. Optional, for the **DW2** and **DCB** tabs (your own discs, no Python needed): open the tab, press **Choose the disc...** and pick the
+   `.cue` (Digimon World 2, USA, SLUS-01193; or Digital Card Battle). It checks the disc first and takes a few seconds; **Cancel** leaves
+   the folder as it was. The same buttons read another disc later. `dw3mv --extract-dw2 DISC OUT` and `--extract-dcb DISC OUT` do it without
+   the window (`tools/extract_dw2.py` and `tools/extract_dcb.py` are the reference the byte-for-byte checks were made against).
+   **Export all models...** writes every model of the tab as a `.glb` and an `.obj` (with PNGs) under `models/dw2` or `models/dcb`; an open
+   model has its own Export OBJ / Export glTF in the inspector (`--export-obj NAME OUT` and `--export-gltf NAME OUT` from the command line).
 
 ## Building from source
 

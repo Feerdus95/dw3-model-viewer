@@ -19,10 +19,13 @@
             g_dw2 = picked.dw2, picked.dw2.clear();
             dw2_save_dir(), dw2List = dw2_scan();
         }
+        if (disc_progress(0)) return;
+        if (disc_read_ended(0) && g_read[0].err.empty()) dw2List = dw2_scan(), note(NOTE_OK, g_read[0].note);
         if (dw2List.empty()) {
             hint("No Digimon World 2 models found%s.", g_dw2.empty() ? "" : (" in " + g_dw2).c_str());
-            hint("Run tools/extract_dw2.py on your own SLUS-01193 disc (python tools/extract_dw2.py DISC.cue OUT), and choose OUT.");
-            if (button(IC_FOLDER "  Choose the folder...", 1)) pick_dw2_folder();
+            disc_button(0, true);
+            if (button(IC_FOLDER "  Choose the folder...", 0)) pick_dw2_folder();
+            tip("A folder that already holds digimon/ and fx/ of Digimon World 2 models");
             return;
         }
         if (ImGui::BeginTabBar("##dw2tabs")) {
@@ -31,6 +34,7 @@
             ImGui::EndTabBar();
         }
         bool open = scene.model && scene.model->dw2 && !view.stageView;
+        bulk_button(0, dw2List, dw2Tab);
         ImGui::SetNextItemWidth(-FLT_MIN);
         ImGui::InputTextWithHint("##dw2filter", IC_SEARCH "  Search: number or file", dw2Filter, sizeof dw2Filter);
         std::string f = lower(dw2Filter);
@@ -64,6 +68,7 @@
             field("Vertices", "%d", (int)verts);
             field("Motions", "%d", (int)m.motions.size());
             model_inspector(); /* the selected bone, and the size: as in Model */
+            viewer_export(0);
             heading("In Digimon World 2003");
             Dw2Link l = dw2_link(scene.path);
             if (!l.ok) {
@@ -83,6 +88,7 @@
         }
         heading("Folder");
         hint("%s", g_dw2.empty() ? "None chosen" : g_dw2.c_str());
+        disc_button(0, false);
         if (button(IC_FOLDER "  Choose the folder...", 0)) pick_dw2_folder();
     };
 

@@ -34,6 +34,7 @@
 #include "ui/cameras_workbench.inc" /* Cameras: the Workbench */
 #include "ui/effects.inc" /* Effects */
 #include "ui/sounds.inc" /* Sounds */
+#include "ui/disc_prompt.inc" /* the DW2 and DCB tabs' disc prompt and bulk export */
 #include "ui/dw2.inc" /* DW2 */
 #include "ui/dcb.inc" /* DCB */
 #include "ui/layout.inc" /* the sections' browser and inspector */

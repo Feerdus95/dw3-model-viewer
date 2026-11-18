@@ -55,8 +55,8 @@ static int export_stage_cli(int id, const std::string &mods, const std::string &
     return 1;
 }
 
-/* --export-gltf NAME OUT: fighter NAME (or a model file) as OUT/<name>.glb with its textures */
-static int export_gltf_cli(const std::string &what, const std::string &dir) {
+/* --export-gltf NAME OUT: fighter NAME (or a model file) as OUT/<name>.glb with its textures; --export-obj the same as OUT/<name>.obj */
+static int export_gltf_cli(const std::string &what, const std::string &dir, bool obj = false) {
     std::vector<uint8_t> bytes;
     Model m;
     bool ok = false;
@@ -73,6 +73,14 @@ static int export_gltf_cli(const std::string &what, const std::string &dir) {
     }
     std::string err, nm = what.substr(what.find_last_of("/\\") + 1);
     nm = nm.substr(0, nm.find('.'));
+    if (obj) {
+        StageEdit e;
+        StageInfo info;
+        e.fromModel(m, info);
+        if (!e.exportObj(dir, nm)) return fprintf(stderr, "can't write %s\n", dir.c_str()), 1;
+        printf("%s: %d bones -> %s/%s.obj\n", what.c_str(), (int)m.bones.size(), dir.c_str(), nm.c_str());
+        return 0;
+    }
     if (!export_gltf(m, dir, nm, err)) {
         fprintf(stderr, "%s\n", err.c_str());
         return 1;

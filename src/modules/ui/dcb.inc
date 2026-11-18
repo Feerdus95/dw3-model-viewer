@@ -19,13 +19,17 @@
             g_dcb = picked.dcb, picked.dcb.clear();
             dcb_save_dir(), dcbList = dcb_scan();
         }
+        if (disc_progress(1)) return;
+        if (disc_read_ended(1) && g_read[1].err.empty()) dcbList = dcb_scan(), note(NOTE_OK, g_read[1].note);
         if (dcbList.empty()) {
             hint("No Digital Card Battle models found%s.", g_dcb.empty() ? "" : (" in " + g_dcb).c_str());
-            hint("Run tools/extract_dcb.py on your own copy of the disc (python tools/extract_dcb.py DISC.cue OUT), and choose OUT.");
-            if (button(IC_FOLDER "  Choose the folder...", 1)) pick_dcb_folder();
+            disc_button(1, true);
+            if (button(IC_FOLDER "  Choose the folder...", 0)) pick_dcb_folder();
+            tip("A folder that already holds digimon/ of Digital Card Battle models");
             return;
         }
         bool open = dcb_open();
+        bulk_button(1, dcbList, -1);
         ImGui::SetNextItemWidth(-FLT_MIN);
         ImGui::InputTextWithHint("##dcbfilter", IC_SEARCH "  Search: number or name", dcbFilter, sizeof dcbFilter);
         std::string f = lower(dcbFilter);
@@ -59,6 +63,7 @@
             field("Vertices", "%d", (int)verts);
             field("Motions", "%d", (int)m.motions.size());
             model_inspector(); /* the selected bone, and the size: as in Model */
+            viewer_export(1);
             heading("In Digimon World 2003");
             Dw2Link l = dw2_link(scene.path);
             if (!l.ok) {
@@ -78,5 +83,6 @@
         }
         heading("Folder");
         hint("%s", g_dcb.empty() ? "None chosen" : g_dcb.c_str());
+        disc_button(1, false);
         if (button(IC_FOLDER "  Choose the folder...", 0)) pick_dcb_folder();
     };
