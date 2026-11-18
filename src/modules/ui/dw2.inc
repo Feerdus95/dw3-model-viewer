@@ -86,8 +86,9 @@
             title("No Digimon World 2 model open");
             hint("Pick one on the left, or drop a .DW2M file on the window.");
         }
+        if (dw2List.empty()) return; /* the browser's own prompt is the only one then */
         heading("Folder");
-        hint("%s", g_dw2.empty() ? "None chosen" : g_dw2.c_str());
+        hint("%s", g_dw2.c_str());
         disc_button(0, false);
         if (button(IC_FOLDER "  Choose the folder...", 0)) pick_dw2_folder();
     };
